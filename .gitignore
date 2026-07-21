@@ -1,0 +1,21 @@
+# Swift / Xcode
+.build/
+.build/*
+*.xcodeproj
+*.xcworkspace
+*.xcuserdata
+DerivedData/
+Packages/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Build artifacts
+dist/
+
+# Unnecessary resources
+Resources/AutoPMX.icns
+Resources/AutoPMX.ics
+Resources/AutoPMX.iconset/

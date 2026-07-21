@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoPMX Help</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 20px; line-height: 1.75; color: #1d1d1f; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #f5f5f7; background: #1c1c1e; } h1 { color: #f5f5f7; } h2 { color: #e0e0e5; } h3 { color: #d2d2d7; } pre { background: #2c2c2e; color: #e5e5ea; } code { background: #3a3a3c; color: #f5a97f; } a { color: #2997ff; } .tip { background: #1b3a1b; border-left-color: #4caf50; } .warn { background: #3d2e0a; border-left-color: #ff9800; } th { background: #2c2c2e; } }
+  h1 { font-size: 28px; font-weight: 700; margin-top: 0; color: #1d1d1f; }
+  h2 { font-size: 20px; font-weight: 600; margin-top: 36px; color: #6e6e73; border-bottom: 1px solid #d2d2d7; padding-bottom: 8px; }
+  h3 { font-size: 16px; font-weight: 600; margin-top: 24px; }
+  pre { background: #f5f5f7; padding: 14px 18px; border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  code { font-family: 'SF Mono', 'Menlo', 'Monaco', monospace; font-size: 13px; background: #f0f0f5; padding: 2px 6px; border-radius: 4px; }
+  a { color: #0071e3; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { padding-left: 20px; }
+  li { margin: 6px 0; }
+  .tip { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .warn { background: #fff3e0; border-left: 4px solid #ff9800; padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e5e5ea; font-size: 13px; }
+  th { font-weight: 600; background: #f5f5f7; }
+  .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .logo-text { font-size: 24px; font-weight: 800; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge-green { background: #e8f5e9; color: #2e7d32; }
+  .badge-blue { background: #e3f2fd; color: #1565c0; }
+  .toc { background: #f5f5f7; border-radius: 10px; padding: 16px 20px; margin: 20px 0; }
+  .toc a { display: block; padding: 3px 0; font-size: 14px; }
+  .steps { counter-reset: step-counter; list-style: none; padding-left: 0; }
+  .steps li { counter-increment: step-counter; margin: 10px 0; padding-left: 36px; position: relative; }
+  .steps li::before { content: counter(step-counter); position: absolute; left: 0; top: 0; width: 24px; height: 24px; background: #0071e3; color: #fff; border-radius: 12px; text-align: center; font-size: 12px; font-weight: 700; line-height: 24px; }
+</style>
+</head>
+<body>
+
+<div class="logo">
+  <span class="logo-text">&#129442; AutoPMX <span style="font-size:16px;font-weight:400;color:#888;">&middot; DuDu PMx Workbench</span></span>
+</div>
+
+<h1>AutoPMX Help &amp; User Guide</h1>
+
+<p>AutoPMX is a native macOS pharmacometrics modeling workbench. It integrates <strong>NONMEM / PsN execution</strong>, <strong>AI-assisted model building</strong> (via DuDu PMx), <strong>genetic algorithm optimization</strong> (parameter + structural search), and <strong>diagnostic visualization</strong> — all powered by local or cloud LLMs.</p>
+
+<!-- ============ TABLE OF CONTENTS ============ -->
+<div class="toc">
+  <strong>Contents</strong>
+  <a href="#quickstart">1. Quick Start</a>
+  <a href="#keyboard">2. Keyboard Shortcuts</a>
+  <a href="#workspace">3. Workspace &amp; Project Structure</a>
+  <a href="#sidebar">4. Sidebar &amp; File Management</a>
+  <a href="#inspector">5. Inspector Panel</a>
+  <a href="#data-preview">6. Data Preview</a>
+  <a href="#terminal">7. Terminal &amp; Run Log</a>
+  <a href="#psn">8. PsN Command &amp; NONMEM Execution</a>
+  <a href="#dudu">9. DuDu PMx AI Assistant</a>
+  <a href="#automation">10. Automated Modeling (DuDu Auto)</a>
+  <a href="#ga">11. GA Optimization</a>
+  <a href="#settings">12. Settings</a>
+  <a href="#faq">13. FAQ &amp; Troubleshooting</a>
+</div>
+
+<!-- ============ SECTION 1 ============ -->
+<h2 id="quickstart">1. Quick Start</h2>
+
+<ol>
+  <li><strong>Set up LLM</strong> — Open Settings (&#8984;,) &rarr; LLM tab &rarr; choose MLX, LM Studio, Ollama, or add a cloud API provider. Click <strong>Test Connection</strong> to verify.</li>
+  <li><strong>Open a project</strong> — Use the toolbar to open an existing PopPK project, or create a new one from a run.</li>
+  <li><strong>Select a model</strong> — In the sidebar under "Models", click a <code>run*.mod</code> file to preview it. The Inspector shows parameter estimates if available.</li>
+  <li><strong>Run NONMEM</strong> — The PsN command is auto-populated in the Inspector. Click <strong>Run</strong> (&#8984;&#8617;) to execute.</li>
+  <li><strong>Review results</strong> — Outputs, figures, and reports appear in the sidebar. Click any file to preview it — images, PDFs, DOCX, and HTML are rendered inline.</li>
+</ol>
+
+<h2 id="keyboard">2. Keyboard Shortcuts</h2>
+<table>
+  <tr><th>Shortcut</th><th>Action</th></tr>
+  <tr><td>&#8984;R</td><td>Refresh Workspace</td></tr>
+  <tr><td>&#8984;&#8617;</td><td>Run Current Model</td></tr>
+  <tr><td>&#8984;,</td><td>Open Settings</td></tr>
+  <tr><td>&#8984;Q</td><td>Quit AutoPMX</td></tr>
+  <tr><td>Enter</td><td>Send message (DuDu PMx input)</td></tr>
+</table>
+
+<h2 id="workspace">3. Workspace &amp; Project Structure</h2>
+
+<p>AutoPMX projects live in the <code>AutoPMX_Projects/</code> folder inside your workspace directory. Each project is a self-contained folder with all required files:</p>
+
+<pre>
+Workspace/
+&#9500;&#9472;&#9472; AutoPMX_Projects/
+&#9474;   &#9500;&#9472;&#9472; Demo_mAb_Run41/          &larr; Demo project
+&#9474;   &#9474;   &#9500;&#9472;&#9472; run041.mod
+&#9474;   &#9474;   &#9500;&#9472;&#9472; run041.lst / .ext / .cov
+&#9474;   &#9474;   &#9470;&#9472;&#9472; NM_dat_new.csv
+&#9474;   &#9500;&#9472;&#9472; AutoModel_NMData_*/       &larr; Automation projects (DuDu Auto)
+&#9474;   &#9474;   &#9500;&#9472;&#9472; run001.mod, run002.mod, ...
+&#9474;   &#9474;   &#9500;&#9472;&#9472; run001.lst, run001.ext, ...
+&#9474;   &#9474;   &#9500;&#9472;&#9472; GOF_mod001.jpg, VPC_mod001.jpg
+&#9474;   &#9474;   &#9500;&#9472;&#9472; GA001.mod  &larr; GA-optimized model
+&#9474;   &#9474;   &#9470;&#9472;&#9472; AutoPMX_Best_Model_Summary.md
+&#9474;   &#9470;&#9472;&#9472; ...
+&#9500;&#9472;&#9472; poppk_rules.json            &larr; PopPK rule library (495 rules)
+&#9500;&#9472;&#9472; poppk_model_library.md      &larr; NONMEM ADVAN/TRANS template library
+&#9500;&#9472;&#9472; NM_dat_new.csv              &larr; Default dataset
+&#9500;&#9472;&#9472; autopmx_cli.py              &larr; Python bridge (diagnostics, validation)
+&#9470;&#9472;&#9472; autopmx_ga.py               &larr; GA optimizer script
+</pre>
+
+<h3>File Types in Sidebar</h3>
+<table>
+  <tr><th>Category</th><th>Extensions</th><th>Description</th></tr>
+  <tr><td>Models</td><td>.mod</td><td>NONMEM control streams (run001.mod, GA001.mod)</td></tr>
+  <tr><td>Outputs</td><td>.lst, .ext, .cov</td><td>NONMEM results (parameter estimates, covariance)</td></tr>
+  <tr><td>Data</td><td>.csv, .xlsx</td><td>Datasets and NONMEM table files (SDTAB*, PATAB*)</td></tr>
+  <tr><td>Figures</td><td>.jpg, .png, .pdf</td><td>GOF, VPC, individual plots</td></tr>
+  <tr><td>Reports</td><td>.md, .docx</td><td>AI audit reports, model summaries</td></tr>
+</table>
+
+<h2 id="sidebar">4. Sidebar &amp; File Management</h2>
+
+<h3>Sidebar Categories</h3>
+<p>Files are organized by type: <strong>Models</strong>, <strong>Outputs</strong>, <strong>Data</strong>, <strong>Figures</strong>, <strong>Reports</strong>, <strong>Scripts</strong>. Each category has its own collapsible section.</p>
+
+<h3>Context Menu Operations</h3>
+<p>Right-click any file to access:</p>
+<ul>
+  <li><strong>Run NONMEM via PsN —</strong> Execute the selected .mod file</li>
+  <li><strong>&#129518; GA Optimize —</strong> Run genetic algorithm to optimize THETA initial estimates</li>
+  <li><strong>&#129518; GA Structure Search —</strong> Run hybrid GA to search model structure + THETA</li>
+  <li><strong>Run GOF / VPC / Individual DV-Time —</strong> Generate diagnostic plots via R</li>
+  <li><strong>Run Full Diagnostic Suite —</strong> GOF + VPC + individual + PK parameters + audits</li>
+  <li><strong>Run Bootstrap / Run SCM —</strong> Advanced diagnostics</li>
+  <li><strong>AI Evaluate This Model —</strong> Let DuDu PMx assess the model</li>
+  <li><strong>Pin / Reveal in Finder / Move to Trash</strong></li>
+</ul>
+
+<h3>Data vs Output Tables</h3>
+<p>AutoPMX automatically distinguishes <strong>modeling datasets</strong> (like <code>NM_dat_new.csv</code>) from <strong>NONMEM table outputs</strong> (like <code>SDTAB001</code>, <code>PATAB001</code>). Only modeling datasets appear in the DuDu Auto dataset picker. Table outputs are filtered out automatically.</p>
+
+<h2 id="inspector">5. Inspector Panel</h2>
+
+<h3>Run Configuration</h3>
+<p>Shows the current <strong>Previous</strong>, <strong>Current</strong>, and <strong>Data</strong> file being used for model execution. The Data field reflects the active dataset for the selected model.</p>
+
+<h3>PsN Command</h3>
+<p>An editable PsN command line. The <strong>Suggest</strong> button generates the default <code>execute run###.mod -model_dir_name</code> command. The <strong>Run</strong> button executes the command.</p>
+
+<h3>Checks</h3>
+<p>Real-time validation of: model files presence, data path correctness, and PsN command format.</p>
+
+<h3>Parameter Estimates</h3>
+<p>When a model with a successful run is selected, this table shows the final THETA, OMEGA, and SIGMA estimates parsed from <code>run###.ext</code>.</p>
+
+<h3>GA Optimization</h3>
+<p>Two buttons in the Parameter Estimates section:</p>
+<ul>
+  <li><strong>&#129518; GA Optimize —</strong> Parameter-only optimization (200 NONMEM runs). Output: <code>GA###.mod</code> + <code>GA###_population.csv</code>.</li>
+  <li><strong>&#129518; GA Structure —</strong> Structural + parameter search (50 NONMEM runs). Searches ADVAN, error model, IIV, covariates.</li>
+</ul>
+
+<h3>LLM Provider Status</h3>
+<p>Shows the active LLM provider with connection status (green dot = connected).</p>
+
+<h2 id="data-preview">6. Data Preview</h2>
+
+<h3>CSV Table View</h3>
+<p>When you click any CSV file in the sidebar, AutoPMX shows an Excel-style grid preview with:</p>
+<ul>
+  <li>Column headers in a fixed header row</li>
+  <li>Row numbers on the left</li>
+  <li>Alternating row colors for readability</li>
+  <li>Numeric columns right-aligned</li>
+  <li>Horizontal and vertical scrolling</li>
+  <li>Up to 200 rows shown (with truncation notice for large files)</li>
+</ul>
+
+<h3>Other File Types</h3>
+<ul>
+  <li><strong>Images</strong> (PNG, JPG) — Pinch-to-zoom, fit-to-window. Click to toggle zoom.</li>
+  <li><strong>PDF, DOCX, XLSX, PPTX, HTML</strong> — Rendered inline via macOS QuickLook.</li>
+  <li><strong>Text</strong> (.mod, .lst, .ext, .md, .R, .py) — Monospaced text preview.</li>
+</ul>
+
+<h2 id="terminal">7. Terminal &amp; Run Log</h2>
+
+<p>The bottom panel shows a real-time terminal with:</p>
+<ul>
+  <li><strong>Command output</strong> from NONMEM, PsN, Python bridge scripts</li>
+  <li><strong>GA progress</strong> per-generation fitness scores</li>
+  <li><strong>Automation steps</strong> with timestamps</li>
+  <li><strong>Clear / Copy / Stop</strong> toolbar buttons</li>
+</ul>
+
+<h2 id="psn">8. PsN Command &amp; NONMEM Execution</h2>
+
+<h3>Default Command</h3>
+<pre>execute run###.mod -model_dir_name</pre>
+
+<h3>How it works</h3>
+<ol>
+  <li>Select a .mod file in the sidebar</li>
+  <li>The PsN command auto-populates in the Inspector</li>
+  <li>Edit if needed (e.g., add <code>-retries=3</code> or change flags)</li>
+  <li>Click <strong>Run</strong> or press &#8984;&#8617;</li>
+  <li>Output appears in the Terminal panel</li>
+  <li>New .lst, .ext, .cov files appear in the sidebar</li>
+</ol>
+
+<div class="tip">
+  <strong>Tip:</strong> If you right-click a GA-optimized model (<code>GA###.mod</code>), the PsN command automatically points to the correct file (<code>execute GA###.mod</code>), not the original <code>run###.mod</code>.
+</div>
+
+<h2 id="dudu">9. DuDu PMx AI Assistant</h2>
+
+<p>Click the floating <span class="badge badge-blue">&#129504; DuDu PMx</span> button at the bottom-right corner to open the AI chat panel.</p>
+
+<h3>Chat Interface</h3>
+<ul>
+  <li><strong>Enter</strong> — Send message (or click the blue arrow button)</li>
+  <li><strong>Message bubbles</strong> — Your messages appear in blue on the right; DuDu's replies in gray on the left (iMessage-style)</li>
+  <li><strong>Copy button</strong> — Small copy icon appears next to each bubble</li>
+  <li><strong>Right-click a bubble</strong> — Context menu to copy or fill into input</li>
+  <li>Ask questions about model diagnostics, NONMEM syntax, PsN commands, or PopPK reasoning</li>
+</ul>
+
+<h3>Header Controls</h3>
+<ul>
+  <li><strong>DuDu Auto</strong> — Start automated stepwise model building</li>
+  <li><strong>Stop</strong> (red, visible during automation) — Gracefully halt the automation loop</li>
+  <li><strong>&times;</strong> — Close the panel</li>
+</ul>
+
+<h3>Thinking Timeline</h3>
+<p>During automation, DuDu shows a collapsible "thinking steps" timeline at the top of the chat. Click to expand/collapse. Each step shows:</p>
+<ul>
+  <li>&#128309; Working — Step in progress</li>
+  <li>&#128994; Done — Step completed</li>
+  <li>&#128308; Error — Step failed</li>
+  <li>&#128992; Pending — Not yet started</li>
+</ul>
+
+<h2 id="automation">10. Automated Modeling (DuDu Auto)</h2>
+
+<p>DuDu Auto performs iterative stepwise PopPK model building driven by AI:</p>
+
+<ol class="steps">
+  <li><strong>Analyze Dataset</strong> — DuDu reads the CSV to detect administration route (IV Bolus, IV Infusion, Oral, or Mixed), subject count, dose levels, and available covariates.</li>
+  <li><strong>Generate Initial Model</strong> — Writes <code>run001.mod</code> using the appropriate PopPK template from the model library (1-compartment, route-matched ADVAN/TRANS).</li>
+  <li><strong>Run NONMEM</strong> — Executes the model. If it fails, DuDu reads the LST/FMSG error messages and repairs the control stream before trying again.</li>
+  <li><strong>Run Diagnostics</strong> — Only if the model runs successfully: GOF plots, VPC, individual plots, PK parameter extraction, and AI audits.</li>
+  <li><strong>AI Evaluation</strong> — DuDu evaluates diagnostics and decides to <strong>ACCEPT</strong> or <strong>REVISE</strong> based on FDA guidance criteria.</li>
+  <li><strong>Model Evolution</strong> — If REVISE, DuDu proposes exactly ONE change (add compartment, refine error model, add IIV, screen covariate) following strict escalation priority.</li>
+  <li><strong>Repeat</strong> — Up to 6 iterations, or until acceptance criteria are met.</li>
+  <li><strong>Best Model Selection</strong> — After completion, AutoPMX automatically selects the best model based on minimization success, covariance step, and OFV.</li>
+</ol>
+
+<h3>Automation Start Options</h3>
+<ul>
+  <li><strong>Fresh Start</strong> — Creates a new AutoModel project and begins from run001</li>
+  <li><strong>Continue Latest</strong> — Resumes from the highest-numbered run in an existing AutoModel project</li>
+  <li><strong>Selected Run</strong> — Continues from a specific run you choose</li>
+  <li><strong>Dataset Picker</strong> — Choose which CSV file to use (only modeling datasets are shown; NONMEM table outputs are filtered out)</li>
+</ul>
+
+<h3>Model Evolution Priority</h3>
+<table>
+  <tr><th>Pass</th><th>Action</th><th>Guidance</th></tr>
+  <tr><td>1</td><td>Refine structural model</td><td>1-comp &rarr; 2-comp if GOF/VPC shows distribution phase misspecification</td></tr>
+  <tr><td>2</td><td>Refine error model</td><td>Combined is default; simplify only if one component is unsupported</td></tr>
+  <tr><td>3</td><td>Add IIV</td><td>One parameter at a time (CL first, then V); eta-shrinkage &lt; 30%</td></tr>
+  <tr><td>4</td><td>Screen covariates</td><td>WT on CL/V, then AGE, SEX, STUDY; OFV drop &gt; 3.84</td></tr>
+  <tr><td>5</td><td>Bioavailability</td><td>F1 only when both oral and IV data exist</td></tr>
+</table>
+
+<h3>Acceptance Criteria</h3>
+<ul>
+  <li>GOF plots show no systematic bias</li>
+  <li>VPC prediction intervals capture observed data well</li>
+  <li>Parameter RSE &lt; 50%, covariance step successful</li>
+  <li>No boundary estimates</li>
+  <li>CWRES centered around zero without trends</li>
+</ul>
+
+<div class="warn">
+  <strong>Important:</strong> If a NONMEM run fails, DuDu will <em>not</em> run diagnostics (GOF/VPC). Instead, it reads the LST error messages and attempts to fix the control stream before trying again. This saves time and avoids broken diagnostic plots.
+</div>
+
+<h2 id="ga">11. GA Optimization</h2>
+
+<h3>GA Initial Estimate Optimization</h3>
+<p><strong>Entry:</strong> Right-click any run*.mod &rarr; <code>&#129518; GA Optimize</code>, or click the button in the Inspector's Parameter Estimates section.</p>
+<p><strong>What it does:</strong> Uses a built-in genetic algorithm to search for better THETA initial estimates. Each candidate is evaluated by running NONMEM. Fitness = &minus;OFV + success bonus &minus; diagnostic penalties. THETA values use <code>(0, mid)</code> format (lower bound fixed to 0).</p>
+
+<table>
+  <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+  <tr><td>Population size</td><td>20</td><td>Individuals per generation</td></tr>
+  <tr><td>Iterations</td><td>10</td><td>Number of generations</td></tr>
+  <tr><td>Elite ratio</td><td>0.2</td><td>Top fraction preserved each generation</td></tr>
+  <tr><td>Estimated runs</td><td>200</td><td>population &times; iterations</td></tr>
+</table>
+
+<h3>GA Structural Search</h3>
+<p><strong>Entry:</strong> Right-click any run*.mod &rarr; <code>&#129518; GA Structure Search</code>, or click the button in the Inspector.</p>
+<p><strong>What it does:</strong> Hybrid GA that simultaneously searches model structure AND optimizes THETA values:</p>
+<ul>
+  <li><strong>ADVAN / Compartments</strong> — 1-comp, 2-comp, or 3-comp (route-locked)</li>
+  <li><strong>Error model</strong> — Proportional, combined, or additive</li>
+  <li><strong>IIV</strong> — Which parameters get ETA terms + diagonal vs block OMEGA</li>
+  <li><strong>Covariates</strong> — WT on CL/V, AGE, SEX, STUDY</li>
+</ul>
+
+<table>
+  <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+  <tr><td>Population size</td><td>10</td><td>Individuals per generation</td></tr>
+  <tr><td>Iterations</td><td>5</td><td>Number of generations</td></tr>
+  <tr><td>Elite ratio</td><td>0.2</td><td>Top fraction preserved</td></tr>
+  <tr><td>Estimated runs</td><td>50</td><td>population &times; iterations</td></tr>
+</table>
+
+<h3>Output</h3>
+<ul>
+  <li><code>GA###.mod</code> — Best model with optimal structure + THETA values</li>
+  <li><code>GA###_population.csv</code> — All candidates with genes, values, and fitness for comparison</li>
+</ul>
+
+<h3>Prerequisites</h3>
+<ul>
+  <li>Settings &rarr; Tools &rarr; NONMEM Path configured (nmfe)</li>
+  <li>Settings &rarr; Tools &rarr; Python Environment configured (Python 3.8+)</li>
+  <li>No external Python packages required (built-in GA engine)</li>
+  <li>Target run*.mod must have completed NONMEM successfully at least once</li>
+</ul>
+
+<h2 id="settings">12. Settings</h2>
+
+<h3>General</h3>
+<p><strong>Appearance:</strong> Choose System (follow macOS), Light, or Dark mode.</p>
+
+<h3>LLM Providers</h3>
+<ul>
+  <li><strong>MLX (Apple Silicon)</strong> — Local models via MLX at <code>http://127.0.0.1:8080/v1</code>. Supports qwen3.6:35b-mlx and others.</li>
+  <li><strong>LM Studio</strong> — Desktop LLM server at port 1234.</li>
+  <li><strong>Ollama</strong> — Containerized local LLMs at port 11434.</li>
+  <li><strong>OpenAI / Anthropic / Google Gemini</strong> — Cloud APIs with your own key.</li>
+  <li><strong>Custom</strong> — Any OpenAI-compatible endpoint.</li>
+</ul>
+<p>Use the <strong>Toggle switch</strong> to activate a provider. Expand the row to edit URL, model name, and API key. Click <strong>Test Connection</strong> to verify.</p>
+
+<h3>Tools</h3>
+<ul>
+  <li><strong>NONMEM (nmfe)</strong> — Path to the NONMEM executable. Auto-detected from <code>/opt/nm760</code> or <code>which</code>. Use Browse or Auto Detect.</li>
+  <li><strong>PsN (execute)</strong> — Path to the PsN command. Auto-detected or browsable.</li>
+  <li><strong>Python Environment</strong> — Detected from workspace <code>.venv</code> or system Python.</li>
+  <li><strong>R (Rscript)</strong> — Path to Rscript for diagnostic plot generation.</li>
+</ul>
+
+<h3>Rules</h3>
+<p>AutoPMX loads four core knowledge files as LLM context:</p>
+<table>
+  <tr><th>File</th><th>Purpose</th></tr>
+  <tr><td><code>poppk_rules.json</code></td><td>PopPK modeling rules — 495 FDA/regulatory rules in 8 namespaces</td></tr>
+  <tr><td><code>poppk_model_library.md</code></td><td>NONMEM ADVAN/TRANS template library — all supported compartment models</td></tr>
+  <tr><td><code>PopPK_Expert_Audit_Report.md</code></td><td>Expert knowledge base — case studies and audit patterns</td></tr>
+  <tr><td><code>NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md</code></td><td>NONMEM syntax and validation rules</td></tr>
+</table>
+<p>Add additional sources as comma-separated filenames. AutoPMX searches the project directory, workspace root, and <code>AutoPMX_Projects</code> folder.</p>
+
+<div class="warn">
+  <strong>Note:</strong> The Rules JSON field has been moved to Settings. Dataset configuration is per-project via the Data field in Run Configuration — different projects can use different datasets.
+</div>
+
+<h2 id="faq">13. FAQ &amp; Troubleshooting</h2>
+
+<h3>Q: NONMEM reports "WARNING 23: $PK DOES NOT DEFINE A SCALE PARAMETER"</h3>
+<p>Your $PK block is missing <code>S1=V/1000</code> (IV models) or <code>S2=V/1000</code> (oral models). Add the scale parameter after defining V. AutoPMX's GA optimizer automatically injects this if missing.</p>
+
+<h3>Q: "ERROR IN TRANS2 ROUTINE: CL IS NEGATIVE"</h3>
+<p>NONMEM's gradient search is exploring negative parameter values for CL or V. The model still converges — these are intermediate search steps, not final estimates. Check the final parameter table in the .lst file.</p>
+
+<h3>Q: GA-optimized model won't run via right-click</h3>
+<p>This is fixed in the current version. <code>GA###.mod</code> files are now recognized correctly and the PsN command points to the right file.</p>
+
+<h3>Q: DuDu Auto keeps oscillating between two error models</h3>
+<p>Anti-oscillation rules now prevent DuDu from proposing toggling changes (e.g., remove IIV &rarr; re-add IIV) in consecutive iterations. If the model with fewer parameters has a working covariance step, it is preferred.</p>
+
+<h3>Q: "Covariance step failed / ERROR=134" — is the model still usable?</h3>
+<p>If minimization succeeded but covariance failed (R-matrix non-positive-definite), the parameter estimates are valid but their standard errors are unreliable. DuDu Auto now treats covariance failure as needing repair. Consider simplifying the model (remove one IIV term or simplify the error model).</p>
+
+<h3>Q: How do I switch between light and dark mode?</h3>
+<p>Settings &rarr; General &rarr; Appearance. Choose System, Light, or Dark.</p>
+
+<h3>Q: Where are the rule files?</h3>
+<p>All rules are configured in Settings &rarr; Rules. The Rules JSON field in the Inspector has been removed to avoid confusion — rule sources belong in Settings.</p>
+
+<h2>About AutoPMX</h2>
+
+<p><strong>AutoPMX</strong> (Auto Pharmacometrics) is a native macOS application for population pharmacokinetic (PopPK) and pharmacodynamic modeling. It wraps the industry-standard NONMEM and PsN tools with a modern SwiftUI interface, providing AI-assisted model building through local large language models.</p>
+
+<p><strong>Key Features:</strong></p>
+<ul>
+  <li>One-click NONMEM execution with real-time terminal output</li>
+  <li>AI-driven automated model building (DuDu Auto) with up to 6 iterations of stepwise refinement</li>
+  <li>Genetic algorithm optimization for initial estimates AND model structure</li>
+  <li>Integrated diagnostic visualization (GOF, VPC, individual plots, PK parameters)</li>
+  <li>Multi-provider LLM support (MLX, LM Studio, Ollama, OpenAI, Anthropic, Gemini, custom)</li>
+  <li>macOS-native design with dark mode, iMessage-style chat, and liquid glass effects</li>
+</ul>
+
+<p><strong>Technology Stack:</strong> Swift 5.9+ &middot; SwiftUI &middot; macOS 13+ &middot; NONMEM 7.4+ &middot; PsN &middot; Python 3.8+ &middot; R 4+</p>
+
+<hr>
+
+<p><strong>Author:</strong> Graham Ju<br>
+<strong>Company:</strong> Changsha Duxact Biotechnology Co., Ltd.<br>
+<strong>Version:</strong> 1.1.0<br>
+<strong>Built:</strong> SwiftUI &middot; macOS 13+</p>
+
+<p>&copy; 2025&ndash;2026 Graham Ju. All rights reserved.</p>
+
+</body>
+</html>
