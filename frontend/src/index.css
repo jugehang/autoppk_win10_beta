@@ -1,0 +1,473 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   AutoPMX Web — macOS design language
+   ============================================ */
+
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-macos-bg text-text-primary;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow: hidden;
+  }
+
+  ::selection {
+    background-color: rgba(38,103,204,0.20);
+    color: #1d1d1f;
+  }
+
+  /* Custom scrollbar — macOS style */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.18);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.32); }
+}
+
+@layer components {
+  /* ============================================
+     Toolbar
+     ============================================ */
+
+  .toolbar {
+    @apply flex items-center gap-1.5 px-3.5 py-2 bg-macos-bg border-b border-macos-border;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+
+  .toolbar button,
+  .toolbar .btn-area {
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-divider {
+    @apply w-px h-[26px] bg-macos-divider mx-0.5 opacity-40;
+  }
+
+  .toolbar-btn {
+    @apply flex items-center gap-1.5 h-7 px-2 rounded-[7px] text-[11.5px] font-medium
+           text-text-secondary hover:text-text-primary hover:bg-black/[0.04]
+           active:bg-black/[0.08] transition-colors duration-150;
+    line-height: 1;
+  }
+
+  .toolbar-btn-primary {
+    @apply flex items-center gap-1.5 h-7 px-3 rounded-[8px] text-[12px] font-semibold
+           text-white transition-all duration-200;
+    background: linear-gradient(135deg, #2667cc 0%, #59a6ff 100%);
+    box-shadow: 0 2px 8px rgba(38,103,204,0.25);
+  }
+  .toolbar-btn-primary:hover {
+    box-shadow: 0 3px 12px rgba(38,103,204,0.35);
+  }
+  .toolbar-btn-primary:active {
+    transform: scale(0.97);
+  }
+  .toolbar-btn-primary:disabled {
+    @apply opacity-60;
+    transform: scale(0.97);
+  }
+
+  .toolbar-btn-demo {
+    @apply flex items-center gap-1.5 h-7 px-2 rounded-[7px] text-[11.5px] font-medium
+           text-white transition-all duration-200;
+    background: linear-gradient(135deg, #2667cc 0%, #59a6ff 100%);
+    box-shadow: 0 2px 8px rgba(38,103,204,0.25);
+  }
+  .toolbar-btn-demo:hover {
+    box-shadow: 0 3px 12px rgba(38,103,204,0.35);
+  }
+
+  .toolbar-btn-claude {
+    @apply flex items-center gap-1.5 h-7 px-2 rounded-[7px] text-[11.5px] font-medium
+           text-primary-start transition-colors duration-150;
+  }
+  .toolbar-btn-claude:hover {
+    background-color: rgba(38,103,204,0.08);
+  }
+
+  /* ============================================
+     Project Location Badge
+     ============================================ */
+
+  .location-badge {
+    @apply flex items-center gap-1.5 px-2.5 py-1.5 max-w-[260px]
+           bg-black/[0.04] border border-black/[0.06] rounded-[8px];
+  }
+
+  /* ============================================
+     Sidebar
+     ============================================ */
+
+  .sidebar {
+    @apply bg-macos-sidebar border-r border-macos-border overflow-hidden flex flex-col;
+    min-width: 240px;
+    max-width: 360px;
+  }
+
+  .sidebar-section-header {
+    @apply px-3 py-2;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+  }
+
+  .sidebar-category {
+    @apply flex items-center gap-1.5 px-1 py-[3px] rounded-[5px] text-[11px] font-semibold
+           text-text-secondary hover:text-text-primary hover:bg-black/[0.04]
+           transition-colors duration-150 cursor-pointer select-none;
+  }
+
+  .sidebar-category.active {
+    background-color: rgba(38,103,204,0.10);
+    color: #2667cc;
+  }
+
+  .sidebar-row {
+    @apply flex items-center gap-1.5 px-2 py-[5px] rounded-[6px] cursor-pointer
+           text-[12px] transition-colors duration-100 select-none;
+  }
+  .sidebar-row:hover {
+    @apply bg-black/[0.04];
+  }
+  .sidebar-row.selected {
+    background-color: rgba(38,103,204,0.12);
+    color: #1d1d1f;
+  }
+
+  .sidebar-row-icon {
+    @apply shrink-0 w-[18px] text-center text-[12px];
+  }
+
+  .sidebar-row-text {
+    @apply truncate flex-1 leading-tight;
+  }
+
+  .sidebar-row-subtitle {
+    @apply text-[10px] text-text-tertiary truncate leading-tight;
+  }
+
+  .sidebar-badge {
+    @apply text-[10px] text-text-tertiary font-medium px-1.5 py-0.5 rounded-full
+           bg-black/[0.04];
+  }
+
+  /* ============================================
+     Detail View
+     ============================================ */
+
+  .detail-view {
+    @apply bg-macos-panel rounded-macos border border-macos-border
+           shadow-macos overflow-hidden;
+  }
+
+  .detail-header {
+    @apply flex items-center justify-between px-4 py-2.5
+           bg-macos-header/50 border-b border-macos-border;
+  }
+
+  .detail-tab {
+    @apply px-3 py-1.5 text-[11.5px] font-medium rounded-[6px]
+           text-text-secondary hover:text-text-primary hover:bg-black/[0.04]
+           transition-colors duration-150 cursor-pointer;
+  }
+  .detail-tab.active {
+    @apply bg-white text-text-primary shadow-macos;
+  }
+
+  /* ============================================
+     File Preview (code area)
+     ============================================ */
+
+  .code-preview {
+    @apply font-mono text-[12px] leading-[1.7] p-4 overflow-auto;
+    tab-size: 4;
+    background: #fafafa;
+    color: #1d1d1f;
+  }
+
+  .code-preview .line-number {
+    @apply text-text-tertiary select-none pr-4 text-right inline-block w-[40px];
+  }
+
+  /* ============================================
+     Parameter Table
+     ============================================ */
+
+  .params-table {
+    @apply w-full text-[12px];
+  }
+  .params-table thead th {
+    @apply sticky top-0 bg-macos-header text-[11px] font-semibold text-text-secondary
+           uppercase tracking-wide px-3 py-2 border-b border-macos-border text-left;
+  }
+  .params-table tbody td {
+    @apply px-3 py-1.5 border-b border-macos-border/50;
+  }
+  .params-table tbody tr:hover {
+    @apply bg-primary-start/[0.03];
+  }
+  .params-table tbody tr:nth-child(even) {
+    @apply bg-black/[0.01];
+  }
+
+  /* ============================================
+     Terminal
+     ============================================ */
+
+  .terminal {
+    @apply bg-[#1e1e24] text-[#e4e4e7] font-mono text-[12px] leading-[1.6]
+           rounded-macos border border-macos-border overflow-hidden flex flex-col;
+  }
+
+  .terminal-header {
+    @apply flex items-center gap-2 px-3 py-2 bg-[#2a2a32] border-b border-white/[0.06];
+  }
+
+  .terminal-dot {
+    @apply w-3 h-3 rounded-full;
+  }
+  .terminal-dot.red { background: #ff5f57; }
+  .terminal-dot.yellow { background: #febc2e; }
+  .terminal-dot.green { background: #28c840; }
+
+  .terminal-body {
+    @apply flex-1 p-3 overflow-auto;
+  }
+
+  .terminal-line { @apply whitespace-pre-wrap break-all; }
+  .terminal-line.stdout { @apply text-[#e4e4e7]; }
+  .terminal-line.stderr { @apply text-red-400; }
+  .terminal-line.info { @apply text-[#5ac8fa]; }
+  .terminal-line.success { @apply text-[#30d158]; }
+  .terminal-line.warn { @apply text-[#ff9f0a]; }
+  .terminal-prompt { @apply text-[#5ac8fa] select-none mr-2; }
+
+  /* ============================================
+     AI Assistant Overlay (DuDu)
+     ============================================ */
+
+  .ai-overlay {
+    @apply fixed bottom-6 right-6 z-50;
+    animation: slideInRight 0.3s ease-out;
+  }
+
+  .ai-card {
+    @apply w-[420px] max-h-[600px] rounded-macos-lg overflow-hidden flex flex-col;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.55);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 2px 10px rgba(0,0,0,0.06);
+  }
+
+  .ai-card-header {
+    @apply flex items-center justify-between px-4 py-3
+           bg-gradient-to-b from-black/[0.02] to-transparent
+           border-b border-black/[0.06];
+  }
+
+  .ai-card-body {
+    @apply flex-1 overflow-y-auto px-4 py-3 space-y-3;
+  }
+
+  .ai-card-footer {
+    @apply border-t border-black/[0.06] p-3;
+  }
+
+  .ai-bubble {
+    @apply max-w-[85%] px-3.5 py-2.5 rounded-[14px] text-[13px] leading-relaxed;
+    animation: slideUp 0.25s ease-out;
+  }
+
+  .ai-bubble.user {
+    @apply ml-auto;
+    background: linear-gradient(135deg, #2667cc 0%, #3a7de0 100%);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+
+  .ai-bubble.assistant {
+    @apply mr-auto bg-black/[0.04] text-text-primary;
+    border-bottom-left-radius: 4px;
+  }
+
+  .ai-input {
+    @apply w-full bg-black/[0.04] border border-black/[0.08] rounded-[10px]
+           px-3.5 py-2.5 text-[13px] resize-none outline-none
+           focus:border-primary-start/40 focus:bg-white
+           transition-colors duration-200;
+  }
+  .ai-input::placeholder {
+    @apply text-text-placeholder;
+  }
+
+  .ai-send-btn {
+    @apply shrink-0 w-8 h-8 rounded-full flex items-center justify-center
+           transition-all duration-200;
+    background: linear-gradient(135deg, #2667cc 0%, #59a6ff 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(38,103,204,0.25);
+  }
+  .ai-send-btn:hover {
+    box-shadow: 0 3px 12px rgba(38,103,204,0.35);
+  }
+  .ai-send-btn:disabled {
+    @apply opacity-40;
+    box-shadow: none;
+  }
+
+  .ai-floating-btn {
+    @apply w-11 h-11 rounded-full flex items-center justify-center cursor-pointer
+           transition-all duration-300;
+    background: linear-gradient(135deg, #2667cc 0%, #59a6ff 100%);
+    box-shadow: 0 4px 20px rgba(38,103,204,0.35);
+    color: white;
+  }
+  .ai-floating-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 28px rgba(38,103,204,0.45);
+  }
+
+  .ai-thinking {
+    @apply flex items-center gap-1 px-3.5 py-2.5 mr-auto;
+  }
+  .ai-thinking .dot {
+    @apply w-[6px] h-[6px] rounded-full bg-text-tertiary;
+    animation: pulseSoft 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .ai-thinking .dot:nth-child(2) { animation-delay: 0.2s; }
+  .ai-thinking .dot:nth-child(3) { animation-delay: 0.4s; }
+
+  /* ============================================
+     Context Menu (custom right-click)
+     ============================================ */
+
+  .context-menu {
+    @apply fixed z-[100] min-w-[180px] py-1.5 rounded-[8px] overflow-hidden;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.06);
+    animation: fadeIn 0.12s ease-out;
+  }
+
+  .context-menu-item {
+    @apply flex items-center gap-2 px-3 py-[6px] text-[12.5px] text-text-primary
+           cursor-pointer transition-colors duration-100;
+  }
+  .context-menu-item:hover {
+    background-color: rgba(38,103,204,0.10);
+  }
+
+  .context-menu-item.destructive {
+    color: #ff3b30;
+  }
+  .context-menu-item.destructive:hover {
+    background-color: rgba(255,59,48,0.08);
+  }
+
+  .context-menu-separator {
+    @apply my-1 border-t border-black/[0.06];
+  }
+
+  /* ============================================
+     Split Pane (Resizable)
+     ============================================ */
+
+  .split-handle {
+    @apply shrink-0 transition-colors duration-150;
+    background: transparent;
+    z-index: 10;
+  }
+  .split-handle:hover,
+  .split-handle.active {
+    background-color: rgba(38,103,204,0.20);
+  }
+  .split-handle.horizontal {
+    @apply w-[5px] cursor-col-resize;
+  }
+  .split-handle.vertical {
+    @apply h-[5px] cursor-row-resize;
+  }
+
+  /* ============================================
+     Settings Dialog
+     ============================================ */
+
+  .settings-overlay {
+    @apply fixed inset-0 z-[60] flex items-center justify-center;
+    background: rgba(0,0,0,0.2);
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .settings-dialog {
+    @apply w-[560px] max-h-[80vh] bg-macos-panel rounded-macos-lg shadow-macos-lg
+           border border-macos-border overflow-hidden flex flex-col;
+    animation: slideUp 0.25s ease-out;
+  }
+
+  .settings-tab {
+    @apply px-3 py-1.5 text-[12px] font-medium rounded-[6px]
+           text-text-secondary hover:text-text-primary hover:bg-black/[0.04]
+           transition-colors duration-150 cursor-pointer;
+  }
+  .settings-tab.active {
+    background-color: rgba(38,103,204,0.10);
+    color: #2667cc;
+  }
+
+  .settings-input {
+    @apply w-full bg-black/[0.03] border border-black/[0.08] rounded-[7px]
+           px-3 py-2 text-[12px] outline-none transition-colors duration-200
+           focus:border-primary-start/40 focus:bg-white;
+  }
+
+  .settings-label {
+    @apply text-[11px] font-semibold text-text-secondary mb-1;
+  }
+
+  /* ============================================
+     Status Bar
+     ============================================ */
+
+  .status-bar {
+    @apply h-7 flex items-center gap-1.5 px-3 bg-macos-header/70
+           border-t border-macos-border text-[10px] text-text-tertiary;
+  }
+
+  .status-indicator {
+    @apply w-[6px] h-[6px] rounded-full shrink-0;
+  }
+
+  /* ============================================
+     Animations
+     ============================================ */
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slideInRight {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes pulseSoft {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+}
