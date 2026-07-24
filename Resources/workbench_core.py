@@ -383,7 +383,18 @@ def mac_nonmem_env() -> Dict[str, str]:
 
 def archive_existing_paths(project_dir: Path, paths: Iterable[Path], label: str) -> Optional[Path]:
     root = Path(project_dir).resolve()
-    existing = [ensure_inside_project(path, root) for path in paths if Path(path).exists()]
+    # Resolve to real paths and deduplicate (critical for case-insensitive APFS)
+    seen: set[str] = set()
+    existing: List[Path] = []
+    for p in paths:
+        abs_path = ensure_inside_project(p, root)
+        if not abs_path.exists():
+            continue
+        real = str(abs_path.resolve())
+        if real in seen:
+            continue
+        seen.add(real)
+        existing.append(abs_path)
     if not existing:
         return None
     archive = root / f"WorkbenchArchive-{label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"

@@ -32,9 +32,7 @@ if (length(missing_cols) > 0) {
 }
 
 # Detect dose column
-dose_col <- if ("DOSE" %in% names(d)) "DOSE"
-           else if ("AMT"  %in% names(d)) "AMT"
-           else stop("No DOSE or AMT column found")
+dose_col <- if ("DOSE" %in% names(d)) "DOSE" else if ("AMT" %in% names(d)) "AMT" else stop("No DOSE or AMT column found")
 
 # Detect CMT/EVID for dosing records
 has_cmt  <- "CMT"  %in% names(d)
