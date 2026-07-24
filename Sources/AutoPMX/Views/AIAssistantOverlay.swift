@@ -472,6 +472,11 @@ struct AssistantPanel: View {
         .sheet(isPresented: $store.showSCMDialog) {
             SCMSetupSheetView().environmentObject(store)
         }
+        .sheet(item: $showRunPicker) { action in
+            RunPickerSheet(action: action)
+                .environmentObject(store)
+                .frame(width: 260, height: 320)
+        }
         .sheet(isPresented: $store.isBaseModelConfirmPresented) {
             BaseModelConfirmView()
                 .environmentObject(store)
@@ -825,6 +830,13 @@ struct AssistantPanel: View {
     // MARK: Input Bar
     @State private var showQuickActions: Bool = false
 
+    // MARK: Run Picker for diagnostic shortcuts
+    enum RunPickerAction: Identifiable {
+        case gof, vpc, individual, pkParams
+        var id: Self { self }
+    }
+    @State private var showRunPicker: RunPickerAction? = nil
+
     // MARK: Quick Actions Bar (above input)
     private var quickActionsBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -857,24 +869,24 @@ struct AssistantPanel: View {
                 .disabled(store.isAutoModeling || store.runner.isRunning)
 
                 quickActionButton(label: "GOF", icon: "chart.xyaxis.line", colors: [.teal, .blue]) {
-                    store.runGOF(for: store.currentRun)
+                    showRunPicker = .gof
                 }
-                .disabled(store.currentRun.isEmpty || store.runner.isRunning)
+                .disabled(store.runner.isRunning)
 
                 quickActionButton(label: "VPC", icon: "chart.bar.doc.horizontal", colors: [.indigo, .cyan]) {
-                    store.runVPCPlot(for: store.currentRun)
+                    showRunPicker = .vpc
                 }
-                .disabled(store.currentRun.isEmpty || store.runner.isRunning)
+                .disabled(store.runner.isRunning)
 
                 quickActionButton(label: "个体图", icon: "person.2.wave.2", colors: [.mint, .green]) {
-                    store.runIndividualDVTime(for: store.currentRun)
+                    showRunPicker = .individual
                 }
-                .disabled(store.currentRun.isEmpty || store.runner.isRunning)
+                .disabled(store.runner.isRunning)
 
                 quickActionButton(label: "PK参数", icon: "tablecells", colors: [.orange, .yellow]) {
-                    store.runPKParameterExtraction(for: store.currentRun)
+                    showRunPicker = .pkParams
                 }
-                .disabled(store.currentRun.isEmpty || store.runner.isRunning)
+                .disabled(store.runner.isRunning)
 
                 quickActionButton(label: "SCM", icon: "square.grid.3x3.topleft.filled", colors: [.orange, .red]) {
                     store.presentSCMDialog()
@@ -1772,6 +1784,109 @@ struct ContextRing: View {
                 .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.5), value: clamped)
+        }
+    }
+}
+
+// MARK: - Run Picker Sheet for Diagnostic Shortcuts
+
+struct RunPickerSheet: View {
+    let action: AssistantPanel.RunPickerAction
+    @EnvironmentObject private var store: WorkbenchStore
+    @Environment(\.dismiss) private var dismiss
+
+    private var availableRuns: [String] {
+        ProjectScanner.discoverRuns(in: store.projectURL)
+            .filter { runID in
+                FileManager.default.fileExists(atPath: store.projectURL.appendingPathComponent("run\(runID).mod").path)
+            }
+            .sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }
+    }
+
+    private var actionLabel: String {
+        switch action {
+        case .gof:        return "GOF 诊断图"
+        case .vpc:        return "VPC 预测检验"
+        case .individual: return "个体拟合图"
+        case .pkParams:   return "PK 参数提取"
+        }
+    }
+
+    private var actionIcon: String {
+        switch action {
+        case .gof:        return "chart.xyaxis.line"
+        case .vpc:        return "chart.bar.doc.horizontal"
+        case .individual: return "person.2.wave.2"
+        case .pkParams:   return "tablecells"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: actionIcon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.blue)
+                Text(actionLabel)
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+
+            Divider()
+
+            if availableRuns.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 28)).foregroundStyle(.tertiary)
+                    Text("当前项目没有模型")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                List(availableRuns, id: \.self) { runID in
+                    Button {
+                        dismiss()
+                        DispatchQueue.main.async {
+                            execute(for: runID)
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text("run\(runID)")
+                                .font(.system(size: 13, weight: runID == store.currentRun ? .semibold : .regular, design: .monospaced))
+                                .foregroundStyle(runID == store.currentRun ? Color.blue : .primary)
+                            Spacer()
+                            if runID == store.currentRun {
+                                Text("当前")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.blue)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Capsule().fill(.blue.opacity(0.12)))
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
+            }
+        }
+        .frame(minWidth: 240, minHeight: 240)
+    }
+
+    private func execute(for runID: String) {
+        store.activateRun(runID)
+        switch action {
+        case .gof:        store.runGOF(for: runID)
+        case .vpc:        store.runVPCPlot(for: runID)
+        case .individual: store.runIndividualDVTime(for: runID)
+        case .pkParams:   store.runPKParameterExtraction(for: runID)
         }
     }
 }
