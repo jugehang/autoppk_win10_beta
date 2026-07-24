@@ -13,10 +13,17 @@ mod_index <- if(length(args) > 0) args[1] else "41"
 config_file <- "project_config.json"
 sdtab_name  <- paste0("sdtab", mod_index)
 
-if (!file.exists(config_file)) stop("❌ 错误：未找到 project_config.json")
 if (!file.exists(sdtab_name))  stop(paste0("❌ 错误：未找到数据文件 ", sdtab_name))
 
-config <- fromJSON(config_file)
+# 加载配置（缺失时使用内置默认值）
+if (file.exists(config_file)) {
+  config <- fromJSON(config_file)
+} else {
+  message("⚠️ project_config.json 未找到，使用内置默认配置")
+  config <- list(
+    grouping = list(factor = "STUDY", labels = list())
+  )
+}
 
 # 2. 增强的数据读取：处理可能出现的重复标题行
 raw_data <- read.table(sdtab_name, skip = 1, header = TRUE, stringsAsFactors = FALSE) %>%
@@ -38,17 +45,28 @@ iwres_col <- get_res_col(raw_data, "IWRES")
 cwres_col <- get_res_col(raw_data, "CWRES")
 
 # 4. 数据清洗与分组映射
-map_df <- data.frame(
-  RAW_VALUE = as.numeric(names(config$grouping$labels)),
-  LABEL = unlist(config$grouping$labels)
-)
+group_labels <- config$grouping$labels
+if (length(group_labels) > 0) {
+  map_df <- data.frame(
+    RAW_VALUE = as.numeric(names(group_labels)),
+    LABEL = unlist(group_labels)
+  )
+} else {
+  map_df <- data.frame(RAW_VALUE = numeric(0), LABEL = character(0))
+}
 
 group_col <- config$grouping$factor
 sdtab <- raw_data %>%
   filter(MDV != 1) %>%
   mutate(across(everything(), ~as.numeric(as.character(.)))) %>% # 强制转数字，防止 non-numeric 报错
-  left_join(map_df, by = setNames("RAW_VALUE", group_col)) %>%
-  mutate(GROUP = factor(LABEL, levels = unlist(config$grouping$labels)))
+  left_join(map_df, by = setNames("RAW_VALUE", group_col))
+
+# 如果没有 labels 映射，直接用分组因子值作为 GROUP
+if (length(group_labels) > 0) {
+  sdtab <- sdtab %>% mutate(GROUP = factor(LABEL, levels = unlist(group_labels)))
+} else {
+  sdtab <- sdtab %>% mutate(GROUP = factor(.data[[group_col]]))
+}
 
 # 5. 绘图样式
 colors <- brewer.pal(name="Dark2", 8)

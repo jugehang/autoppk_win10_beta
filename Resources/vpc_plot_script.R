@@ -25,7 +25,13 @@ config_file <- "project_config.json"
 
 if (!file.exists(vpc_res_path)) stop("❌ 找不到结果文件")
 
-proj_cfg <- fromJSON(config_file)
+# 加载配置（缺失时使用内置默认值）
+if (file.exists(config_file)) {
+  proj_cfg <- fromJSON(config_file)
+} else {
+  message("⚠️ project_config.json 未找到，使用内置默认配置")
+  proj_cfg <- list(grouping = list(factor = "STUDY", labels = list()))
+}
 group_factor <- proj_cfg$grouping$factor
 group_labels <- proj_cfg$grouping$labels
 

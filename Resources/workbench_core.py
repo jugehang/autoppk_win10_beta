@@ -593,8 +593,41 @@ class TaskRunner:
             ],
         )
 
+    def _ensure_project_config(self) -> None:
+        """Auto-create project_config.json with sensible defaults if missing."""
+        config_path = self.root / "project_config.json"
+        if config_path.exists():
+            return
+        # Detect grouping factor from $DATA file if possible
+        group_factor = "STUDY"
+        data_file = self.settings.data_file
+        data_path = self.root / data_file
+        if data_path.exists():
+            try:
+                import pandas as pd
+                df = pd.read_csv(data_path, nrows=1)
+                cols = [c.upper() for c in df.columns]
+                for candidate in ("STUDY", "STUDYID", "STUDYNO", "ARM", "DOSE", "TRT", "SEX", "RACE", "REGION"):
+                    if candidate in cols:
+                        group_factor = candidate
+                        break
+            except Exception:
+                pass
+        default_config = {
+            "project_name": self.root.name,
+            "units": {"time": "Time (h)", "conc": "Concentration"},
+            "grouping": {"factor": group_factor, "labels": {}},
+            "psn_settings": {"vpc_samples": 500, "bootstrap_samples": 200, "stratify_var": group_factor},
+        }
+        config_path.write_text(
+            json.dumps(default_config, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        self.log(f"Auto-generated project_config.json (grouping factor: {group_factor})")
+
     def _run_r_diagnostic_script(self, script: str, label: str, outputs: List[str]) -> int:
         run = self.settings.curr_run
+        self._ensure_project_config()
         archive = archive_existing_paths(self.root, [self.root / output for output in outputs], label.lower().replace(" ", "-"))
         if archive:
             self.log(f"Archived previous {label} outputs to: {archive.name}")

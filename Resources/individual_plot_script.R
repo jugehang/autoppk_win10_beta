@@ -8,9 +8,13 @@ library(jsonlite)
 args <- commandArgs(trailingOnly = TRUE)
 mod_index <- if(length(args) > 0) args[1] else "41"
 
-# 1. 加载配置与数据
-if (!file.exists("project_config.json")) stop("❌ 未找到配置文件")
-config <- fromJSON("project_config.json")
+# 1. 加载配置与数据（缺失时使用内置默认值）
+if (file.exists("project_config.json")) {
+  config <- fromJSON("project_config.json")
+} else {
+  message("⚠️ project_config.json 未找到，使用内置默认配置")
+  config <- list(units = list(time = "Time (h)", conc = "Concentration"))
+}
 sdtab_name <- paste0("sdtab", mod_index)
 
 if (!file.exists(sdtab_name)) stop(paste0("❌ 未找到数据：", sdtab_name))

@@ -22,7 +22,6 @@ dist/
 *.dmg
 
 # Sub-projects (pushed separately)
-AutoPMX_Web/
 AutoPMX_Windows/
 
 # Node (just in case)
