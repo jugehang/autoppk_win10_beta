@@ -1,4 +1,20 @@
 import Foundation
+import SwiftUI
+
+// MARK: - Language Store
+
+final class LanguageStore: ObservableObject {
+    static let shared = LanguageStore()
+
+    @Published var language: AppLanguage = AppLanguage.current()
+
+    private init() {}
+
+    func setLanguage(_ newValue: AppLanguage) {
+        language = newValue
+        newValue.save()
+    }
+}
 
 // MARK: - Language
 
@@ -35,224 +51,302 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
 enum L10n {
     static func t(_ key: String) -> String {
-        let lang = AppLanguage.current()
+        let lang = LanguageStore.shared.language
         return Self.strings[key]?[lang] ?? key
     }
 
     // Categories & Asset names
-    static let models = t("models")
-    static let data = t("data")
-    static let outputs = t("outputs")
-    static let figures = t("figures")
-    static let reports = t("reports")
-    static let scripts = t("scripts")
+    static var models: String { t("models") }
+    static var data: String { t("data") }
+    static var outputs: String { t("outputs") }
+    static var figures: String { t("figures") }
+    static var reports: String { t("reports") }
+    static var scripts: String { t("scripts") }
 
     // Toolbar
-    static let toolbarNewProject = t("toolbar.newProject")
-    static let toolbarOpen = t("toolbar.open")
-    static let toolbarDemo = t("toolbar.demo")
-    static let toolbarRoot = t("toolbar.root")
-    static let toolbarFromRun = t("toolbar.fromRun")
-    static let toolbarRefresh = t("toolbar.refresh")
-    static let toolbarRunModel = t("toolbar.runModel")
-    static let toolbarRunning = t("toolbar.running")
+    static var toolbarNewProject: String { t("toolbar.newProject") }
+    static var toolbarOpen: String { t("toolbar.open") }
+    static var toolbarDemo: String { t("toolbar.demo") }
+    static var toolbarRoot: String { t("toolbar.root") }
+    static var toolbarFromRun: String { t("toolbar.fromRun") }
+    static var toolbarRefresh: String { t("toolbar.refresh") }
+    static var toolbarRunModel: String { t("toolbar.runModel") }
+    static var toolbarRunning: String { t("toolbar.running") }
+
+    // General UI
+    static var general: String { t("general.title") }
+    static var language: String { t("general.language") }
+    static var selectLanguage: String { t("general.selectLanguage") }
+    static var cancel: String { t("general.cancel") }
+    static var start: String { t("general.start") }
+    static var save: String { t("general.save") }
 
     // Sidebar
-    static let sidebarProjectExplorer = t("sidebar.projectExplorer")
-    static let sidebarDesc = t("sidebar.desc")
+    static var sidebarProjectExplorer: String { t("sidebar.projectExplorer") }
+    static var sidebarDesc: String { t("sidebar.desc") }
 
     // Detail
-    static let detailOpen = t("detail.open")
-    static let detailReveal = t("detail.reveal")
-    static let detailActions = t("detail.actions")
-    static let detailWorkspace = t("detail.workspace")
-    static let detailFileType = t("detail.fileType")
-    static let detailSize = t("detail.size")
-    static let detailPath = t("detail.path")
+    static var detailOpen: String { t("detail.open") }
+    static var detailReveal: String { t("detail.reveal") }
+    static var detailActions: String { t("detail.actions") }
+    static var detailWorkspace: String { t("detail.workspace") }
+    static var detailFileType: String { t("detail.fileType") }
+    static var detailSize: String { t("detail.size") }
+    static var detailPath: String { t("detail.path") }
 
     // Inspector
-    static let inspectorRunConfig = t("inspector.runConfig")
-    static let inspectorPrevious = t("inspector.previous")
-    static let inspectorCurrent = t("inspector.current")
-    static let inspectorDataFile = t("inspector.dataFile")
-    static let inspectorRulesJSON = t("inspector.rulesJSON")
-    static let inspectorPsnCommand = t("inspector.psnCommand")
-    static let inspectorSuggest = t("inspector.suggest")
-    static let inspectorAI = t("inspector.ai")
-    static let inspectorRun = t("inspector.run")
-    static let inspectorChecks = t("inspector.checks")
-    static let inspectorModelFiles = t("inspector.modelFiles")
-    static let inspectorDataPath = t("inspector.dataPath")
-    static let inspectorPsn = t("inspector.psn")
-    static let inspectorParameterEstimates = t("inspector.parameterEstimates")
-    static let inspectorLLM = t("inspector.llmProvider")
-    static let inspectorTestConnection = t("inspector.testConnection")
-    static let inspectorNoEstimates = t("inspector.noEstimates")
-    static let inspectorParam = t("inspector.param")
-    static let inspectorEstimate = t("inspector.estimate")
-    static let inspectorSE = t("inspector.se")
-    static let inspectorRSE = t("inspector.rse")
+    static var inspectorRunConfig: String { t("inspector.runConfig") }
+    static var inspectorPrevious: String { t("inspector.previous") }
+    static var inspectorCurrent: String { t("inspector.current") }
+    static var inspectorDataFile: String { t("inspector.dataFile") }
+    static var inspectorRulesJSON: String { t("inspector.rulesJSON") }
+    static var inspectorPsnCommand: String { t("inspector.psnCommand") }
+    static var inspectorSuggest: String { t("inspector.suggest") }
+    static var inspectorAI: String { t("inspector.ai") }
+    static var inspectorRun: String { t("inspector.run") }
+    static var inspectorChecks: String { t("inspector.checks") }
+    static var inspectorModelFiles: String { t("inspector.modelFiles") }
+    static var inspectorDataPath: String { t("inspector.dataPath") }
+    static var inspectorPsn: String { t("inspector.psn") }
+    static var inspectorParameterEstimates: String { t("inspector.parameterEstimates") }
+    static var inspectorLLM: String { t("inspector.llmProvider") }
+    static var inspectorTestConnection: String { t("inspector.testConnection") }
+    static var inspectorNoEstimates: String { t("inspector.noEstimates") }
+    static var inspectorParam: String { t("inspector.param") }
+    static var inspectorEstimate: String { t("inspector.estimate") }
+    static var inspectorSE: String { t("inspector.se") }
+    static var inspectorRSE: String { t("inspector.rse") }
 
     // AI Assistant
-    static let aiTitle = t("ai.title")
-    static let aiSubtitle = t("ai.subtitle")
-    static let aiRunning = t("ai.running")
-    static let aiTestLLM = t("ai.testLLM")
-    static let aiGenPsN = t("ai.genPsn")
-    static let aiDuDuAuto = t("ai.duDuAuto")
-    static let aiPlots = t("ai.plots")
-    static let aiVPC = t("ai.vpc")
-    static let aiLSTAudit = t("ai.lstAudit")
-    static let aiAllDiagnose = t("ai.allDiagnose")
-    static let aiAskPlaceholder = t("ai.askPlaceholder")
-    static let aiStop = t("ai.stop")
-    static let aiThinking = t("ai.thinking")
-    static let aiThinkingDuDu = t("ai.thinkingDuDu")
-    static let aiSystemLabel = t("ai.systemLabel")
-    static let aiDuDuLabel = t("ai.duDuLabel")
+    static var aiTitle: String { t("ai.title") }
+    static var aiSubtitle: String { t("ai.subtitle") }
+    static var aiRunning: String { t("ai.running") }
+    static var aiTestLLM: String { t("ai.testLLM") }
+    static var aiGenPsN: String { t("ai.genPsn") }
+    static var aiDuDuAuto: String { t("ai.duDuAuto") }
+    static var aiPlots: String { t("ai.plots") }
+    static var aiVPC: String { t("ai.vpc") }
+    static var aiLSTAudit: String { t("ai.lstAudit") }
+    static var aiAllDiagnose: String { t("ai.allDiagnose") }
+    static var aiAskPlaceholder: String { t("ai.askPlaceholder") }
+    static var aiStop: String { t("ai.stop") }
+    static var aiThinking: String { t("ai.thinking") }
+    static var aiThinkingDuDu: String { t("ai.thinkingDuDu") }
+    static var aiSystemLabel: String { t("ai.systemLabel") }
+    static var aiDuDuLabel: String { t("ai.duDuLabel") }
+
+    // AI message bubble UI
+    static var aiReasoning: String { t("ai.reasoning") }
+    static var aiSteps: String { t("ai.steps") }
+    static var aiThinkingDots: String { t("ai.thinkingDots") }
+    static var aiCopy: String { t("ai.copy") }
+    static var aiCopyHint: String { t("ai.copyHint") }
+    static var aiFillInput: String { t("ai.fillInput") }
+    static var aiClickToRun: String { t("ai.clickToRun") }
+
+    // Action chips
+    static var actionAutoModel: String { t("action.autoModel") }
+    static var actionCompare: String { t("action.compare") }
+    static var actionEvaluate: String { t("action.evaluate") }
+    static var actionPKParams: String { t("action.pkParams") }
+    static var actionGAOpt: String { t("action.gaOpt") }
+    static var actionGOF: String { t("action.gof") }
+    static var actionVPC: String { t("action.vpc") }
+
+    // AI Compare sheet
+    static var aiCompareRunA: String { t("ai.compare.runA") }
+    static var aiCompareRunB: String { t("ai.compare.runB") }
+    static var aiCompareStart: String { t("ai.compare.start") }
+    static var aiCompareNeedsTwo: String { t("ai.compare.needsTwo") }
 
     // Settings
-    static let settingsLLM = t("settings.llm")
-    static let settingsTools = t("settings.tools")
-    static let settingsRules = t("settings.rules")
-    static let settingsAbout = t("settings.about")
-    static let settingsLLMProviders = t("settings.llmProviders")
-    static let settingsAddProvider = t("settings.addProvider")
-    static let settingsName = t("settings.name")
-    static let settingsApiFormat = t("settings.apiFormat")
-    static let settingsBaseURL = t("settings.baseURL")
-    static let settingsModel = t("settings.model")
-    static let settingsApiKey = t("settings.apiKey")
-    static let settingsTestConnection = t("settings.testConnection")
-    static let settingsRemove = t("settings.remove")
-    static let settingsModelsFound = t("settings.modelsFound")
-    static let settingsNotTested = t("settings.notTested")
-    static let settingsConnected = t("settings.connected")
-    static let settingsNoModel = t("settings.noModel")
-    static let settingsUnnamed = t("settings.unnamed")
-    static let settingsSourceFiles = t("settings.sourceFiles")
-    static let settingsSourceFilesHint = t("settings.sourceFilesHint")
-    static let settingsReloadRules = t("settings.reloadRules")
-    static let settingsLoadAllDefaults = t("settings.loadAllDefaults")
-    static let settingsLoadStatus = t("settings.loadStatus")
-    static let settingsLoaded = t("settings.loaded")
-    static let settingsMissing = t("settings.missing")
-    static let settingsNoRules = t("settings.noRules")
-    static let settingsKnownFiles = t("settings.knownFiles")
-    static let settingsKnownFilesHint = t("settings.knownFilesHint")
-    static let settingsNoRuleFiles = t("settings.noRuleFiles")
-    static let settingsAdd = t("settings.add")
-    static let settingsToolsNONMEM = t("settings.tools.nonmem")
-    static let settingsToolsNONMEMHint = t("settings.tools.nonmemHint")
-    static let settingsToolsPsN = t("settings.tools.psn")
-    static let settingsToolsPsNHint = t("settings.tools.psnHint")
-    static let settingsToolsPython = t("settings.tools.python")
-    static let settingsToolsPythonHint = t("settings.tools.pythonHint")
-    static let settingsToolsViewers = t("settings.tools.viewers")
-    static let settingsToolsViewersHint = t("settings.tools.viewersHint")
-    static let settingsToolsDataFile = t("settings.tools.dataFile")
-    static let settingsToolsDataFileHint = t("settings.tools.dataFileHint")
-    static let settingsToolsDataFileHintText = t("settings.tools.dataFileHintText")
-    static let settingsAutoDetect = t("settings.autoDetect")
-    static let settingsBrowse = t("settings.browse")
-    static let settingsFound = t("settings.found")
-    static let settingsNotFound = t("settings.notFound")
+    static var settingsLLM: String { t("settings.llm") }
+    static var settingsTools: String { t("settings.tools") }
+    static var settingsRules: String { t("settings.rules") }
+    static var settingsAbout: String { t("settings.about") }
+    static var settingsLLMProviders: String { t("settings.llmProviders") }
+    static var settingsAddProvider: String { t("settings.addProvider") }
+    static var settingsName: String { t("settings.name") }
+    static var settingsApiFormat: String { t("settings.apiFormat") }
+    static var settingsBaseURL: String { t("settings.baseURL") }
+    static var settingsModel: String { t("settings.model") }
+    static var settingsApiKey: String { t("settings.apiKey") }
+    static var settingsTestConnection: String { t("settings.testConnection") }
+    static var settingsRemove: String { t("settings.remove") }
+    static var settingsModelsFound: String { t("settings.modelsFound") }
+    static var settingsNotTested: String { t("settings.notTested") }
+    static var settingsConnected: String { t("settings.connected") }
+    static var settingsNoModel: String { t("settings.noModel") }
+    static var settingsUnnamed: String { t("settings.unnamed") }
+    static var settingsSourceFiles: String { t("settings.sourceFiles") }
+    static var settingsSourceFilesHint: String { t("settings.sourceFilesHint") }
+    static var settingsReloadRules: String { t("settings.reloadRules") }
+    static var settingsLoadAllDefaults: String { t("settings.loadAllDefaults") }
+    static var settingsLoadStatus: String { t("settings.loadStatus") }
+    static var settingsLoaded: String { t("settings.loaded") }
+    static var settingsMissing: String { t("settings.missing") }
+    static var settingsNoRules: String { t("settings.noRules") }
+    static var settingsKnownFiles: String { t("settings.knownFiles") }
+    static var settingsKnownFilesHint: String { t("settings.knownFilesHint") }
+    static var settingsNoRuleFiles: String { t("settings.noRuleFiles") }
+    static var settingsAdd: String { t("settings.add") }
+    static var settingsToolsNONMEM: String { t("settings.tools.nonmem") }
+    static var settingsToolsNONMEMHint: String { t("settings.tools.nonmemHint") }
+    static var settingsToolsPsN: String { t("settings.tools.psn") }
+    static var settingsToolsPsNHint: String { t("settings.tools.psnHint") }
+    static var settingsToolsPython: String { t("settings.tools.python") }
+    static var settingsToolsPythonHint: String { t("settings.tools.pythonHint") }
+    static var settingsToolsViewers: String { t("settings.tools.viewers") }
+    static var settingsToolsViewersHint: String { t("settings.tools.viewersHint") }
+    static var settingsToolsDataFile: String { t("settings.tools.dataFile") }
+    static var settingsToolsDataFileHint: String { t("settings.tools.dataFileHint") }
+    static var settingsToolsDataFileHintText: String { t("settings.tools.dataFileHintText") }
+    static var settingsAutoDetect: String { t("settings.autoDetect") }
+    static var settingsBrowse: String { t("settings.browse") }
+    static var settingsFound: String { t("settings.found") }
+    static var settingsNotFound: String { t("settings.notFound") }
 
     // Automation
-    static let autoStartFresh = t("auto.startFresh")
-    static let autoStartFreshDetail = t("auto.startFreshDetail")
-    static let autoStartContinue = t("auto.startContinue")
-    static let autoStartContinueDetail = t("auto.startContinueDetail")
-    static let autoStartFromModel = t("auto.startFromModel")
-    static let autoStartFromModelDetail = t("auto.startFromModelDetail")
-    static let autoTitle = t("auto.title")
-    static let autoSubtitle = t("auto.subtitle")
-    static let autoMode = t("auto.mode")
-    static let autoParentModel = t("auto.parentModel")
-    static let autoGuidance = t("auto.guidance")
-    static let autoGuidanceHint = t("auto.guidanceHint")
-    static let autoCancel = t("auto.cancel")
-    static let autoStart = t("auto.start")
+    static var autoStartFresh: String { t("auto.startFresh") }
+    static var autoStartFreshDetail: String { t("auto.startFreshDetail") }
+    static var autoStartContinue: String { t("auto.startContinue") }
+    static var autoStartContinueDetail: String { t("auto.startContinueDetail") }
+    static var autoStartFromModel: String { t("auto.startFromModel") }
+    static var autoStartFromModelDetail: String { t("auto.startFromModelDetail") }
+    static var autoTitle: String { t("auto.title") }
+    static var autoSubtitle: String { t("auto.subtitle") }
+    static var autoMode: String { t("auto.mode") }
+    static var autoParentModel: String { t("auto.parentModel") }
+    static var autoGuidance: String { t("auto.guidance") }
+    static var autoGuidanceHint: String { t("auto.guidanceHint") }
+    static var autoCancel: String { t("auto.cancel") }
+    static var autoStart: String { t("auto.start") }
 
     // Context menu
-    static let ctxRunNONMEM = t("ctx.runNonmem")
-    static let ctxRunGOF = t("ctx.runGof")
-    static let ctxRunVPC = t("ctx.runVpc")
-    static let ctxRunIndividual = t("ctx.runIndividual")
-    static let ctxRunAllDiagnostics = t("ctx.runAllDiagnostics")
-    static let ctxExtractPK = t("ctx.extractPk")
-    static let ctxBootstrap = t("ctx.bootstrap")
-    static let ctxSCM = t("ctx.scm")
-    static let ctxAIEvaluate = t("ctx.aiEvaluate")
-    static let ctxOpen = t("ctx.open")
-    static let ctxPin = t("ctx.pin")
-    static let ctxUnpin = t("ctx.unpin")
-    static let ctxReveal = t("ctx.reveal")
-    static let ctxDelete = t("ctx.delete")
+    static var ctxRunNONMEM: String { t("ctx.runNonmem") }
+    static var ctxRunGOF: String { t("ctx.runGof") }
+    static var ctxRunVPC: String { t("ctx.runVpc") }
+    static var ctxRunIndividual: String { t("ctx.runIndividual") }
+    static var ctxRunAllDiagnostics: String { t("ctx.runAllDiagnostics") }
+    static var ctxExtractPK: String { t("ctx.extractPk") }
+    static var ctxBootstrap: String { t("ctx.bootstrap") }
+    static var ctxSCM: String { t("ctx.scm") }
+    static var ctxAIEvaluate: String { t("ctx.aiEvaluate") }
+    static var ctxOpen: String { t("ctx.open") }
+    static var ctxPin: String { t("ctx.pin") }
+    static var ctxUnpin: String { t("ctx.unpin") }
+    static var ctxReveal: String { t("ctx.reveal") }
+    static var ctxDelete: String { t("ctx.delete") }
 
     // Delete confirmation
-    static let deleteTitle = t("delete.title")
-    static let deleteMessage = t("delete.message")
-    static let deleteCancel = t("delete.cancel")
-    static let deleteConfirm = t("delete.confirm")
+    static var deleteTitle: String { t("delete.title") }
+    static var deleteMessage: String { t("delete.message") }
+    static var deleteCancel: String { t("delete.cancel") }
+    static var deleteConfirm: String { t("delete.confirm") }
 
     // Project sheet
-    static let projectCreateBlank = t("project.createBlank")
-    static let projectCreateBlankMsg = t("project.createBlankMsg")
-    static let projectCreateFromRun = t("project.createFromRun")
-    static let projectCreate = t("project.create")
+    static var projectCreateBlank: String { t("project.createBlank") }
+    static var projectCreateBlankMsg: String { t("project.createBlankMsg") }
+    static var projectCreateFromRun: String { t("project.createFromRun") }
+    static var projectCreate: String { t("project.create") }
 
     // Terminal
-    static let terminalReady = t("terminal.ready")
+    static var terminalReady: String { t("terminal.ready") }
 
     // About
-    static let aboutTitle = t("about.title")
-    static let aboutSubtitle = t("about.subtitle")
-    static let aboutDescription = t("about.description")
-    static let aboutProviders = t("about.providers")
-    static let aboutBuilt = t("about.built")
+    static var aboutTitle: String { t("about.title") }
+    static var aboutSubtitle: String { t("about.subtitle") }
+    static var aboutDescription: String { t("about.description") }
+    static var aboutProviders: String { t("about.providers") }
+    static var aboutBuilt: String { t("about.built") }
 
     // Workbench
-    static let workbenchOverview = t("workbench.overview")
+    static var workbenchOverview: String { t("workbench.overview") }
 
     // App display name
     static let appName = "AutoPMX"
     static let appSubtitle = "DuDu PMx Workbench"
 
     // Thinking steps
-    static let thinkCheckingLLM = t("think.checkingLLM")
-    static let thinkPreparingProject = t("think.preparingProject")
-    static let thinkAnalyzingDataset = t("think.analyzingDataset")
-    static let thinkAIWritingModel = t("think.aiWritingModel")
-    static let thinkRunningNONMEM = t("think.runningNonmem")
-    static let thinkRunningDiagnostics = t("think.runningDiagnostics")
-    static let thinkAIEvaluating = t("think.aiEvaluating")
+    static var thinkCheckingLLM: String { t("think.checkingLLM") }
+    static var thinkPreparingProject: String { t("think.preparingProject") }
+    static var thinkAnalyzingDataset: String { t("think.analyzingDataset") }
+    static var thinkAIWritingModel: String { t("think.aiWritingModel") }
+    static var thinkRunningNONMEM: String { t("think.runningNonmem") }
+    static var thinkRunningDiagnostics: String { t("think.runningDiagnostics") }
+    static var thinkAIEvaluating: String { t("think.aiEvaluating") }
 
     // Automation messages
-    static let msgAutomationStarted = t("msg.automation.started")
-    static let msgAutomationUserGuidance = t("msg.automation.userGuidance")
-    static let msgAutomationProjectCreated = t("msg.automation.projectCreated")
-    static let msgAutomationDatasetAnalysis = t("msg.automation.datasetAnalysis")
-    static let msgAutomationModelCreated = t("msg.automation.modelCreated")
-    static let msgAutomationResuming = t("msg.automation.resuming")
-    static let msgAutomationComplete = t("msg.automation.complete")
-    static let msgAutomationBest = t("msg.automation.best")
-    static let msgAutomationStopped = t("msg.automation.stopped")
-    static let msgAutomationFailed = t("msg.automation.failed")
-    static let msgAutomationStopRequested = t("msg.automation.stopRequested")
+    static var msgAutomationStarted: String { t("msg.automation.started") }
+    static var msgAutomationUserGuidance: String { t("msg.automation.userGuidance") }
+    static var msgAutomationProjectCreated: String { t("msg.automation.projectCreated") }
+    static var msgAutomationDatasetAnalysis: String { t("msg.automation.datasetAnalysis") }
+    static var msgAutomationModelCreated: String { t("msg.automation.modelCreated") }
+    static var msgAutomationResuming: String { t("msg.automation.resuming") }
+    static var msgAutomationComplete: String { t("msg.automation.complete") }
+    static var msgAutomationBest: String { t("msg.automation.best") }
+    static var msgAutomationStopped: String { t("msg.automation.stopped") }
+    static var msgAutomationFailed: String { t("msg.automation.failed") }
+    static var msgAutomationStopRequested: String { t("msg.automation.stopRequested") }
 
     // Others
-    static let othersNoParams = t("others.noParams")
-    static let othersNA = t("others.na")
-    static let othersNotConnected = t("others.notConnected")
-    static let othersNotTested = t("others.notTested")
-    static let othersNeverTested = t("others.neverTested")
-    static let othersModelsAvailable = t("others.modelsAvailable")
-    static let othersModelNotSelected = t("others.modelNotSelected")
+    static var othersNoParams: String { t("others.noParams") }
+    static var othersNA: String { t("others.na") }
+    static var othersNotConnected: String { t("others.notConnected") }
+    static var othersNotTested: String { t("others.notTested") }
+    static var othersNeverTested: String { t("others.neverTested") }
+    static var othersModelsAvailable: String { t("others.modelsAvailable") }
+    static var othersModelNotSelected: String { t("others.modelNotSelected") }
+
+
+    // Appearance
+    static var appearance: String { t("settings.appearance") }
+    static var followSystem: String { t("settings.followSystem") }
+    static var lightTheme: String { t("settings.light") }
+    static var darkTheme: String { t("settings.dark") }
+
+    // Particle effects
+    static var particleEffects: String { t("settings.particleEffects") }
+    static var particleEffectsEnable: String { t("settings.particleEffectsEnable") }
+    static var particleEffectsDesc: String { t("settings.particleEffectsDesc") }
+    static var particleCount: String { t("settings.particleCount") }
+    static var particleLite: String { t("settings.particleLite") }
+    static var particleStandard: String { t("settings.particleStandard") }
+    static var particlePerformance: String { t("settings.particlePerformance") }
+    static var toolsTitle: String { t("settings.tools.title") }
+    static var toolsR: String { t("settings.tools.r") }
+    static var toolsRHint: String { t("settings.tools.rHint") }
+    static var toolsFileViewers: String { t("settings.tools.fileViewers") }
+    static var toolsDataFile: String { t("settings.tools.dataFile") }
+    static var toolsDataFileDesc: String { t("settings.tools.dataFileDesc") }
+    static var rulesTitle: String { t("settings.rules.title") }
+    static var rulesSourceFilesDesc: String { t("settings.rules.sourceFilesDesc") }
+    static var rulesKnownFilesDesc: String { t("settings.rules.knownFilesDesc") }
+
+    // Provider form labels
+    static var providerName: String { t("settings.name") }
+    static var providerApiFormat: String { t("settings.apiFormat") }
+    static var providerBaseURL: String { t("settings.baseURL") }
+    static var providerModel: String { t("settings.model") }
+    static var providerApiKey: String { t("settings.apiKey") }
+    static var providerTestConnection: String { t("settings.testConnection") }
+    static var providerRemove: String { t("settings.remove") }
+    static var providerConnected: String { t("settings.connected") }
+    static var providerNotTested: String { t("settings.notTested") }
+    static var providerNoModel: String { t("settings.noModel") }
+    static var buttonBrowse: String { t("settings.browse") }
 
     // MARK: - Translation Table
 
     private static let strings: [String: [AppLanguage: String]] = [
+        // General UI
+        "general.title": [.zhCN: "通用", .en: "General"],
+        "general.language": [.zhCN: "语言", .en: "Language"],
+        "general.selectLanguage": [.zhCN: "选择语言", .en: "Select Language"],
+        "general.cancel": [.zhCN: "取消", .en: "Cancel"],
+        "general.start": [.zhCN: "开始", .en: "Start"],
+        "general.save": [.zhCN: "保存", .en: "Save"],
+
         // Categories
         "models": [.zhCN: "模型", .en: "Models"],
         "data": [.zhCN: "数据", .en: "Data"],
@@ -324,6 +418,30 @@ enum L10n {
         "ai.thinkingDuDu": [.zhCN: "DuDu 正在思考...", .en: "DuDu is thinking..."],
         "ai.systemLabel": [.zhCN: "系统", .en: "System"],
         "ai.duDuLabel": [.zhCN: "DuDu PMx", .en: "DuDu PMx"],
+
+        // AI message bubble UI
+        "ai.reasoning": [.zhCN: "推理过程", .en: "Reasoning"],
+        "ai.steps": [.zhCN: "步", .en: "steps"],
+        "ai.thinkingDots": [.zhCN: "思考中...", .en: "Thinking..."],
+        "ai.copy": [.zhCN: "复制", .en: "Copy"],
+        "ai.copyHint": [.zhCN: "复制消息", .en: "Copy message"],
+        "ai.fillInput": [.zhCN: "填入输入框", .en: "Insert into input"],
+        "ai.clickToRun": [.zhCN: "点击执行", .en: "Click to run"],
+
+        // Action chips
+        "action.autoModel": [.zhCN: "DuDu Auto", .en: "DuDu Auto"],
+        "action.compare": [.zhCN: "Compare", .en: "Compare"],
+        "action.evaluate": [.zhCN: "模型评估", .en: "Evaluate"],
+        "action.pkParams": [.zhCN: "PK 参数", .en: "PK Params"],
+        "action.gaOpt": [.zhCN: "GA 优化", .en: "GA Optimize"],
+        "action.gof": [.zhCN: "GOF", .en: "GOF"],
+        "action.vpc": [.zhCN: "VPC", .en: "VPC"],
+
+        // AI Compare sheet
+        "ai.compare.runA": [.zhCN: "Run A", .en: "Run A"],
+        "ai.compare.runB": [.zhCN: "Run B", .en: "Run B"],
+        "ai.compare.start": [.zhCN: "开始比较", .en: "Start Comparison"],
+        "ai.compare.needsTwo": [.zhCN: "至少需要两个已生成的模型才能进行比较。", .en: "At least two successfully run models are needed for comparison."],
 
         // Settings
         "settings.llm": [.zhCN: "LLM", .en: "LLM"],
@@ -486,5 +604,32 @@ enum L10n {
         "others.neverTested": [.zhCN: "LLM 未测试", .en: "LLM not tested"],
         "others.modelsAvailable": [.zhCN: "个模型可用", .en: " models available"],
         "others.modelNotSelected": [.zhCN: "未选择模型", .en: "No model"],
+        // Appearance
+        "settings.appearance": [.zhCN: "外观", .en: "Appearance"],
+        "settings.followSystem": [.zhCN: "跟随系统", .en: "System"],
+        "settings.light": [.zhCN: "浅色", .en: "Light"],
+        "settings.dark": [.zhCN: "深色", .en: "Dark"],
+
+        // Particle effects
+        "settings.particleEffects": [.zhCN: "粒子特效", .en: "Particle Effects"],
+        "settings.particleEffectsEnable": [.zhCN: "启用粒子特效", .en: "Enable Particle Effects"],
+        "settings.particleEffectsDesc": [.zhCN: "鼠标悬停按钮时显示细微风粒子动画，DuDu PMx 浮动按钮周围也有极光粒子环绕", .en: "Show subtle wind-like particle animations on button hover, with aurora particles orbiting the DuDu PMx floating button"],
+        "settings.particleCount": [.zhCN: "粒子数量", .en: "Particle Count"],
+        "settings.particleLite": [.zhCN: "轻量", .en: "Lite"],
+        "settings.particleStandard": [.zhCN: "标准", .en: "Standard"],
+        "settings.particlePerformance": [.zhCN: "性能", .en: "Performance"],
+
+        // Tools
+        "settings.tools.title": [.zhCN: "工具与路径", .en: "Tools & Paths"],
+        "settings.tools.r": [.zhCN: "R 环境 (Rscript)", .en: "R Environment (Rscript)"],
+        "settings.tools.rHint": [.zhCN: "Rscript 路径，用于运行 R 诊断和绘图。推荐 R 4.x 并安装 xpose、ggplot2、dplyr。", .en: "Path to Rscript for running R-based diagnostics and plotting. R 4.x with xpose, ggplot2, and dplyr is recommended."],
+        "settings.tools.fileViewers": [.zhCN: "文件查看器", .en: "File Viewers"],
+        "settings.tools.dataFileDesc": [.zhCN: "创建新项目时的默认 CSV 文件名。如需按项目设置数据集，请在侧边栏右键 CSV → 设为建模数据集。", .en: "Default CSV filename when creating new projects. To set dataset per-project, right-click a CSV in the sidebar → Set as Modeling Dataset."],
+
+        // Rules
+        "settings.rules.title": [.zhCN: "规则与知识来源", .en: "Rule & Knowledge Sources"],
+        "settings.rules.sourceFilesDesc": [.zhCN: "逗号分隔的规则、知识、审核文件列表。AutoPMX 会搜索项目目录、工作区根目录和 AutoPMX_Projects 文件夹。", .en: "Comma-separated list of rule, knowledge, and audit files. AutoPMX searches the project directory, workspace root, and AutoPMX_Projects folder."],
+        "settings.rules.knownFilesDesc": [.zhCN: "工作区中存在的文件，可以添加为来源文件。点击添加。", .en: "These files exist in your workspace and can be added as sources. Click to append."],
+
     ]
 }

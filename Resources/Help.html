@@ -5,107 +5,568 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AutoPMX Help</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 20px; line-height: 1.75; color: #1d1d1f; background: #fff; }
-  @media (prefers-color-scheme: dark) { body { color: #f5f5f7; background: #1c1c1e; } h1 { color: #f5f5f7; } h2 { color: #e0e0e5; } h3 { color: #d2d2d7; } pre { background: #2c2c2e; color: #e5e5ea; } code { background: #3a3a3c; color: #f5a97f; } a { color: #2997ff; } .tip { background: #1b3a1b; border-left-color: #4caf50; } .warn { background: #3d2e0a; border-left-color: #ff9800; } th { background: #2c2c2e; } }
-  h1 { font-size: 28px; font-weight: 700; margin-top: 0; color: #1d1d1f; }
-  h2 { font-size: 20px; font-weight: 600; margin-top: 36px; color: #6e6e73; border-bottom: 1px solid #d2d2d7; padding-bottom: 8px; }
-  h3 { font-size: 16px; font-weight: 600; margin-top: 24px; }
-  pre { background: #f5f5f7; padding: 14px 18px; border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
-  code { font-family: 'SF Mono', 'Menlo', 'Monaco', monospace; font-size: 13px; background: #f0f0f5; padding: 2px 6px; border-radius: 4px; }
-  a { color: #0071e3; text-decoration: none; }
+  :root {
+    color-scheme: light dark;
+    --bg: #fff; --text: #1d1d1f;
+    --nav-bg: #f5f5f7; --nav-border: #e5e5ea;
+    --h2-color: #6e6e73; --h2-border: #d2d2d7;
+    --pre-bg: #f5f5f7; --code-bg: #f0f0f5;
+    --a-color: #0071e3;
+    --tip-bg: #e8f5e9; --tip-border: #4caf50;
+    --warn-bg: #fff3e0; --warn-border: #ff9800;
+    --th-bg: #f5f5f7; --td-border: #e5e5ea;
+    --badge-green-bg: #e8f5e9; --badge-green-text: #2e7d32;
+    --badge-blue-bg: #e3f2fd;  --badge-blue-text: #1565c0;
+    --nav-active-bg: #e8f0fe;  --nav-active-text: #1a73e8;
+    --toc-bg: #f5f5f7;
+    --shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --text: #f5f5f7;
+      --nav-bg: #252528; --nav-border: #3a3a3c;
+      --h2-color: #e0e0e5; --h2-border: #48484a;
+      --pre-bg: #2c2c2e; --code-bg: #3a3a3c;
+      --a-color: #2997ff;
+      --tip-bg: #1b3a1b; --tip-border: #4caf50;
+      --warn-bg: #3d2e0a; --warn-border: #ff9800;
+      --th-bg: #2c2c2e; --td-border: #48484a;
+      --badge-green-bg: #1b3a1b; --badge-green-text: #81c784;
+      --badge-blue-bg: #1a2a4a;  --badge-blue-text: #64b5f6;
+      --nav-active-bg: #1a3a5c;  --nav-active-text: #64b5f6;
+      --toc-bg: #252528;
+      --shadow: 0 1px 3px rgba(0,0,0,.3);
+      pre code { color: #f5a97f; }
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+    line-height: 1.75;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ===== SIDEBAR NAVIGATION ===== */
+  nav#sidebar {
+    position: sticky;
+    top: 0;
+    width: 260px;
+    min-width: 260px;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--nav-bg);
+    border-right: 1px solid var(--nav-border);
+    padding: 24px 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+    scroll-behavior: smooth;
+  }
+  nav#sidebar::-webkit-scrollbar { width: 4px; }
+  nav#sidebar::-webkit-scrollbar-thumb { background: var(--nav-border); border-radius: 2px; }
+
+  .nav-header {
+    padding: 0 20px 16px;
+    border-bottom: 1px solid var(--nav-border);
+    margin-bottom: 8px;
+  }
+  .nav-header .logo-text {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .nav-header .subtitle {
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  .nav-section-title {
+    padding: 12px 20px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #888;
+  }
+
+  nav#sidebar a {
+    display: flex;
+    align-items: center;
+    padding: 7px 20px;
+    font-size: 13px;
+    color: var(--text);
+    text-decoration: none;
+    border-left: 3px solid transparent;
+    transition: all 0.15s ease;
+  }
+  nav#sidebar a:hover {
+    background: var(--nav-active-bg);
+    color: var(--nav-active-text);
+    border-left-color: var(--nav-active-text);
+  }
+  nav#sidebar a.active {
+    background: var(--nav-active-bg);
+    color: var(--nav-active-text);
+    font-weight: 600;
+    border-left-color: var(--nav-active-text);
+  }
+  nav#sidebar a .nav-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #ddd;
+    color: #666;
+    font-size: 10px;
+    font-weight: 700;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    nav#sidebar a .nav-num { background: #3a3a3c; color: #aaa; }
+  }
+  nav#sidebar a.active .nav-num {
+    background: var(--nav-active-text);
+    color: #fff;
+  }
+
+  .nav-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--nav-border);
+    margin-top: 12px;
+    font-size: 10px;
+    color: #888;
+    line-height: 1.6;
+  }
+
+  /* Mobile hamburger */
+  .nav-toggle {
+    display: none;
+    position: fixed;
+    top: 12px; left: 12px;
+    z-index: 200;
+    width: 36px; height: 36px;
+    background: var(--nav-bg);
+    border: 1px solid var(--nav-border);
+    border-radius: 8px;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 34px;
+    text-align: center;
+    color: var(--text);
+    box-shadow: var(--shadow);
+  }
+  .nav-overlay { display: none; }
+
+  /* ===== MAIN CONTENT ===== */
+  main {
+    flex: 1;
+    min-width: 0;
+    padding: 40px 48px;
+    max-width: 900px;
+    scroll-behavior: smooth;
+  }
+
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 12px; color: var(--text); }
+  h2 {
+    font-size: 20px; font-weight: 600; margin-top: 44px; margin-bottom: 12px;
+    color: var(--h2-color); border-bottom: 1px solid var(--h2-border);
+    padding-bottom: 8px; scroll-margin-top: 24px;
+  }
+  h3 { font-size: 16px; font-weight: 600; margin-top: 28px; margin-bottom: 8px; }
+  p { margin: 10px 0; }
+  pre {
+    background: var(--pre-bg); padding: 14px 18px; border-radius: 10px;
+    overflow-x: auto; font-size: 13px; line-height: 1.5; margin: 12px 0;
+  }
+  code {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', monospace; font-size: 13px;
+    background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; }
+  a { color: var(--a-color); text-decoration: none; }
   a:hover { text-decoration: underline; }
   ul, ol { padding-left: 20px; }
   li { margin: 6px 0; }
-  .tip { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
-  .warn { background: #fff3e0; border-left: 4px solid #ff9800; padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .tip {
+    background: var(--tip-bg); border-left: 4px solid var(--tip-border);
+    padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 16px 0;
+  }
+  .warn {
+    background: var(--warn-bg); border-left: 4px solid var(--warn-border);
+    padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 16px 0;
+  }
   table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e5e5ea; font-size: 13px; }
-  th { font-weight: 600; background: #f5f5f7; }
-  .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-  .logo-text { font-size: 24px; font-weight: 800; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--td-border); font-size: 13px; }
+  th { font-weight: 600; background: var(--th-bg); }
   .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-green { background: #e8f5e9; color: #2e7d32; }
-  .badge-blue { background: #e3f2fd; color: #1565c0; }
-  .toc { background: #f5f5f7; border-radius: 10px; padding: 16px 20px; margin: 20px 0; }
-  .toc a { display: block; padding: 3px 0; font-size: 14px; }
+  .badge-green { background: var(--badge-green-bg); color: var(--badge-green-text); }
+  .badge-blue  { background: var(--badge-blue-bg);  color: var(--badge-blue-text); }
   .steps { counter-reset: step-counter; list-style: none; padding-left: 0; }
   .steps li { counter-increment: step-counter; margin: 10px 0; padding-left: 36px; position: relative; }
-  .steps li::before { content: counter(step-counter); position: absolute; left: 0; top: 0; width: 24px; height: 24px; background: #0071e3; color: #fff; border-radius: 12px; text-align: center; font-size: 12px; font-weight: 700; line-height: 24px; }
+  .steps li::before {
+    content: counter(step-counter);
+    position: absolute; left: 0; top: 0;
+    width: 24px; height: 24px; background: var(--a-color); color: #fff;
+    border-radius: 12px; text-align: center; font-size: 12px; font-weight: 700; line-height: 24px;
+  }
+  hr { border: none; border-top: 1px solid var(--nav-border); margin: 32px 0; }
+
+  /* Back to top */
+  .back-top {
+    display: none;
+    position: fixed; bottom: 24px; right: 24px;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--a-color); color: #fff;
+    border: none; cursor: pointer; font-size: 18px;
+    box-shadow: var(--shadow); z-index: 50;
+    transition: opacity 0.2s;
+  }
+  .back-top.show { display: flex; align-items: center; justify-content: center; }
+
+  /* ===== RESPONSIVE ===== */
+  @media (max-width: 860px) {
+    body { flex-direction: column; }
+    nav#sidebar {
+      position: fixed; left: -280px; top: 0; width: 260px; height: 100%;
+      transition: left 0.25s ease; box-shadow: 2px 0 12px rgba(0,0,0,.15);
+    }
+    nav#sidebar.open { left: 0; }
+    .nav-toggle { display: block; }
+    .nav-overlay {
+      display: none;
+      position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 99;
+    }
+    .nav-overlay.show { display: block; }
+    main { padding: 24px 16px; }
+  }
 </style>
 </head>
 <body>
 
-<div class="logo">
-  <span class="logo-text">&#129442; AutoPMX <span style="font-size:16px;font-weight:400;color:#888;">&middot; DuDu PMx Workbench</span></span>
-</div>
+<!-- Mobile toggle -->
+<button class="nav-toggle" onclick="toggleNav()" aria-label="Toggle navigation">☰</button>
+<div class="nav-overlay" id="navOverlay" onclick="toggleNav()"></div>
+
+<!-- ============ SIDEBAR NAVIGATION ============ -->
+<nav id="sidebar">
+  <div class="nav-header">
+    <div class="logo-text">🧬 AutoPMX</div>
+    <div class="subtitle">DuDu PMx Workbench v1.1</div>
+  </div>
+
+  <div class="nav-section-title">Getting Started</div>
+  <a href="#env"><span class="nav-num">0</span> Environment Setup</a>
+  <a href="#context"><span class="nav-num">0a</span> Context Window</a>
+  <a href="#quickstart"><span class="nav-num">1</span> Quick Start</a>
+  <a href="#keyboard"><span class="nav-num">2</span> Keyboard Shortcuts</a>
+
+  <div class="nav-section-title">Workspace</div>
+  <a href="#workspace"><span class="nav-num">3</span> Project Structure</a>
+  <a href="#sidebar-section"><span class="nav-num">4</span> Sidebar &amp; Files</a>
+  <a href="#inspector"><span class="nav-num">5</span> Inspector Panel</a>
+  <a href="#data-preview"><span class="nav-num">6</span> Data Preview</a>
+  <a href="#terminal"><span class="nav-num">7</span> Terminal &amp; Run Log</a>
+
+  <div class="nav-section-title">Execution</div>
+  <a href="#psn"><span class="nav-num">8</span> PsN &amp; NONMEM</a>
+
+  <div class="nav-section-title">AI &amp; Automation</div>
+  <a href="#dudu"><span class="nav-num">9</span> DuDu PMx AI Assistant</a>
+  <a href="#automation"><span class="nav-num">10</span> Automated Modeling</a>
+  <a href="#ga"><span class="nav-num">11</span> GA Optimization</a>
+  <a href="#scm"><span class="nav-num">12</span> SCM Covariate Screening</a>
+
+  <div class="nav-section-title">Configuration</div>
+  <a href="#settings"><span class="nav-num">13</span> Settings</a>
+
+  <div class="nav-section-title">Help</div>
+  <a href="#faq"><span class="nav-num">14</span> FAQ &amp; Troubleshooting</a>
+
+  <div class="nav-footer">
+    <strong>AutoPMX</strong> v1.1.0<br>
+    © 2025&ndash;2026 Graham Ju<br>
+    Changsha Duxact Biotech
+  </div>
+</nav>
+
+<!-- ============ MAIN CONTENT ============ -->
+<main>
 
 <h1>AutoPMX Help &amp; User Guide</h1>
 
 <p>AutoPMX is a native macOS pharmacometrics modeling workbench. It integrates <strong>NONMEM / PsN execution</strong>, <strong>AI-assisted model building</strong> (via DuDu PMx), <strong>genetic algorithm optimization</strong> (parameter + structural search), and <strong>diagnostic visualization</strong> — all powered by local or cloud LLMs.</p>
 
-<!-- ============ TABLE OF CONTENTS ============ -->
-<div class="toc">
-  <strong>Contents</strong>
-  <a href="#quickstart">1. Quick Start</a>
-  <a href="#keyboard">2. Keyboard Shortcuts</a>
-  <a href="#workspace">3. Workspace &amp; Project Structure</a>
-  <a href="#sidebar">4. Sidebar &amp; File Management</a>
-  <a href="#inspector">5. Inspector Panel</a>
-  <a href="#data-preview">6. Data Preview</a>
-  <a href="#terminal">7. Terminal &amp; Run Log</a>
-  <a href="#psn">8. PsN Command &amp; NONMEM Execution</a>
-  <a href="#dudu">9. DuDu PMx AI Assistant</a>
-  <a href="#automation">10. Automated Modeling (DuDu Auto)</a>
-  <a href="#ga">11. GA Optimization</a>
-  <a href="#settings">12. Settings</a>
-  <a href="#faq">13. FAQ &amp; Troubleshooting</a>
+<!-- ============ 0 ============ -->
+<h2 id="env">0. Environment Setup</h2>
+
+<h3>0.1 System Requirements</h3>
+<table>
+  <tr><th>Component</th><th>Requirement</th><th>Notes</th></tr>
+  <tr><td>macOS</td><td>13.0 (Ventura) or later</td><td>Apple Silicon (M1/M2/M3/M4) recommended for local LLM</td></tr>
+  <tr><td>NONMEM</td><td>7.4.0 or later</td><td>Standard academic/commercial installation with <code>nmfe</code> executable</td></tr>
+  <tr><td>PsN</td><td>5.x or later</td><td>Perl-speaks-NONMEM toolkit; the <code>execute</code> command must be in <code>PATH</code></td></tr>
+  <tr><td>Python</td><td>3.8 or later</td><td>Required for diagnostics, audits, GA optimization; <code>.venv</code> recommended</td></tr>
+  <tr><td>R</td><td>4.0 or later</td><td>Rscript must be in <code>PATH</code>; packages: xpose, ggplot2, dplyr</td></tr>
+</table>
+
+<div class="tip">
+  <strong>Auto-detection:</strong> On first launch, AutoPMX scans common install paths (<code>/opt/nm*</code>, <code>/usr/local/bin</code>, <code>which</code>) and pre-fills tool paths. Verify in Settings → Tools.
 </div>
 
-<!-- ============ SECTION 1 ============ -->
-<h2 id="quickstart">1. Quick Start</h2>
+<h3>0.2 Related Applications (关联应用)</h3>
 
+<table>
+  <tr><th>Tool</th><th>Purpose</th><th>Installation</th></tr>
+  <tr><td><strong>XQuartz</strong></td><td>X11 window server — required if NONMEM/FOCE uses graphical output or Xpose/R plots with X11 device</td><td><code>brew install --cask xquartz</code></td></tr>
+  <tr><td><strong>Homebrew</strong></td><td>macOS package manager — installs Python, R, and other dependencies easily</td><td><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></td></tr>
+  <tr><td><strong>Visual Studio Code</strong></td><td>Recommended editor for .mod files — syntax highlighting, terminal integration</td><td><a href="https://code.visualstudio.com" target="_blank">Download</a></td></tr>
+  <tr><td><strong>RStudio</strong></td><td>R IDE — useful for debugging R diagnostic scripts</td><td><a href="https://posit.co" target="_blank">Download</a></td></tr>
+  <tr><td><strong>Ghostscript</strong></td><td>Required for PsN VPC PDF output and R eps-to-pdf conversion</td><td><code>brew install ghostscript</code></td></tr>
+</table>
+
+<h3>0.3 Local LLM Deployment (本地大模型部署)</h3>
+
+<p>AutoPMX supports three local LLM runtimes. You only need <strong>one</strong>. Below are our recommendations:</p>
+
+<h4>🥇 MLX — Recommended (Apple Silicon, Free)</h4>
+<table>
+  <tr><td><strong>What</strong></td><td>Apple's native ML framework — runs LLMs directly on Apple Silicon GPU/Neural Engine with minimal overhead.</td></tr>
+  <tr><td><strong>Install</strong></td><td><code>pip install mlx-lm</code></td></tr>
+  <tr><td><strong>Launch Server</strong></td><td><code>mlx_lm.server --model mlx-community/Qwen2.5-Coder-32B-Instruct-4bit</code></td></tr>
+  <tr><td><strong>API URL</strong></td><td><code>http://127.0.0.1:8080/v1</code></td></tr>
+  <tr><td><strong>Best for</strong></td><td>Apple Silicon Macs (M1 Max / M2 / M3 / M4 with ≥32GB unified memory)</td></tr>
+</table>
+
+<h4>🥈 LM Studio — Easiest (GUI, Free)</h4>
+<table>
+  <tr><td><strong>What</strong></td><td>Desktop app with built-in model browser, download, and one-click local server.</td></tr>
+  <tr><td><strong>Install</strong></td><td><a href="https://lmstudio.ai" target="_blank">Download from lmstudio.ai</a></td></tr>
+  <tr><td><strong>Usage</strong></td><td>Search &amp; download a model → Go to Developer tab → Start Server (port 1234)</td></tr>
+  <tr><td><strong>API URL</strong></td><td><code>http://127.0.0.1:1234/v1</code></td></tr>
+  <tr><td><strong>Best for</strong></td><td>Beginners; any Mac (Intel or Apple Silicon)</td></tr>
+</table>
+
+<h4>🥉 Ollama — CLI (Lightweight, Free)</h4>
+<table>
+  <tr><td><strong>What</strong></td><td>Containerized local LLM runtime — simple CLI, auto-downloads models.</td></tr>
+  <tr><td><strong>Install</strong></td><td><code>brew install ollama</code> or download from <a href="https://ollama.com" target="_blank">ollama.com</a></td></tr>
+  <tr><td><strong>Launch</strong></td><td><code>ollama pull qwen2.5:32b &amp;&amp; ollama serve</code></td></tr>
+  <tr><td><strong>API URL</strong></td><td><code>http://127.0.0.1:11434/v1</code></td></tr>
+  <tr><td><strong>Best for</strong></td><td>Developers comfortable with terminal; headless servers</td></tr>
+</table>
+
+<h2 id="context">0a. Context Window Configuration (上下文窗口设置)</h2>
+
+<div class="tip">
+  <strong>Most common cause of "LLM disconnected" or "model returned garbage":</strong> context window too small. Fix this FIRST before anything else.
+</div>
+
+<h3>0a.1 Why Context Window Matters</h3>
+
+<p>AutoPMX sends large prompts (rules + model files + diagnostics) that can reach 15,000–40,000 tokens. The default context window of many local LLM servers is too small, causing <strong>truncation, hallucination, or connection drops</strong>. You MUST configure it properly.</p>
+
+<h4>Why Context Window Matters</h4>
+<table>
+  <tr><th>Scenario</th><th>Estimated Tokens</th><th>Min Window</th></tr>
+  <tr><td>Chat with DuDu (short Q&amp;A)</td><td>1,000–3,000</td><td>4K</td></tr>
+  <tr><td>Model evaluation + diagnostics</td><td>8,000–15,000</td><td>16K</td></tr>
+  <tr><td>Generate next .mod (full rules + evidence)</td><td>15,000–30,000</td><td>32K</td></tr>
+  <tr><td>Long automation session (multi-turn context)</td><td>20,000–40,000</td><td>64K</td></tr>
+  <tr><td>Full PopPK rules (495 rules) + model + ext + lst</td><td>30,000–60,000</td><td>128K</td></tr>
+</table>
+
+<div class="warn">
+  <strong>Recommended minimum: 32K tokens.</strong> Below 16K, prompts are silently truncated — the LLM sees only partial rules, leading to incorrect model decisions. <strong>128K is ideal</strong> for full automation with complete PopPK rules.
+</div>
+
+<h4>How to Set Context Window</h4>
+
+<div class="warn">
+  <strong>⚠️ 90% of "LLM crashed / disconnected / garbage output" issues are caused by Ollama's default 2048-token context window.</strong><br>
+  AutoPMX sends 15K–60K tokens of rules + model files + diagnostics per request.<br>
+  If context is too small: prompts silently truncated → rules lost → wrong model decisions.<br>
+  <strong>You MUST configure this BEFORE running AutoPMX. It takes 30 seconds.</strong>
+</div>
+
+<h5>Ollama （最易出错 — 务必看完）</h5>
+
+<p>Ollama's <strong>default context is only 2048 tokens</strong> — 99% of AutoPMX requests will exceed this and silently fail. <strong>You MUST override it.</strong></p>
+
+<p><strong>Recommended: 256K context (如果你的 Mac 有 ≥48GB 统一内存)：</strong></p>
+<pre># 1. 先停掉正在运行的 Ollama
+ollama stop
+
+# 2. 重新启动 — 256K 上下文 + 单线程 + 30分钟保活
+OLLAMA_NUM_PARALLEL=1 \
+OLLAMA_CONTEXT_LENGTH=262144 \
+OLLAMA_KEEP_ALIVE=30m \
+ollama serve</pre>
+
+<p><strong>如果你只有 24GB 内存，使用 128K：</strong></p>
+<pre>OLLAMA_NUM_PARALLEL=1 \
+OLLAMA_CONTEXT_LENGTH=131072 \
+OLLAMA_KEEP_ALIVE=30m \
+ollama serve</pre>
+
+<p><strong>Option B: 设置为永久环境变量</strong></p>
+<pre># macOS launchd 环境变量（重启后仍生效）
+launchctl setenv OLLAMA_CONTEXT_LENGTH 262144
+launchctl setenv OLLAMA_NUM_PARALLEL 1
+launchctl setenv OLLAMA_KEEP_ALIVE 30m</pre>
+
+<p><strong>Option C: 通过 Modelfile 固化到模型（最可靠）</strong></p>
+<pre>ollama pull qwen2.5:32b
+
+# 创建 Modelfile：
+cat > /tmp/Modelfile << 'EOF'
+FROM qwen2.5:32b
+PARAMETER num_ctx 262144
+PARAMETER keep_alive 30m
+EOF
+
+ollama create autopmx-qwen -f /tmp/Modelfile
+# 然后在 AutoPMX 里把 Model 改成 autopmx-qwen</pre>
+
+<table>
+  <tr><th>Parameter</th><th>Default</th><th>48GB+ 内存</th><th>24GB 内存</th><th>说明</th></tr>
+  <tr><td><code>OLLAMA_CONTEXT_LENGTH</code></td><td>2048 ❌</td><td>262144</td><td>131072</td><td>AutoPMX 的最小可用值：32768</td></tr>
+  <tr><td><code>OLLAMA_NUM_PARALLEL</code></td><td>4</td><td>1</td><td>1</td><td>单线程避免 GPU 争抢, 稳定性大幅提升</td></tr>
+  <tr><td><code>OLLAMA_KEEP_ALIVE</code></td><td>5m</td><td>30m</td><td>30m</td><td>模型驻留内存, 避免反复加载</td></tr>
+</table>
+
+<h5>🔍 怎么确认 Ollama 的上下文窗口已生效?</h5>
+<pre># 方法1：查询运行中的模型参数
+curl http://localhost:11434/api/show -d '{"name": "qwen2.5:32b"}' | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(f'Context length: {d.get(\"parameters\",\"N/A\")}')
+"
+
+# 方法2：在 DuDu PMx 聊天里问
+"在我回复的末尾加上 CONTEXT_OK_256K 这几个字"
+# 然后等它回复——如果末尾没有这几个字，说明上下文不够大，回复被截断了。</pre>
+
+<div class="tip">
+  <strong>已知问题：</strong>Ollama 即使在 Modelfile 里设置了 num_ctx，<code>ollama serve</code> 启动时不带 <code>OLLAMA_CONTEXT_LENGTH</code> 环境变量，仍然会用 2048 覆盖掉 Modelfile 的值。最保险的做法是 <strong>始终在启动命令里带环境变量 + Modelfile 双重设置</strong>。
+</div>
+
+<h5>MLX</h5>
+<p>MLX auto-detects the model's native context length (e.g., Qwen2.5 supports 128K natively). No manual config needed in most cases:</p>
+<pre># Default launch — context window auto-detected
+mlx_lm.server --model mlx-community/Qwen2.5-Coder-32B-Instruct-4bit
+
+# If you need to override:
+mlx_lm.server --model mlx-community/Qwen2.5-Coder-32B-Instruct-4bit \
+  --max-tokens 32768</pre>
+
+<h5>LM Studio</h5>
+<p>GUI-based. In the model settings panel (right sidebar when model is loaded):</p>
 <ol>
-  <li><strong>Set up LLM</strong> — Open Settings (&#8984;,) &rarr; LLM tab &rarr; choose MLX, LM Studio, Ollama, or add a cloud API provider. Click <strong>Test Connection</strong> to verify.</li>
+  <li>Select your loaded model in the top bar</li>
+  <li>Go to <strong>Settings</strong> tab (right panel)</li>
+  <li>Set <strong>Context Length</strong> to 32768 or higher</li>
+  <li>Set <strong>GPU Offload</strong> layers to maximum</li>
+  <li>Click <strong>Apply</strong> and reload the model</li>
+</ol>
+
+<h5>Cloud APIs (OpenAI / Anthropic / Gemini)</h5>
+<p>Cloud APIs have their own context limits, generally much larger:</p>
+<table>
+  <tr><th>Model</th><th>Context Window</th><th>Cost</th></tr>
+  <tr><td>GPT-4o</td><td>128K</td><td>$2.50/1M input tokens</td></tr>
+  <tr><td>GPT-4o-mini</td><td>128K</td><td>$0.15/1M input tokens</td></tr>
+  <tr><td>Claude Sonnet 4.5</td><td>200K</td><td>$3.00/1M input tokens</td></tr>
+  <tr><td>Gemini 2.5 Pro</td><td>1M</td><td>$1.25/1M input tokens</td></tr>
+</table>
+
+<h4>How to Verify Your Context Window</h4>
+<p>After setting up, ask DuDu PMx in the chat:</p>
+<pre>Repeat this exact sentence at the end of your reply: "CONTEXT_OK_128K"</pre>
+<p>Then send a long message (paste the same text 50 times). If you see "CONTEXT_OK_128K" at the end, your context window is large enough. If it's missing or truncated, the window is too small.</p>
+
+<h3>0.5 Recommended Local Models (推荐模型)</h3>
+
+<p>For PopPK / NONMEM modeling, the model needs strong code generation, mathematical reasoning, and pharmacological knowledge. <strong>≥ 32B parameters recommended.</strong></p>
+
+<table>
+  <tr><th>Model</th><th>Size</th><th>RAM Needed</th><th>Quality</th><th>Provider</th></tr>
+  <tr><td><strong>Qwen3 235B</strong></td><td>235B</td><td>128GB+</td><td>⭐⭐⭐⭐⭐</td><td>MLX (qwen3.6:235b-mlx)</td></tr>
+  <tr><td><strong>Qwen2.5-Coder 32B</strong></td><td>32B</td><td>24GB</td><td>⭐⭐⭐⭐⭐</td><td>MLX / LM Studio / Ollama</td></tr>
+  <tr><td><strong>Qwen2.5 72B</strong></td><td>72B</td><td>48GB</td><td>⭐⭐⭐⭐</td><td>MLX / Ollama</td></tr>
+  <tr><td><strong>DeepSeek-Coder-V2</strong></td><td>16B-236B</td><td>16-128GB</td><td>⭐⭐⭐⭐</td><td>MLX / LM Studio</td></tr>
+  <tr><td><strong>Llama 3.3 70B</strong></td><td>70B</td><td>48GB</td><td>⭐⭐⭐⭐</td><td>MLX / LM Studio / Ollama</td></tr>
+  <tr><td><strong>Qwen2.5 14B</strong></td><td>14B</td><td>12GB</td><td>⭐⭐⭐</td><td>MLX / LM Studio / Ollama</td></tr>
+  <tr><td><strong>Phi-4 14B</strong></td><td>14B</td><td>12GB</td><td>⭐⭐⭐</td><td>MLX / Ollama</td></tr>
+</table>
+
+<div class="warn">
+  <strong>Important:</strong> For NONMEM control stream generation and model evaluation, models below 14B parameters often produce incorrect <code>$PK</code>/<code>$ERROR</code> blocks or hallucinate ADVAN/TRANS combinations. <strong>Always use ≥14B models.</strong> For production use, Qwen2.5-Coder-32B or larger is strongly recommended.
+</div>
+
+<h3>0.5 Cloud LLM Options (云端大模型)</h3>
+
+<p>If local hardware is insufficient, cloud APIs are available:</p>
+<table>
+  <tr><th>Provider</th><th>Recommended Model</th><th>API Format</th><th>Cost</th></tr>
+  <tr><td><strong>OpenAI</strong></td><td>GPT-4o / o3-mini</td><td>OpenAI Compatible</td><td>$$ per token</td></tr>
+  <tr><td><strong>Anthropic</strong></td><td>Claude Sonnet 4.5</td><td>Anthropic Messages</td><td>$$ per token</td></tr>
+  <tr><td><strong>Google</strong></td><td>Gemini 2.5 Pro</td><td>Google Generative AI</td><td>$ per token</td></tr>
+  <tr><td><strong>vLLM / Custom</strong></td><td>Any OpenAI-compatible endpoint</td><td>OpenAI Compatible</td><td>Depends</td></tr>
+</table>
+
+<p>Configure in <strong>Settings → LLM</strong>. Add your API key and click <strong>Test Connection</strong>.</p>
+
+<!-- ============ 1 ============ -->
+<h2 id="quickstart">1. Quick Start</h2>
+<ol>
+  <li><strong>Set up LLM</strong> — Follow <a href="#env">Section 0</a> to deploy a local or cloud LLM. Then verify in Settings → LLM with <strong>Test Connection</strong>.</li>
   <li><strong>Open a project</strong> — Use the toolbar to open an existing PopPK project, or create a new one from a run.</li>
   <li><strong>Select a model</strong> — In the sidebar under "Models", click a <code>run*.mod</code> file to preview it. The Inspector shows parameter estimates if available.</li>
-  <li><strong>Run NONMEM</strong> — The PsN command is auto-populated in the Inspector. Click <strong>Run</strong> (&#8984;&#8617;) to execute.</li>
+  <li><strong>Run NONMEM</strong> — The PsN command is auto-populated in the Inspector. Click <strong>Run</strong> (⌘↩) to execute.</li>
   <li><strong>Review results</strong> — Outputs, figures, and reports appear in the sidebar. Click any file to preview it — images, PDFs, DOCX, and HTML are rendered inline.</li>
 </ol>
 
+<!-- ============ 2 ============ -->
 <h2 id="keyboard">2. Keyboard Shortcuts</h2>
 <table>
   <tr><th>Shortcut</th><th>Action</th></tr>
-  <tr><td>&#8984;R</td><td>Refresh Workspace</td></tr>
-  <tr><td>&#8984;&#8617;</td><td>Run Current Model</td></tr>
-  <tr><td>&#8984;,</td><td>Open Settings</td></tr>
-  <tr><td>&#8984;Q</td><td>Quit AutoPMX</td></tr>
+  <tr><td>⌘R</td><td>Refresh Workspace</td></tr>
+  <tr><td>⌘↩</td><td>Run Current Model</td></tr>
+  <tr><td>⌘,</td><td>Open Settings</td></tr>
+  <tr><td>⌘Q</td><td>Quit AutoPMX</td></tr>
   <tr><td>Enter</td><td>Send message (DuDu PMx input)</td></tr>
 </table>
 
+<!-- ============ 3 ============ -->
 <h2 id="workspace">3. Workspace &amp; Project Structure</h2>
-
 <p>AutoPMX projects live in the <code>AutoPMX_Projects/</code> folder inside your workspace directory. Each project is a self-contained folder with all required files:</p>
-
 <pre>
 Workspace/
-&#9500;&#9472;&#9472; AutoPMX_Projects/
-&#9474;   &#9500;&#9472;&#9472; Demo_mAb_Run41/          &larr; Demo project
-&#9474;   &#9474;   &#9500;&#9472;&#9472; run041.mod
-&#9474;   &#9474;   &#9500;&#9472;&#9472; run041.lst / .ext / .cov
-&#9474;   &#9474;   &#9470;&#9472;&#9472; NM_dat_new.csv
-&#9474;   &#9500;&#9472;&#9472; AutoModel_NMData_*/       &larr; Automation projects (DuDu Auto)
-&#9474;   &#9474;   &#9500;&#9472;&#9472; run001.mod, run002.mod, ...
-&#9474;   &#9474;   &#9500;&#9472;&#9472; run001.lst, run001.ext, ...
-&#9474;   &#9474;   &#9500;&#9472;&#9472; GOF_mod001.jpg, VPC_mod001.jpg
-&#9474;   &#9474;   &#9500;&#9472;&#9472; GA001.mod  &larr; GA-optimized model
-&#9474;   &#9474;   &#9470;&#9472;&#9472; AutoPMX_Best_Model_Summary.md
-&#9474;   &#9470;&#9472;&#9472; ...
-&#9500;&#9472;&#9472; poppk_rules.json            &larr; PopPK rule library (495 rules)
-&#9500;&#9472;&#9472; poppk_model_library.md      &larr; NONMEM ADVAN/TRANS template library
-&#9500;&#9472;&#9472; NM_dat_new.csv              &larr; Default dataset
-&#9500;&#9472;&#9472; autopmx_cli.py              &larr; Python bridge (diagnostics, validation)
-&#9470;&#9472;&#9472; autopmx_ga.py               &larr; GA optimizer script
+├── AutoPMX_Projects/
+│   ├── Demo_mAb_Run41/          ← Demo project
+│   │   ├── run041.mod
+│   │   ├── run041.lst / .ext / .cov
+│   │   └── NM_dat_new.csv
+│   ├── AutoModel_NMData_*/       ← Automation projects (DuDu Auto)
+│   │   ├── run001.mod, run002.mod, ...
+│   │   ├── run001.lst, run001.ext, ...
+│   │   ├── GOF_mod001.jpg, VPC_mod001.jpg
+│   │   ├── GA001.mod  ← GA-optimized model
+│   │   └── AutoPMX_Best_Model_Summary.md
+│   └── ...
+├── poppk_rules.json            ← PopPK rule library (495 rules)
+├── poppk_model_library.md      ← NONMEM ADVAN/TRANS template library
+├── NM_dat_new.csv              ← Default dataset
+├── autopmx_cli.py              ← Python bridge (diagnostics, validation)
+└── autopmx_ga.py               ← GA optimizer script
 </pre>
 
 <h3>File Types in Sidebar</h3>
@@ -118,53 +579,48 @@ Workspace/
   <tr><td>Reports</td><td>.md, .docx</td><td>AI audit reports, model summaries</td></tr>
 </table>
 
-<h2 id="sidebar">4. Sidebar &amp; File Management</h2>
-
+<!-- ============ 4 ============ -->
+<h2 id="sidebar-section">4. Sidebar &amp; File Management</h2>
 <h3>Sidebar Categories</h3>
 <p>Files are organized by type: <strong>Models</strong>, <strong>Outputs</strong>, <strong>Data</strong>, <strong>Figures</strong>, <strong>Reports</strong>, <strong>Scripts</strong>. Each category has its own collapsible section.</p>
 
 <h3>Context Menu Operations</h3>
 <p>Right-click any file to access:</p>
 <ul>
-  <li><strong>Run NONMEM via PsN —</strong> Execute the selected .mod file</li>
-  <li><strong>&#129518; GA Optimize —</strong> Run genetic algorithm to optimize THETA initial estimates</li>
-  <li><strong>&#129518; GA Structure Search —</strong> Run hybrid GA to search model structure + THETA</li>
-  <li><strong>Run GOF / VPC / Individual DV-Time —</strong> Generate diagnostic plots via R</li>
-  <li><strong>Run Full Diagnostic Suite —</strong> GOF + VPC + individual + PK parameters + audits</li>
-  <li><strong>Run Bootstrap / Run SCM —</strong> Advanced diagnostics</li>
-  <li><strong>AI Evaluate This Model —</strong> Let DuDu PMx assess the model</li>
+  <li><strong>Run NONMEM via PsN</strong> — Execute the selected .mod file</li>
+  <li><strong>🧬 GA Optimize</strong> — Run genetic algorithm to optimize THETA initial estimates</li>
+  <li><strong>🧬 GA Structure Search</strong> — Run hybrid GA to search model structure + THETA</li>
+  <li><strong>Run GOF / VPC / Individual DV-Time</strong> — Generate diagnostic plots via R</li>
+  <li><strong>Run Full Diagnostic Suite</strong> — GOF + VPC + individual + PK parameters + audits</li>
+  <li><strong>Run Bootstrap / <a href="#scm">SCM Covariate Screening</a></strong> — Advanced diagnostics (see <a href="#scm">section 12</a>)</li>
+  <li><strong>AI Evaluate This Model</strong> — Let DuDu PMx assess the model</li>
   <li><strong>Pin / Reveal in Finder / Move to Trash</strong></li>
 </ul>
 
 <h3>Data vs Output Tables</h3>
 <p>AutoPMX automatically distinguishes <strong>modeling datasets</strong> (like <code>NM_dat_new.csv</code>) from <strong>NONMEM table outputs</strong> (like <code>SDTAB001</code>, <code>PATAB001</code>). Only modeling datasets appear in the DuDu Auto dataset picker. Table outputs are filtered out automatically.</p>
 
+<!-- ============ 5 ============ -->
 <h2 id="inspector">5. Inspector Panel</h2>
-
 <h3>Run Configuration</h3>
 <p>Shows the current <strong>Previous</strong>, <strong>Current</strong>, and <strong>Data</strong> file being used for model execution. The Data field reflects the active dataset for the selected model.</p>
-
 <h3>PsN Command</h3>
 <p>An editable PsN command line. The <strong>Suggest</strong> button generates the default <code>execute run###.mod -model_dir_name</code> command. The <strong>Run</strong> button executes the command.</p>
-
 <h3>Checks</h3>
 <p>Real-time validation of: model files presence, data path correctness, and PsN command format.</p>
-
 <h3>Parameter Estimates</h3>
 <p>When a model with a successful run is selected, this table shows the final THETA, OMEGA, and SIGMA estimates parsed from <code>run###.ext</code>.</p>
-
 <h3>GA Optimization</h3>
 <p>Two buttons in the Parameter Estimates section:</p>
 <ul>
-  <li><strong>&#129518; GA Optimize —</strong> Parameter-only optimization (200 NONMEM runs). Output: <code>GA###.mod</code> + <code>GA###_population.csv</code>.</li>
-  <li><strong>&#129518; GA Structure —</strong> Structural + parameter search (50 NONMEM runs). Searches ADVAN, error model, IIV, covariates.</li>
+  <li><strong>🧬 GA Optimize</strong> — Parameter-only optimization (200 NONMEM runs). Output: <code>GA###.mod</code> + <code>GA###_population.csv</code>.</li>
+  <li><strong>🧬 GA Structure</strong> — Structural + parameter search (50 NONMEM runs). Searches ADVAN, error model, IIV, covariates.</li>
 </ul>
-
 <h3>LLM Provider Status</h3>
 <p>Shows the active LLM provider with connection status (green dot = connected).</p>
 
+<!-- ============ 6 ============ -->
 <h2 id="data-preview">6. Data Preview</h2>
-
 <h3>CSV Table View</h3>
 <p>When you click any CSV file in the sidebar, AutoPMX shows an Excel-style grid preview with:</p>
 <ul>
@@ -175,7 +631,6 @@ Workspace/
   <li>Horizontal and vertical scrolling</li>
   <li>Up to 200 rows shown (with truncation notice for large files)</li>
 </ul>
-
 <h3>Other File Types</h3>
 <ul>
   <li><strong>Images</strong> (PNG, JPG) — Pinch-to-zoom, fit-to-window. Click to toggle zoom.</li>
@@ -183,8 +638,8 @@ Workspace/
   <li><strong>Text</strong> (.mod, .lst, .ext, .md, .R, .py) — Monospaced text preview.</li>
 </ul>
 
+<!-- ============ 7 ============ -->
 <h2 id="terminal">7. Terminal &amp; Run Log</h2>
-
 <p>The bottom panel shows a real-time terminal with:</p>
 <ul>
   <li><strong>Command output</strong> from NONMEM, PsN, Python bridge scripts</li>
@@ -193,29 +648,26 @@ Workspace/
   <li><strong>Clear / Copy / Stop</strong> toolbar buttons</li>
 </ul>
 
+<!-- ============ 8 ============ -->
 <h2 id="psn">8. PsN Command &amp; NONMEM Execution</h2>
-
 <h3>Default Command</h3>
 <pre>execute run###.mod -model_dir_name</pre>
-
 <h3>How it works</h3>
 <ol>
   <li>Select a .mod file in the sidebar</li>
   <li>The PsN command auto-populates in the Inspector</li>
   <li>Edit if needed (e.g., add <code>-retries=3</code> or change flags)</li>
-  <li>Click <strong>Run</strong> or press &#8984;&#8617;</li>
+  <li>Click <strong>Run</strong> or press ⌘↩</li>
   <li>Output appears in the Terminal panel</li>
   <li>New .lst, .ext, .cov files appear in the sidebar</li>
 </ol>
-
 <div class="tip">
   <strong>Tip:</strong> If you right-click a GA-optimized model (<code>GA###.mod</code>), the PsN command automatically points to the correct file (<code>execute GA###.mod</code>), not the original <code>run###.mod</code>.
 </div>
 
+<!-- ============ 9 ============ -->
 <h2 id="dudu">9. DuDu PMx AI Assistant</h2>
-
-<p>Click the floating <span class="badge badge-blue">&#129504; DuDu PMx</span> button at the bottom-right corner to open the AI chat panel.</p>
-
+<p>Click the floating <span class="badge badge-blue">🧠 DuDu PMx</span> button at the bottom-right corner to open the AI chat panel.</p>
 <h3>Chat Interface</h3>
 <ul>
   <li><strong>Enter</strong> — Send message (or click the blue arrow button)</li>
@@ -224,35 +676,32 @@ Workspace/
   <li><strong>Right-click a bubble</strong> — Context menu to copy or fill into input</li>
   <li>Ask questions about model diagnostics, NONMEM syntax, PsN commands, or PopPK reasoning</li>
 </ul>
-
 <h3>Header Controls</h3>
 <ul>
   <li><strong>DuDu Auto</strong> — Start automated stepwise model building</li>
   <li><strong>Stop</strong> (red, visible during automation) — Gracefully halt the automation loop</li>
-  <li><strong>&times;</strong> — Close the panel</li>
+  <li><strong>×</strong> — Close the panel</li>
 </ul>
-
 <h3>Thinking Timeline</h3>
 <p>During automation, DuDu shows a collapsible "thinking steps" timeline at the top of the chat. Click to expand/collapse. Each step shows:</p>
 <ul>
-  <li>&#128309; Working — Step in progress</li>
-  <li>&#128994; Done — Step completed</li>
-  <li>&#128308; Error — Step failed</li>
-  <li>&#128992; Pending — Not yet started</li>
+  <li>🔵 Working — Step in progress</li>
+  <li>🟢 Done — Step completed</li>
+  <li>🔴 Error — Step failed</li>
+  <li>🟠 Pending — Not yet started</li>
 </ul>
 
+<!-- ============ 10 ============ -->
 <h2 id="automation">10. Automated Modeling (DuDu Auto)</h2>
-
 <p>DuDu Auto performs iterative stepwise PopPK model building driven by AI:</p>
-
 <ol class="steps">
   <li><strong>Analyze Dataset</strong> — DuDu reads the CSV to detect administration route (IV Bolus, IV Infusion, Oral, or Mixed), subject count, dose levels, and available covariates.</li>
   <li><strong>Generate Initial Model</strong> — Writes <code>run001.mod</code> using the appropriate PopPK template from the model library (1-compartment, route-matched ADVAN/TRANS).</li>
   <li><strong>Run NONMEM</strong> — Executes the model. If it fails, DuDu reads the LST/FMSG error messages and repairs the control stream before trying again.</li>
   <li><strong>Run Diagnostics</strong> — Only if the model runs successfully: GOF plots, VPC, individual plots, PK parameter extraction, and AI audits.</li>
   <li><strong>AI Evaluation</strong> — DuDu evaluates diagnostics and decides to <strong>ACCEPT</strong> or <strong>REVISE</strong> based on FDA guidance criteria.</li>
-  <li><strong>Model Evolution</strong> — If REVISE, DuDu proposes exactly ONE change (add compartment, refine error model, add IIV, screen covariate) following strict escalation priority.</li>
-  <li><strong>Repeat</strong> — Up to 6 iterations, or until acceptance criteria are met.</li>
+  <li><strong>Model Evolution</strong> — If REVISE, DuDu proposes exactly ONE change (add compartment, refine error model, add IIV, screen covariate) following strict escalation priority. Initial THETA values are inherited from the previous run's final estimates, with small upward perturbation — no arbitrary resets.</li>
+  <li><strong>Repeat</strong> — Up to 12 iterations, or until acceptance criteria are met.</li>
   <li><strong>Best Model Selection</strong> — After completion, AutoPMX automatically selects the best model based on minimization success, covariance step, and OFV.</li>
 </ol>
 
@@ -267,12 +716,21 @@ Workspace/
 <h3>Model Evolution Priority</h3>
 <table>
   <tr><th>Pass</th><th>Action</th><th>Guidance</th></tr>
-  <tr><td>1</td><td>Refine structural model</td><td>1-comp &rarr; 2-comp if GOF/VPC shows distribution phase misspecification</td></tr>
+  <tr><td>1</td><td>Refine structural model</td><td>1-comp → 2-comp if GOF/VPC shows distribution phase misspecification</td></tr>
   <tr><td>2</td><td>Refine error model</td><td>Combined is default; simplify only if one component is unsupported</td></tr>
   <tr><td>3</td><td>Add IIV</td><td>One parameter at a time (CL first, then V); eta-shrinkage &lt; 30%</td></tr>
   <tr><td>4</td><td>Screen covariates</td><td>WT on CL/V, then AGE, SEX, STUDY; OFV drop &gt; 3.84</td></tr>
   <tr><td>5</td><td>Bioavailability</td><td>F1 only when both oral and IV data exist</td></tr>
 </table>
+
+<h3>Parameter Inheritance (稳定性策略)</h3>
+<p>每个新模型的初始参数值<strong>以上一轮输出估计值的向上取整为基础</strong>，不做任意重置：</p>
+<ul>
+  <li><strong>直接复制</strong> — 同一含义参数取上一轮 final estimate，向上取整到 3 位有效数字</li>
+  <li><strong>微小扰动</strong> — 新增参数取邻近参数的较小比例（如升级房室时 Q = CL × 0.5~0.8）</li>
+  <li><strong>禁止回退</strong> — 不重置为任意整数（0.1、1、10、100），收敛值就是最好的起点</li>
+  <li><strong>Omega/Sigma 继承</strong> — 复制上一轮方差初始值，新 ETA 从 0.04~0.09 起步</li>
+</ul>
 
 <h3>Acceptance Criteria</h3>
 <ul>
@@ -287,22 +745,21 @@ Workspace/
   <strong>Important:</strong> If a NONMEM run fails, DuDu will <em>not</em> run diagnostics (GOF/VPC). Instead, it reads the LST error messages and attempts to fix the control stream before trying again. This saves time and avoids broken diagnostic plots.
 </div>
 
+<!-- ============ 11 ============ -->
 <h2 id="ga">11. GA Optimization</h2>
-
 <h3>GA Initial Estimate Optimization</h3>
-<p><strong>Entry:</strong> Right-click any run*.mod &rarr; <code>&#129518; GA Optimize</code>, or click the button in the Inspector's Parameter Estimates section.</p>
-<p><strong>What it does:</strong> Uses a built-in genetic algorithm to search for better THETA initial estimates. Each candidate is evaluated by running NONMEM. Fitness = &minus;OFV + success bonus &minus; diagnostic penalties. THETA values use <code>(0, mid)</code> format (lower bound fixed to 0).</p>
-
+<p><strong>Entry:</strong> Right-click any run*.mod → <code>🧬 GA Optimize</code>, or click the button in the Inspector's Parameter Estimates section.</p>
+<p><strong>What it does:</strong> Uses a built-in genetic algorithm to search for better THETA initial estimates. Each candidate is evaluated by running NONMEM. Fitness = −OFV + success bonus − diagnostic penalties. THETA values use <code>(0, mid)</code> format (lower bound fixed to 0).</p>
 <table>
   <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
   <tr><td>Population size</td><td>20</td><td>Individuals per generation</td></tr>
   <tr><td>Iterations</td><td>10</td><td>Number of generations</td></tr>
   <tr><td>Elite ratio</td><td>0.2</td><td>Top fraction preserved each generation</td></tr>
-  <tr><td>Estimated runs</td><td>200</td><td>population &times; iterations</td></tr>
+  <tr><td>Estimated runs</td><td>200</td><td>population × iterations</td></tr>
 </table>
 
 <h3>GA Structural Search</h3>
-<p><strong>Entry:</strong> Right-click any run*.mod &rarr; <code>&#129518; GA Structure Search</code>, or click the button in the Inspector.</p>
+<p><strong>Entry:</strong> Right-click any run*.mod → <code>🧬 GA Structure Search</code>, or click the button in the Inspector.</p>
 <p><strong>What it does:</strong> Hybrid GA that simultaneously searches model structure AND optimizes THETA values:</p>
 <ul>
   <li><strong>ADVAN / Compartments</strong> — 1-comp, 2-comp, or 3-comp (route-locked)</li>
@@ -310,34 +767,90 @@ Workspace/
   <li><strong>IIV</strong> — Which parameters get ETA terms + diagonal vs block OMEGA</li>
   <li><strong>Covariates</strong> — WT on CL/V, AGE, SEX, STUDY</li>
 </ul>
-
 <table>
   <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
   <tr><td>Population size</td><td>10</td><td>Individuals per generation</td></tr>
   <tr><td>Iterations</td><td>5</td><td>Number of generations</td></tr>
   <tr><td>Elite ratio</td><td>0.2</td><td>Top fraction preserved</td></tr>
-  <tr><td>Estimated runs</td><td>50</td><td>population &times; iterations</td></tr>
+  <tr><td>Estimated runs</td><td>50</td><td>population × iterations</td></tr>
 </table>
-
 <h3>Output</h3>
 <ul>
   <li><code>GA###.mod</code> — Best model with optimal structure + THETA values</li>
   <li><code>GA###_population.csv</code> — All candidates with genes, values, and fitness for comparison</li>
 </ul>
-
 <h3>Prerequisites</h3>
 <ul>
-  <li>Settings &rarr; Tools &rarr; NONMEM Path configured (nmfe)</li>
-  <li>Settings &rarr; Tools &rarr; Python Environment configured (Python 3.8+)</li>
+  <li>Settings → Tools → NONMEM Path configured (nmfe)</li>
+  <li>Settings → Tools → Python Environment configured (Python 3.8+)</li>
   <li>No external Python packages required (built-in GA engine)</li>
   <li>Target run*.mod must have completed NONMEM successfully at least once</li>
 </ul>
 
-<h2 id="settings">12. Settings</h2>
+<!-- ============ 12 ============ -->
+<h2 id="scm">12. SCM Covariate Screening (PsN)</h2>
+<p>SCM (Stepwise Covariate Model) is PsN's automated covariate selection tool. AutoPMX provides a user-friendly dialog to configure statistical thresholds and generates the PsN configuration file automatically via AI.</p>
 
+<h3>What SCM Does</h3>
+<ul>
+  <li><strong>Forward inclusion</strong> &mdash; tests each covariate one at a time, adding the most significant one if it passes the inclusion p-value threshold.</li>
+  <li><strong>Backward elimination</strong> &mdash; after each forward step, checks if any included covariates can be removed at the stricter elimination threshold.</li>
+  <li>Outputs a final model with the optimal covariate combination and a step-by-step results table.</li>
+</ul>
+
+<h3>How to Launch SCM</h3>
+<ul>
+  <li><strong>Quick Actions Bar</strong> &mdash; Click the <span class="kbd">SCM</span> button in the DuDu PMx chat panel's quick action bar.</li>
+  <li><strong>Right-Click Menu</strong> &mdash; Right-click any model file (<code>run*.mod</code>) in the sidebar and select <strong>SCM</strong>. This opens the configuration dialog with that model pre-selected.</li>
+  <li><strong>Chat with DuDu</strong> &mdash; Type "SCM" or "协变量筛选" in the chat; DuDu will open the configuration dialog.</li>
+</ul>
+
+<h3>Configuration Dialog</h3>
+<p>The SCM setup dialog lets you choose the base model, dataset, and statistical thresholds:</p>
+<table>
+  <tr><th>Option</th><th>Description</th></tr>
+  <tr><td><strong>Base Model</strong></td><td>Select which <code>run*.mod</code> to use as the starting model.</td></tr>
+  <tr><td><strong>Dataset</strong></td><td>Select the CSV data file (defaults to the project's dataset).</td></tr>
+  <tr><td><strong>Forward Inclusion p</strong></td><td>p-value for adding covariates: <strong>0.05</strong> (&Delta;OFV&nbsp;&gt;&nbsp;3.84), <strong>0.01</strong> (&Delta;OFV&nbsp;&gt;&nbsp;6.63), or <strong>0.001</strong> (&Delta;OFV&nbsp;&gt;&nbsp;10.83).</td></tr>
+  <tr><td><strong>Backward Elimination p</strong></td><td>p-value for removing covariates: <strong>0.01</strong> (&Delta;OFV&nbsp;&gt;&nbsp;6.63) or <strong>0.001</strong> (&Delta;OFV&nbsp;&gt;&nbsp;10.83). Must be &le; forward p.</td></tr>
+</table>
+
+<div class="info">
+  <strong>&Delta;OFV Reference:</strong> The &chi;&sup2; critical values (1 df) are p=0.05 &rarr; 3.84, p=0.01 &rarr; 6.63, p=0.001 &rarr; 10.83. A covariate must decrease OFV by more than this threshold to be included or retained.
+</div>
+
+<div class="warn">
+  <strong>Constraint:</strong> The backward elimination p-value <strong>cannot exceed</strong> the forward inclusion p-value. AutoPMX automatically clamps the backward value and filters invalid options from the picker. When p-forward equals p-backward, the search direction is set to forward-only.
+</div>
+
+<h3>How It Works</h3>
+<ol>
+  <li>AutoPMX copies the base model and dataset into a <code>SCM_run{<em>N</em>}/</code> subdirectory.</li>
+  <li>AI analyzes the model's <code>$INPUT</code> line and <code>$PK</code> block to detect covariates (AGE, WT, SEX, STUD) and parameters with IIV (CL, V, etc.).</li>
+  <li>AutoPMX writes <code>runCONCOV{<em>N</em>}.scm</code> with the correct covariate lists, test relations, valid_states, and your chosen p-values.</li>
+  <li>PsN <code>scm</code> is executed with the generated config file and base model.</li>
+  <li>If the run fails, AutoPMX diagnoses the error and attempts to auto-fix the configuration (up to 2 retries) using PPK knowledge from previous sessions.</li>
+</ol>
+
+<h3>Results</h3>
+<p>After completion, results are available in:</p>
+<ul>
+  <li><code>SCM_run{<em>N</em>}/scm_results.csv</code> &mdash; the main results table: each step's OFV change, covariate tested, and whether it was included or dropped.</li>
+  <li><code>SCM_run{<em>N</em>}/scm_final.xml</code> &mdash; the final NONMEM control file with selected covariates.</li>
+  <li><code>SCM_run{<em>N</em>}/scm_log.txt</code> &mdash; full PsN SCM execution log.</li>
+  <li><strong>DuDu Chat Panel</strong> &mdash; summary of the run with exit status and p-value settings used.</li>
+</ul>
+
+<div class="info">
+  <strong>Stop/Restart:</strong> While SCM is running, a red <strong>Stop</strong> button appears in the quick actions bar. Click it to terminate the running process at any time.
+</div>
+
+<!-- ============ 13 ============ -->
+<h2 id="settings">13. Settings</h2>
 <h3>General</h3>
+<p><strong>Language:</strong> Switch between 中文 and English.</p>
 <p><strong>Appearance:</strong> Choose System (follow macOS), Light, or Dark mode.</p>
-
+<p><strong>Particle Effects:</strong> Toggle liquid glass hover particle animations and adjust particle count for performance.</p>
 <h3>LLM Providers</h3>
 <ul>
   <li><strong>MLX (Apple Silicon)</strong> — Local models via MLX at <code>http://127.0.0.1:8080/v1</code>. Supports qwen3.6:35b-mlx and others.</li>
@@ -354,6 +867,8 @@ Workspace/
   <li><strong>PsN (execute)</strong> — Path to the PsN command. Auto-detected or browsable.</li>
   <li><strong>Python Environment</strong> — Detected from workspace <code>.venv</code> or system Python.</li>
   <li><strong>R (Rscript)</strong> — Path to Rscript for diagnostic plot generation.</li>
+  <li><strong>File Viewers</strong> — macOS QuickLook for images, PDF, DOCX, XLSX, PPTX, HTML.</li>
+  <li><strong>Default Dataset Filename</strong> — CSV used when creating new projects (default: NM_dat_new.csv).</li>
 </ul>
 
 <h3>Rules</h3>
@@ -371,7 +886,8 @@ Workspace/
   <strong>Note:</strong> The Rules JSON field has been moved to Settings. Dataset configuration is per-project via the Data field in Run Configuration — different projects can use different datasets.
 </div>
 
-<h2 id="faq">13. FAQ &amp; Troubleshooting</h2>
+<!-- ============ 14 ============ -->
+<h2 id="faq">14. FAQ &amp; Troubleshooting</h2>
 
 <h3>Q: NONMEM reports "WARNING 23: $PK DOES NOT DEFINE A SCALE PARAMETER"</h3>
 <p>Your $PK block is missing <code>S1=V/1000</code> (IV models) or <code>S2=V/1000</code> (oral models). Add the scale parameter after defining V. AutoPMX's GA optimizer automatically injects this if missing.</p>
@@ -380,44 +896,111 @@ Workspace/
 <p>NONMEM's gradient search is exploring negative parameter values for CL or V. The model still converges — these are intermediate search steps, not final estimates. Check the final parameter table in the .lst file.</p>
 
 <h3>Q: GA-optimized model won't run via right-click</h3>
-<p>This is fixed in the current version. <code>GA###.mod</code> files are now recognized correctly and the PsN command points to the right file.</p>
+<p><code>GA###.mod</code> files are now recognized correctly and the PsN command points to the right file.</p>
 
 <h3>Q: DuDu Auto keeps oscillating between two error models</h3>
-<p>Anti-oscillation rules now prevent DuDu from proposing toggling changes (e.g., remove IIV &rarr; re-add IIV) in consecutive iterations. If the model with fewer parameters has a working covariance step, it is preferred.</p>
+<p>Anti-oscillation rules now prevent DuDu from proposing toggling changes (e.g., remove IIV → re-add IIV) in consecutive iterations. If the model with fewer parameters has a working covariance step, it is preferred.</p>
 
 <h3>Q: "Covariance step failed / ERROR=134" — is the model still usable?</h3>
 <p>If minimization succeeded but covariance failed (R-matrix non-positive-definite), the parameter estimates are valid but their standard errors are unreliable. DuDu Auto now treats covariance failure as needing repair. Consider simplifying the model (remove one IIV term or simplify the error model).</p>
 
 <h3>Q: How do I switch between light and dark mode?</h3>
-<p>Settings &rarr; General &rarr; Appearance. Choose System, Light, or Dark.</p>
+<p>Settings → General → Appearance. Choose System, Light, or Dark.</p>
 
 <h3>Q: Where are the rule files?</h3>
-<p>All rules are configured in Settings &rarr; Rules. The Rules JSON field in the Inspector has been removed to avoid confusion — rule sources belong in Settings.</p>
+<p>All rules are configured in Settings → Rules. Rule sources belong in Settings.</p>
 
+<!-- ============ ABOUT ============ -->
 <h2>About AutoPMX</h2>
-
 <p><strong>AutoPMX</strong> (Auto Pharmacometrics) is a native macOS application for population pharmacokinetic (PopPK) and pharmacodynamic modeling. It wraps the industry-standard NONMEM and PsN tools with a modern SwiftUI interface, providing AI-assisted model building through local large language models.</p>
-
 <p><strong>Key Features:</strong></p>
 <ul>
   <li>One-click NONMEM execution with real-time terminal output</li>
-  <li>AI-driven automated model building (DuDu Auto) with up to 6 iterations of stepwise refinement</li>
+  <li>AI-driven automated model building (DuDu Auto) with up to 12 iterations of stepwise refinement</li>
+  <li>Parameter inheritance strategy — each iteration builds on previous final estimates with upward perturbation</li>
   <li>Genetic algorithm optimization for initial estimates AND model structure</li>
   <li>Integrated diagnostic visualization (GOF, VPC, individual plots, PK parameters)</li>
   <li>Multi-provider LLM support (MLX, LM Studio, Ollama, OpenAI, Anthropic, Gemini, custom)</li>
   <li>macOS-native design with dark mode, iMessage-style chat, and liquid glass effects</li>
 </ul>
-
-<p><strong>Technology Stack:</strong> Swift 5.9+ &middot; SwiftUI &middot; macOS 13+ &middot; NONMEM 7.4+ &middot; PsN &middot; Python 3.8+ &middot; R 4+</p>
-
+<p><strong>Technology Stack:</strong> Swift 5.9+ · SwiftUI · macOS 13+ · NONMEM 7.4+ · PsN · Python 3.8+ · R 4+</p>
 <hr>
-
 <p><strong>Author:</strong> Graham Ju<br>
+<strong>Email:</strong> <a href="mailto:jugehang1995@163.com">jugehang1995@163.com</a><br>
 <strong>Company:</strong> Changsha Duxact Biotechnology Co., Ltd.<br>
 <strong>Version:</strong> 1.1.0<br>
-<strong>Built:</strong> SwiftUI &middot; macOS 13+</p>
+<strong>Built:</strong> SwiftUI · macOS 13+</p>
+<p>© 2025–2026 Graham Ju. All rights reserved.</p>
 
-<p>&copy; 2025&ndash;2026 Graham Ju. All rights reserved.</p>
+</main>
+
+<!-- Back to top button -->
+<button class="back-top" id="backTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">↑</button>
+
+<script>
+  // ===== SIDEBAR HIGHLIGHT & SCROLL TRACKING =====
+  const navLinks = document.querySelectorAll('nav#sidebar a[href^="#"]');
+  const sections = [];
+  navLinks.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ el, a });
+  });
+
+  function updateActive() {
+    let current = sections[0];
+    const scrollY = window.scrollY + 100;
+    for (const s of sections) {
+      if (s.el.offsetTop <= scrollY) current = s;
+    }
+    navLinks.forEach(a => a.classList.remove('active'));
+    if (current) current.a.classList.add('active');
+
+    // Scroll sidebar to show active link
+    const sidebar = document.getElementById('sidebar');
+    const activeLink = current ? current.a : null;
+    if (activeLink && sidebar.scrollHeight > sidebar.clientHeight) {
+      const linkTop = activeLink.offsetTop;
+      const linkBot = linkTop + activeLink.offsetHeight;
+      if (linkBot > sidebar.scrollTop + sidebar.clientHeight || linkTop < sidebar.scrollTop) {
+        sidebar.scrollTop = linkTop - sidebar.clientHeight / 3;
+      }
+    }
+  }
+
+  window.addEventListener('scroll', updateActive, { passive: true });
+  window.addEventListener('load', updateActive);
+
+  // ===== BACK TO TOP =====
+  const backTop = document.getElementById('backTop');
+  window.addEventListener('scroll', () => {
+    backTop.classList.toggle('show', window.scrollY > 600);
+  }, { passive: true });
+
+  // ===== MOBILE NAV TOGGLE =====
+  function toggleNav() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('navOverlay').classList.toggle('show');
+  }
+
+  // Close nav when a link is clicked (mobile)
+  navLinks.forEach(a => {
+    a.addEventListener('click', () => {
+      if (window.innerWidth <= 860) toggleNav();
+    });
+  });
+
+  // ===== SMOOTH SCROLL ANCHOR =====
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+</script>
 
 </body>
 </html>

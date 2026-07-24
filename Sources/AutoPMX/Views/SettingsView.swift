@@ -17,6 +17,7 @@ extension View {
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general = "General"
+    case chat = "Chat"
     case llm = "LLM"
     case tools = "Tools"
     case rules = "Rules"
@@ -26,6 +27,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "switch.2"
+        case .chat: return "message.badge"
         case .llm: return "cpu"
         case .tools: return "wrench.and.screwdriver"
         case .rules: return "book.pages"
@@ -37,6 +39,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @EnvironmentObject private var store: WorkbenchStore
+    @ObservedObject private var lang = LanguageStore.shared
     @State private var selectedTab: SettingsTab = .llm
 
     var body: some View {
@@ -60,6 +63,7 @@ struct SettingsView: View {
             // Content
             switch selectedTab {
             case .general: GeneralSettingsPane()
+            case .chat: DuDuPersonalityPane()
             case .llm: LLMSettingsPane()
             case .tools: ToolsSettingsPane()
             case .rules: RulesSettingsPane()
@@ -125,25 +129,119 @@ struct SettingsTabButton: View {
 
 struct GeneralSettingsPane: View {
     @EnvironmentObject private var store: WorkbenchStore
+    @ObservedObject private var lang = LanguageStore.shared
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("General").font(.system(size: 16, weight: .bold))
+                Text(L10n.general).font(.system(size: 16, weight: .bold))
                 Divider()
 
+                // Language
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.language).font(.system(size: 12, weight: .semibold))
+                    Picker(L10n.selectLanguage, selection: Binding<AppLanguage>(
+                        get: { LanguageStore.shared.language },
+                        set: {
+                            LanguageStore.shared.setLanguage($0)
+                            store.appLanguage = $0
+                        }
+                    )) {
+                        ForEach(AppLanguage.allCases) { languageOption in
+                            Text(languageOption.displayName).tag(languageOption)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 200)
+                }
+
+                Divider()
+
+                // Appearance
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Appearance").font(.system(size: 12, weight: .semibold))
+                    Text(L10n.appearance).font(.system(size: 12, weight: .semibold))
 
                     HStack(spacing: 12) {
-                        ThemeButton(mode: "system", icon: "circle.lefthalf.filled", label: "跟随系统", isSelected: store.colorSchemeMode == "system") {
+                        ThemeButton(mode: "system", icon: "circle.lefthalf.filled", label: L10n.followSystem, isSelected: store.colorSchemeMode == "system") {
                             store.setColorSchemeMode("system")
                         }
-                        ThemeButton(mode: "light", icon: "sun.max.fill", label: "浅色", isSelected: store.colorSchemeMode == "light") {
+                        ThemeButton(mode: "light", icon: "sun.max.fill", label: L10n.lightTheme, isSelected: store.colorSchemeMode == "light") {
                             store.setColorSchemeMode("light")
                         }
-                        ThemeButton(mode: "dark", icon: "moon.fill", label: "深色", isSelected: store.colorSchemeMode == "dark") {
+                        ThemeButton(mode: "dark", icon: "moon.fill", label: L10n.darkTheme, isSelected: store.colorSchemeMode == "dark") {
                             store.setColorSchemeMode("dark")
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Particle effects
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L10n.particleEffects).font(.system(size: 12, weight: .semibold))
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.particleEffectsEnable)
+                                .font(.system(size: 12))
+                            Text(L10n.particleEffectsDesc)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $store.particleEffectsEnabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+
+                    if store.particleEffectsEnabled {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(L10n.particleCount)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                ForEach([10, 30, 100, 1000, 10000], id: \.self) { count in
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.15)) {
+                                            store.particleCount = count
+                                        }
+                                    } label: {
+                                        VStack(spacing: 3) {
+                                            Text("\(count)")
+                                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                            Text(count <= 30 ? L10n.particleLite : count <= 100 ? L10n.particleStandard : L10n.particlePerformance)
+                                                .font(.system(size: 9))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .frame(width: 64, height: 42)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .fill(store.particleCount == count
+                                                      ? Color.blue.opacity(0.10)
+                                                      : Color.primary.opacity(0.03))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .stroke(store.particleCount == count
+                                                        ? Color.blue.opacity(0.35) : Color.primary.opacity(0.08),
+                                                        lineWidth: store.particleCount == count ? 1.2 : 0.6)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+
+                            // Particle preview
+                            ParticlePreview(count: store.particleCount, enabled: store.particleEffectsEnabled)
+                                .frame(height: 48)
+                                .background(.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(.primary.opacity(0.06), lineWidth: 0.5)
+                                )
+                                .padding(.top, 4)
                         }
                     }
                 }
@@ -199,13 +297,13 @@ struct LLMSettingsPane: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("LLM Providers")
+                Text(L10n.settingsLLM)
                     .font(.system(size: 14, weight: .bold))
                 Spacer()
                 Button {
                     startAddingProvider()
                 } label: {
-                    Label("Add Provider", systemImage: "plus")
+                    Label(L10n.settingsAddProvider, systemImage: "plus")
                         .font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.bordered)
@@ -289,9 +387,9 @@ struct LLMSettingsPane: View {
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(provider.name.isEmpty ? "Unnamed" : provider.name)
+                    Text(provider.name.isEmpty ? L10n.settingsUnnamed : provider.name)
                         .font(.system(size: 12, weight: .medium))
-                    Text(provider.model.isEmpty ? "No model configured" : provider.model)
+                    Text(provider.model.isEmpty ? L10n.settingsNoModel : provider.model)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -320,13 +418,13 @@ struct LLMSettingsPane: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Name").font(.system(size: 10)).foregroundStyle(.tertiary)
+                                Text(L10n.settingsName).font(.system(size: 10)).foregroundStyle(.tertiary)
                                 TextField("Provider name", text: binding.name)
                                     .textFieldStyle(.roundedBorder)
                                     .font(.system(size: 11))
                             }
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("API Format").font(.system(size: 10)).foregroundStyle(.tertiary)
+                                Text(L10n.settingsApiFormat).font(.system(size: 10)).foregroundStyle(.tertiary)
                                 Picker("", selection: binding.apiFormat) {
                                     ForEach(APIFormat.allCases, id: \.self) { f in
                                         Text(f.displayName).tag(f)
@@ -339,14 +437,14 @@ struct LLMSettingsPane: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Base URL").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            Text(L10n.settingsBaseURL).font(.system(size: 10)).foregroundStyle(.tertiary)
                             TextField("https://api.example.com/v1", text: binding.baseURL)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11, design: .monospaced))
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Model").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            Text(L10n.settingsModel).font(.system(size: 10)).foregroundStyle(.tertiary)
                             HStack(spacing: 6) {
                                 TextField("model-name", text: binding.model)
                                     .textFieldStyle(.roundedBorder)
@@ -367,7 +465,7 @@ struct LLMSettingsPane: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("API Key (optional)").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            Text(L10n.settingsApiKey).font(.system(size: 10)).foregroundStyle(.tertiary)
                             SecureField("sk-...", text: binding.apiKey)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11))
@@ -415,7 +513,7 @@ struct LLMSettingsPane: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(.blue)
-                Text("New Provider")
+                Text(L10n.settingsAddProvider)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
             }
@@ -424,13 +522,13 @@ struct LLMSettingsPane: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Name").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text(L10n.settingsName).font(.system(size: 10)).foregroundStyle(.tertiary)
                         TextField("My Provider", text: $newProviderDraft.name)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11))
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Format").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text(L10n.settingsApiFormat).font(.system(size: 10)).foregroundStyle(.tertiary)
                         Picker("", selection: $newProviderFormat) {
                             ForEach(APIFormat.allCases, id: \.self) { f in
                                 Text(f.displayName).tag(f)
@@ -455,21 +553,21 @@ struct LLMSettingsPane: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Base URL").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    Text(L10n.settingsBaseURL).font(.system(size: 10)).foregroundStyle(.tertiary)
                     TextField("https://api.example.com/v1", text: $newProviderDraft.baseURL)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11, design: .monospaced))
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Model").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    Text(L10n.settingsModel).font(.system(size: 10)).foregroundStyle(.tertiary)
                     TextField("model-name", text: $newProviderDraft.model)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11, design: .monospaced))
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("API Key (optional)").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    Text(L10n.settingsApiKey).font(.system(size: 10)).foregroundStyle(.tertiary)
                     SecureField("sk-...", text: $newProviderDraft.apiKey)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11))
@@ -477,9 +575,9 @@ struct LLMSettingsPane: View {
 
                 HStack {
                     Spacer()
-                    Button("Cancel") { withAnimation { isAddingProvider = false } }
+                    Button(L10n.cancel) { withAnimation { isAddingProvider = false } }
                         .buttonStyle(.bordered).controlSize(.small)
-                    Button("Add Provider") {
+                    Button(L10n.settingsAddProvider) {
                         store.addProvider(newProviderDraft)
                         store.activateProvider(newProviderDraft)
                         withAnimation { isAddingProvider = false }
@@ -518,7 +616,7 @@ struct ToolsSettingsPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
-                    Text("Tools & Paths")
+                    Text(L10n.toolsTitle)
                         .font(.system(size: 16, weight: .bold))
                     Spacer()
                 }
@@ -586,9 +684,9 @@ struct ToolsSettingsPane: View {
 
                 // Viewer info
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("File Viewers")
+                    Text(L10n.toolsFileViewers)
                         .font(.system(size: 11, weight: .semibold))
-                    Text("AutoPMX uses macOS built-in QuickLook for previewing images, PDF, DOCX, XLSX, PPTX, HTML directly in the Detail pane. No plugins needed.")
+                    Text(L10n.settingsToolsViewersHint)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -597,14 +695,14 @@ struct ToolsSettingsPane: View {
 
                 // Data file
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Default Dataset Filename")
+                    Text(L10n.toolsDataFile)
                         .font(.system(size: 11, weight: .semibold))
                     HStack(spacing: 8) {
                         TextField("NM_dat_new.csv", text: $store.dataFile)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
                             .frame(width: 240)
-                        Text("Default CSV filename when creating new projects. To set dataset per-project, right-click a CSV in the sidebar → Set as Modeling Dataset.")
+                        Text(L10n.toolsDataFileDesc)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }
@@ -644,7 +742,7 @@ struct ToolsSettingsPane: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                Button("Auto Detect", action: onAutoDetect)
+                Button(L10n.settingsAutoDetect, action: onAutoDetect)
                     .font(.system(size: 10))
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -656,7 +754,7 @@ struct ToolsSettingsPane: View {
                     .foregroundStyle(isDetected ? .green : .orange)
                 Text(isDetected
                      ? "Found: \(path.wrappedValue)"
-                     : "Not detected. Please set manually.")
+                     : L10n.settingsNotFound)
                     .font(.system(size: 10))
                     .foregroundStyle(isDetected ? Color.secondary : Color.orange)
                     .lineLimit(2)
@@ -738,16 +836,16 @@ struct RulesSettingsPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
-                    Text("Rule & Knowledge Sources")
+                    Text(L10n.rulesTitle)
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
                 }
 
                 // Rule sources editor
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Source Files")
+                    Text(L10n.settingsSourceFiles)
                         .font(.system(size: 11, weight: .semibold))
-                    Text("Comma-separated list of rule, knowledge, and audit files. AutoPMX searches the project directory, workspace root, and AutoPMX_Projects folder.")
+                    Text(L10n.rulesSourceFilesDesc)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
 
@@ -759,7 +857,7 @@ struct RulesSettingsPane: View {
                         Button {
                             store.refreshRuleContextStatus()
                         } label: {
-                            Label("Reload Rules", systemImage: "arrow.clockwise")
+                            Label(L10n.settingsReloadRules, systemImage: "arrow.clockwise")
                                 .font(.system(size: 11))
                         }
                         .buttonStyle(.bordered).controlSize(.small)
@@ -768,7 +866,7 @@ struct RulesSettingsPane: View {
                             store.ruleSourceFiles = "poppk_rules.json, poppk_model_library.md, PopPK_Expert_Audit_Report.md, NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md"
                             store.refreshRuleContextStatus()
                         } label: {
-                            Label("Load All Defaults", systemImage: "books.vertical")
+                            Label(L10n.settingsLoadAllDefaults, systemImage: "books.vertical")
                                 .font(.system(size: 11))
                         }
                         .buttonStyle(.bordered).controlSize(.small)
@@ -779,13 +877,13 @@ struct RulesSettingsPane: View {
 
                 // Status
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Load Status")
+                    Text(L10n.settingsLoadStatus)
                         .font(.system(size: 11, weight: .semibold))
 
                     let ctx = store.activeRuleContext()
                     if !ctx.loadedSources.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Loaded")
+                            Text(L10n.settingsLoaded)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.green)
                             ForEach(ctx.loadedSources, id: \.self) { src in
@@ -801,7 +899,7 @@ struct RulesSettingsPane: View {
 
                     if !ctx.missingSources.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Missing / Skipped")
+                            Text(L10n.settingsMissing)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.orange)
                             ForEach(ctx.missingSources, id: \.self) { src in
@@ -816,7 +914,7 @@ struct RulesSettingsPane: View {
                     }
 
                     if ctx.loadedSources.isEmpty && ctx.missingSources.isEmpty {
-                        Text("No rules loaded. Add source files above and reload.")
+                        Text(L10n.settingsNoRules)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -828,15 +926,15 @@ struct RulesSettingsPane: View {
 
                 // Available rule files in workspace
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Known Source Files in Workspace")
+                    Text(L10n.settingsKnownFiles)
                         .font(.system(size: 11, weight: .semibold))
-                    Text("These files exist in your workspace and can be added as sources. Click to append.")
+                    Text(L10n.rulesKnownFilesDesc)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
 
                     let knownFiles = discoverKnownRuleFiles()
                     if knownFiles.isEmpty {
-                        Text("No rule files found in workspace.")
+                        Text(L10n.settingsNoRuleFiles)
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 4) {
@@ -848,7 +946,7 @@ struct RulesSettingsPane: View {
                                     Text(file)
                                         .font(.system(size: 10, design: .monospaced))
                                     Spacer()
-                                    Button("Add") {
+                                    Button(L10n.settingsAdd) {
                                         appendRuleSource(file)
                                     }
                                     .font(.system(size: 10)).buttonStyle(.bordered).controlSize(.small)
@@ -1006,8 +1104,8 @@ struct AboutPane: View {
 
     private var duDuAboutLogo: NSImage? {
         let candidates = [
-            Bundle.main.url(forResource: "DuDuPMxButton", withExtension: "png"),
-            Bundle.main.url(forResource: "DuDuPMxSource", withExtension: "png"),
+            BundledResource.url(forResource: "DuDuPMxButton", withExtension: "png"),
+            BundledResource.url(forResource: "DuDuPMxSource", withExtension: "png"),
         ]
         for url in candidates {
             if let url, let image = NSImage(contentsOf: url) {
@@ -1035,6 +1133,348 @@ struct InfoRow: View {
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .lineLimit(3)
+        }
+    }
+}
+
+// MARK: - DuDu Personality Pane
+
+struct DuDuPersonalityPane: View {
+    @EnvironmentObject var store: WorkbenchStore
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                // Header
+                HStack(spacing: 8) {
+                    Text("DuDu 对话风格")
+                        .font(.system(size: 18, weight: .semibold))
+                    Spacer()
+                }
+                .padding(.bottom, 4)
+
+                Text("选择你喜欢的对话风格，DuDu 会根据你的偏好调整语气和回答方式。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+
+                // Personality cards
+                ForEach(DuDuPersonality.allCases) { personality in
+                    PersonalityCard(
+                        personality: personality,
+                        isSelected: store.duDuPersonality == personality,
+                        action: {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                store.duDuPersonality = personality
+                            }
+                        }
+                    )
+                }
+
+                // Custom personality editor (shown when custom is selected)
+                if store.duDuPersonality == .custom {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "pencil.line")
+                                .foregroundStyle(.blue)
+                            Text("自定义人设 Prompt")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+
+                        Text("在这里写你想让 DuDu 扮演的角色、说话方式、口头禅等。这段内容会直接注入到 LLM 的 System Prompt 中。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        TextEditor(text: $store.customPersonalityPrompt)
+                            .font(.system(size: 12, design: .monospaced))
+                            .frame(minHeight: 140)
+                            .scrollContentBackground(.hidden)
+                            .padding(6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .textBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
+                            )
+
+                        if store.customPersonalityPrompt.isEmpty {
+                            Text("例如：你是一个说话喜欢用「咱就是说」开头的东北老铁版药代顾问，专业但不失亲切，喜欢用大碴子味的比喻来解释复杂概念。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                // Learning style section — LLM-generated skill document
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "brain.head.profile")
+                            .foregroundStyle(.blue)
+                        Text("学习你的说话风格")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+
+                    Text("开启后，DuDu 会收集你的聊天消息。可在收集一定数量后点击「生成风格档案」，由 LLM 为你生成一份结构化的说话风格 skill 文档，注入到 DuDu 的 System Prompt 中。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // Toggle
+                    HStack {
+                        Toggle("启用风格学习", isOn: $store.isLearningUserStyle)
+                            .font(.system(size: 13))
+
+                        Spacer()
+
+                        if store.isLearningUserStyle {
+                            HStack(spacing: 4) {
+                                Image(systemName: "text.bubble.fill")
+                                    .font(.system(size: 10))
+                                Text("已收集 \(store.userMessageArchive.count) 条消息")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    // Generate report button
+                    if store.isLearningUserStyle {
+                        HStack(spacing: 8) {
+                            Button(action: { store.generateStyleReport() }) {
+                                HStack(spacing: 4) {
+                                    if store.isGeneratingStyleReport {
+                                        ProgressView()
+                                            .scaleEffect(0.6)
+                                            .frame(width: 14, height: 14)
+                                        Text("正在生成...")
+                                    } else {
+                                        Image(systemName: "sparkles")
+                                        Text("生成风格档案")
+                                    }
+                                }
+                                .font(.system(size: 12, weight: .medium))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(store.userMessageArchive.count < 5 || store.isGeneratingStyleReport
+                                          ? Color.secondary.opacity(0.3)
+                                          : Color.blue)
+                            )
+                            .disabled(store.userMessageArchive.count < 5 || store.isGeneratingStyleReport)
+
+                            if store.userMessageArchive.count < 5 {
+                                Text("至少需要 5 条消息")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                            }
+
+                            Spacer()
+                        }
+                    }
+
+                    // Show generated style report
+                    if store.isLearningUserStyle && !store.styleReport.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("风格档案")
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Text("由 LLM 生成")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(Color.blue.opacity(0.1))
+                                    )
+                            }
+
+                            ScrollView {
+                                Text(store.styleReport)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 160)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .textBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.blue.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+
+                        HStack(spacing: 12) {
+                            Button(action: {
+                                store.styleReport = ""
+                                store.userMessageArchive.removeAll()
+                            }) {
+                                Label("清空全部记录", systemImage: "trash")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+
+                            Button(action: { store.generateStyleReport() }) {
+                                Label("重新生成", systemImage: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                            .disabled(store.isGeneratingStyleReport)
+
+                            Spacer()
+                        }
+                    }
+
+                    // Empty state hint
+                    if !store.isLearningUserStyle && store.styleReport.isEmpty && store.userMessageArchive.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lightbulb.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.yellow)
+                            Text("开启后，每当你和 DuDu 聊天，消息会被收集。积累一定量后，点击「生成风格档案」，LLM 会分析你的说话习惯并生成一份 skill 文档，之后 DuDu 的回复就会自动匹配你的风格～")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 20)
+            }
+            .padding(24)
+        }
+    }
+}
+
+struct PersonalityCard: View {
+    let personality: DuDuPersonality
+    let isSelected: Bool
+    let action: () -> Void
+
+    private var duDuLogo: NSImage? {
+        let candidates = [
+            BundledResource.url(forResource: "DuDuPMxButton", withExtension: "png"),
+            BundledResource.url(forResource: "DuDuPMxSource", withExtension: "png"),
+        ]
+        for url in candidates {
+            if let url, let image = NSImage(contentsOf: url) { return image }
+        }
+        return nil
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 14) {
+                // DuDu app icon
+                if let logo = duDuLogo {
+                    Image(nsImage: logo)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 36, height: 36)
+                        .frame(width: 48, height: 48)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06))
+                        )
+                } else {
+                    Text("🦆")
+                        .font(.system(size: 32))
+                        .frame(width: 48, height: 48)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06))
+                        )
+                }
+
+                // Text content
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(personality.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(personality.description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                // Checkmark
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
+                } else {
+                    Image(systemName: "circle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(14)
+        }
+        .buttonStyle(.plain)
+        .liquidGlassHover(cornerRadius: 14)
+    }
+}
+
+// MARK: - Particle Preview
+
+struct ParticlePreview: View {
+    let count: Int
+    let enabled: Bool
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                guard enabled, count > 0 else { return }
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let displayCount = min(count, 10000)
+
+                for i in 0..<displayCount {
+                    let seed   = Double(i) * 1.9 + 0.5
+                    let px = Double(i) * 0.553
+                    let py = Double(i) * 0.371
+                    // 3× faster multi-octave pseudo-random drift
+                    let rawX = sin(t * 0.51 + px) * cos(t * 0.36 + px * 2.1) * 0.6
+                             + sin(t * 0.24 + px * 0.5) * 0.4
+                    let rawY = cos(t * 0.45 + py) * sin(t * 0.30 + py * 1.4) * 0.6
+                             + cos(t * 0.18 + py * 0.8) * 0.4
+                    let x = size.width  * (0.08 + 0.84 * ((rawX + 1.0) / 2.0))
+                    let y = size.height * (0.10 + 0.80 * ((rawY + 1.0) / 2.0))
+                    let alpha = 0.10 + 0.12 * sin(t * 1.95 + seed)
+                    let radius: CGFloat = 0.6 + 0.7 * sin(t * 1.05 + seed * 0.7)
+
+                    // Blue gradient shades
+                    let bright = 0.55 + 0.45 * sin(t * 0.6 + seed * 1.3)
+                    let color = Color(
+                        hue: 0.58 + 0.05 * sin(t * 0.3 + seed),
+                        saturation: 0.65 + 0.35 * sin(t * 0.4 + seed * 0.6),
+                        brightness: bright
+                    ).opacity(alpha)
+                    let rect = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+                    context.fill(Path(ellipseIn: rect), with: .color(color))
+                }
+            }
         }
     }
 }

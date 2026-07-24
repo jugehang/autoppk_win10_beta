@@ -6,10 +6,11 @@ enum AssetCategory: String, CaseIterable, Identifiable {
     case outputs
     case figures
     case reports
+    case scm
     case scripts
 
     static var allCases: [AssetCategory] {
-        [.models, .data, .outputs, .figures, .reports]
+        [.models, .data, .outputs, .figures, .reports, .scm]
     }
 
     var id: String { rawValue }
@@ -21,6 +22,7 @@ enum AssetCategory: String, CaseIterable, Identifiable {
         case .outputs: return "NONMEM Outputs"
         case .figures: return "Figures"
         case .reports: return "Reports"
+        case .scm: return "SCM Results"
         case .scripts: return "Scripts"
         }
     }
@@ -32,6 +34,7 @@ enum AssetCategory: String, CaseIterable, Identifiable {
         case .outputs: return "terminal"
         case .figures: return "photo"
         case .reports: return "doc.richtext"
+        case .scm: return "point.3.connected.trianglepath.dotted"
         case .scripts: return "chevron.left.forwardslash.chevron.right"
         }
     }
@@ -70,7 +73,17 @@ struct ProjectAsset: Identifiable, Hashable {
         var id = String(name[start..<end])
         // Strip _ga_opt suffix so run001_ga_opt → "001"
         id = id.replacingOccurrences(of: "_ga_opt", with: "")
-        return id.allSatisfy(\.isNumber) ? id : nil
+
+        // Classic numeric run IDs: run001.mod → "001"
+        if id.allSatisfy(\.isNumber) { return id }
+
+        // Flexible naming: run_Dofetilide_Oct_ad3.mod → try last numeric sequence → "3"
+        if let digits = Self.firstCapture(in: id, pattern: #"(\d+)(?!.*\d)"#) {
+            return digits
+        }
+
+        // Fallback: return the non-empty stem so any run*.mod gets a menu
+        return id.isEmpty ? nil : id
     }
 
     var relatedRunID: String? {
@@ -165,4 +178,33 @@ struct AssistantMessage: Identifiable, Hashable {
     let role: Role
     let text: String
     let date = Date()
+    var citations: [String] = []  // Rule IDs or source descriptions cited by LLM
+
+    /// Parse `@ref[source]` citations from the message text.
+    /// Strip citations from display text and collect them.
+    static func parse(_ rawText: String, role: Role) -> AssistantMessage {
+        var display = rawText
+        var cites: [String] = []
+        // Pattern: @ref[anything not containing ] up to the closing ]
+        let pattern = try! NSRegularExpression(pattern: #"@ref\[([^\]]+)\]"#, options: [])
+        let nsText = rawText as NSString
+        let matches = pattern.matches(in: rawText, options: [], range: NSRange(location: 0, length: nsText.length))
+        for match in matches.reversed() {
+            if match.numberOfRanges > 1 {
+                let citation = nsText.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+                cites.append(citation)
+            }
+            display = (display as NSString).replacingCharacters(in: match.range, with: "")
+        }
+        var msg = AssistantMessage(role: role, text: display.trimmingCharacters(in: .whitespacesAndNewlines))
+        msg.citations = cites
+        return msg
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    static func == (lhs: AssistantMessage, rhs: AssistantMessage) -> Bool {
+        lhs.id == rhs.id
+    }
 }

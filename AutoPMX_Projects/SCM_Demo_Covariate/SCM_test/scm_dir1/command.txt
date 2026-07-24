@@ -1,0 +1,1 @@
+/usr/local/bin/scm -config_file=run32.scm -model=run32.mod

@@ -1,0 +1,597 @@
+#!/usr/bin/env python3
+"""Static NONMEM .mod preflight validator.
+
+Catches common control-stream errors *before* NONMEM runs, so the automation
+loop never submits a manifestly broken model.  Each check returns a structured
+result: the caller decides whether to reject, warn, or fix automatically.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Set
+
+
+# ---------------------------------------------------------------------------
+# Severity levels
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ValidationIssue:
+    severity: str          # "error" | "warning"
+    section: str           # e.g. "$INPUT", "$PK", "$THETA"
+    line_number: int       # 1‑based
+    message: str           # human‑readable description
+    fix_hint: str          # short suggestion (may mention auto‑fix)
+    auto_fixable: bool     # can ModGenerator fix this deterministically?
+
+
+@dataclass
+class ValidationResult:
+    path: Path
+    issues: List[ValidationIssue] = field(default_factory=list)
+    critical_count: int = 0   # count of "error" severity issues
+
+    @property
+    def passed(self) -> bool:
+        return self.critical_count == 0
+
+    def summary(self) -> str:
+        total = len(self.issues)
+        if not total:
+            return f"✓ {self.path.name}: passed"
+        lines = [f"{'✗' if not self.passed else '⚠'} {self.path.name}: "
+                 f"{self.critical_count} error(s), {total - self.critical_count} warning(s)"]
+        for iss in self.issues:
+            prefix = "ERROR" if iss.severity == "error" else "WARN"
+            lines.append(f"  [{prefix}] L{iss.line_number} {iss.section}: {iss.message}")
+            lines.append(f"         → {iss.fix_hint}")
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Parsing helpers
+# ---------------------------------------------------------------------------
+
+def _line_number(text: str, offset: int) -> int:
+    """Convert byte offset to 1‑based line number."""
+    return text[:offset].count("\n") + 1
+
+
+def _section_boundaries(text: str) -> List[tuple]:
+    """Return [(label, start_offset, end_offset), …] for each $‑record."""
+    boundaries: List[tuple] = []
+    pattern = re.compile(r"^\s*(\$\w+)", re.MULTILINE)
+    for m in pattern.finditer(text):
+        label = m.group(1).upper()
+        start = m.start()
+        # Find next $‑record boundary
+        next_m = pattern.search(text, m.end())
+        end = next_m.start() if next_m else len(text)
+        boundaries.append((label, start, end))
+    return boundaries
+
+
+def _section_text(text: str, label: str) -> Optional[str]:
+    """Return the full text of the first $label record."""
+    for lbl, start, end in _section_boundaries(text):
+        if lbl == label:
+            return text[start:end]
+    return None
+
+
+def _all_section_texts(text: str, label: str) -> List[str]:
+    return [text[s:e] for lbl, s, e in _section_boundaries(text) if lbl == label]
+
+
+# ---------------------------------------------------------------------------
+# Individual checks
+# ---------------------------------------------------------------------------
+
+def check_input_comment_column(lines: list, text: str) -> List[ValidationIssue]:
+    """C=DROP / C=SKIP / omitted C when $DATA has IGNORE=C."""
+    issues: List[ValidationIssue] = []
+    data_ignore_c = False
+    data_section = _section_text(text, "$DATA")
+    if data_section and re.search(r"IGNORE\s*=\s*C", data_section, re.IGNORECASE):
+        data_ignore_c = True
+
+    input_section = _section_text(text, "$INPUT")
+    if not input_section:
+        return issues
+
+    input_line_num = _line_number(text, text.find("$INPUT"))
+    tokens = re.split(r"\s+", input_section.strip())
+    col_set: Set[str] = set()
+    has_c = False
+    for tok in tokens:
+        if tok.upper() == "$INPUT":
+            continue
+        base = tok.upper().split("=")[0]
+        col_set.add(base)
+        if base == "C":
+            has_c = True
+        if "C=" in tok.upper() and data_ignore_c:
+            issues.append(ValidationIssue(
+                severity="error",
+                section="$INPUT",
+                line_number=input_line_num,
+                message=f"Illegal token '{tok}' while $DATA IGNORE=C is active",
+                fix_hint="Keep C as a plain token.  Remove '=DROP', '=SKIP' etc.",
+                auto_fixable=True,
+            ))
+
+    if not has_c and data_ignore_c:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$INPUT",
+            line_number=input_line_num,
+            message="Missing C column in $INPUT while $DATA uses IGNORE=C",
+            fix_hint="Prepend bare C to $INPUT tokens (AutoPMX convention)",
+            auto_fixable=True,
+        ))
+
+    return issues
+
+
+def check_input_matches_csv(lines: list, text: str, csv_path: Optional[Path]) -> List[ValidationIssue]:
+    """Check $INPUT order matches CSV header order (when CSV is reachable)."""
+    issues: List[ValidationIssue] = []
+    if not csv_path or not csv_path.exists():
+        return issues
+
+    csv_header = csv_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    if not csv_header:
+        return issues
+    expected_cols = [c.strip().strip("\"").upper() for c in csv_header[0].split(",") if c.strip()]
+
+    input_section = _section_text(text, "$INPUT")
+    if not input_section:
+        return issues
+    input_line_num = _line_number(text, text.find("$INPUT"))
+    tokens = re.split(r"\s+", input_section.strip())
+    input_cols = []
+    for tok in tokens:
+        if tok.upper() == "$INPUT":
+            continue
+        base = tok.upper().split("=")[0]
+        # C should appear as literal C
+        if base == "C" and tok != "C":
+            # already flagged by check_input_comment_column
+            input_cols.append("C")
+        else:
+            input_cols.append(base)
+
+    # Only check first min(len) columns — CSV may have extra columns at end
+    # that NONMEM doesn't read
+    min_len = min(len(input_cols), len(expected_cols))
+
+    mismatches = []
+    for i in range(min_len):
+        if input_cols[i] != expected_cols[i]:
+            mismatches.append(f"col{i+1}: $INPUT has '{input_cols[i]}', CSV has '{expected_cols[i]}'")
+
+    if len(input_cols) != len(expected_cols) and len(input_cols) < len(expected_cols):
+        mismatches.append(f"$INPUT has {len(input_cols)} columns, CSV has {len(expected_cols)}")
+
+    if mismatches:
+        details = "; ".join(mismatches[:5])
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$INPUT",
+            line_number=input_line_num,
+            message=f"$INPUT column order mismatch ({details})",
+            fix_hint="Run auto-fix with the CSV header as source of truth",
+            auto_fixable=True,
+        ))
+
+    return issues
+
+
+def check_theta_omega_count(lines: list, text: str) -> List[ValidationIssue]:
+    """$THETA / $OMEGA count matches $PK references."""
+    issues: List[ValidationIssue] = []
+
+    # Count THETA definitions
+    theta_sections = _all_section_texts(text, "$THETA")
+    theta_count = 0
+    for sec in theta_sections:
+        for line in sec.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";") or stripped.upper().startswith("$THETA"):
+                continue
+            theta_count += 1
+
+    # Count OMEGA blocks
+    omega_sections = _all_section_texts(text, "$OMEGA")
+    omega_count = 0
+    for sec in omega_sections:
+        lines = sec.splitlines()
+        in_block = False
+        block_size = 0
+        block_rows_seen = 0
+        for line in lines:
+            s = line.strip()
+            if not s or s.startswith(";") or s.upper().startswith("$OMEGA"):
+                continue
+            if s.upper().startswith("BLOCK"):
+                in_block = True
+                block_size = 0
+                block_rows_seen = 0
+                # Parse BLOCK(n) — e.g. BLOCK(2) defines 2 ETAs
+                m = re.search(r"BLOCK\s*\(\s*(\d+)\s*\)", s, re.IGNORECASE)
+                if m:
+                    block_size = int(m.group(1))
+                    omega_count += block_size
+                else:
+                    # BLOCK without explicit size — count once (1 ETA)
+                    omega_count += 1
+                continue
+            if in_block:
+                # Inside BLOCK matrix rows — don't add new ETAs (already counted via BLOCK(n))
+                pass
+            else:
+                omega_count += 1
+
+    # Check which THETA(i) and ETA(i) are referenced in $PK and $ERROR
+    pk_section = _section_text(text, "$PK") or _section_text(text, "$PK") or ""
+    error_section = _section_text(text, "$ERROR") or ""
+    combined_pk_err = pk_section + error_section
+
+    max_theta_ref = 0
+    max_eta_ref = 0
+    for m in re.finditer(r"\bTHETA\s*\(\s*(\d+)\s*\)", combined_pk_err, re.IGNORECASE):
+        idx = int(m.group(1))
+        if idx > max_theta_ref:
+            max_theta_ref = idx
+    for m in re.finditer(r"\bETA\s*\(\s*(\d+)\s*\)", combined_pk_err, re.IGNORECASE):
+        idx = int(m.group(1))
+        if idx > max_eta_ref:
+            max_eta_ref = idx
+
+    theta_line_num = _line_number(text, text.find("$THETA")) if "$THETA" in text else 0
+
+    if max_theta_ref > theta_count:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$THETA",
+            line_number=theta_line_num,
+            message=f"$PK/$ERROR references THETA({max_theta_ref}) but only {theta_count} THETA(s) defined",
+            fix_hint=f"Add {max_theta_ref - theta_count} more THETA record(s) with plausible initials",
+            auto_fixable=False,
+        ))
+
+    omega_line_num = _line_number(text, text.find("$OMEGA")) if "$OMEGA" in text else 0
+    if max_eta_ref > omega_count:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$OMEGA",
+            line_number=omega_line_num,
+            message=f"$PK uses ETA({max_eta_ref}) but only {omega_count} OMEGA(s) defined",
+            fix_hint=f"Add {max_eta_ref - omega_count} OMEGA diagonal or BLOCK records",
+            auto_fixable=False,
+        ))
+
+    # Also check for common typo: NTIME=DUMP
+    if re.search(r"NTIME\s*=\s*DUMP", combined_pk_err, re.IGNORECASE):
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$PK",
+            line_number=_line_number(text, combined_pk_err.find("NTIME")),
+            message="NTIME is a data item (not a $PK variable) — NTIME=DUMP is a data‑renaming directive, "
+                    "not a valid $PK assignment",
+            fix_hint="Remove NTIME=DUMP from $INPUT if NTIME is unused, or keep as NTIME",
+            auto_fixable=True,
+        ))
+
+    return issues
+
+
+def check_data_path(text: str, project_dir: Path) -> List[ValidationIssue]:
+    """$DATA path resolves to a real file."""
+    issues: List[ValidationIssue] = []
+    m = re.search(r"(?im)^\s*\$DATA\s+(\S+)", text)
+    if not m:
+        issues.append(ValidationIssue(
+            severity="error", section="$DATA", line_number=0,
+            message="No $DATA record found",
+            fix_hint="Add $DATA <filename> IGNORE=C",
+            auto_fixable=True,
+        ))
+        return issues
+
+    raw_path = m.group(1)
+    data_line_num = _line_number(text, m.start())
+    resolved = Path(raw_path)
+    if not resolved.is_absolute():
+        resolved = project_dir / raw_path
+
+    if not resolved.exists():
+        issues.append(ValidationIssue(
+            severity="error", section="$DATA", line_number=data_line_num,
+            message=f"$DATA file not found: {raw_path}",
+            fix_hint=f"Update path to point to existing file in {project_dir}",
+            auto_fixable=True,
+        ))
+
+    # Check IGNORE=C
+    if "IGNORE=C" not in text[text.find("$DATA"):text.find("$DATA") + 200].upper():
+        data_section = _section_text(text, "$DATA")
+        if data_section:
+            issues.append(ValidationIssue(
+                severity="warning", section="$DATA", line_number=data_line_num,
+                message="Missing IGNORE=C on $DATA (AutoPMX convention)",
+                fix_hint="Add IGNORE=C to $DATA record",
+                auto_fixable=True,
+            ))
+
+    return issues
+
+
+def check_sigma_placement(text: str) -> List[ValidationIssue]:
+    """$SIGMA must appear before $EST when EPS is used."""
+    issues: List[ValidationIssue] = []
+
+    est_pos = text.find("$EST")
+    sigma_pos = text.find("$SIGMA")
+    # EPS can be defined in $ERROR OR $PK; $SIGMA can go before or after $ERROR
+    # but must be before $EST
+    has_eps = bool(re.search(r"\bEPS\s*\(\s*1\s*\)", text[:est_pos + 2000] if est_pos > 0 else text, re.IGNORECASE))
+
+    if has_eps and sigma_pos < 0:
+        issues.append(ValidationIssue(
+            severity="error", section="$SIGMA", line_number=0,
+            message="EPS(1) used but $SIGMA is missing",
+            fix_hint="Add $SIGMA 1 FIX before $EST",
+            auto_fixable=True,
+        ))
+    elif has_eps and est_pos > 0 and sigma_pos > est_pos:
+        issues.append(ValidationIssue(
+            severity="error", section="$SIGMA",
+            line_number=_line_number(text, sigma_pos),
+            message="$SIGMA must appear BEFORE $EST",
+            fix_hint="Move $SIGMA block before $ESTIMATION",
+            auto_fixable=True,
+        ))
+
+    return issues
+
+
+def check_table_files(text: str, run_id: str) -> List[ValidationIssue]:
+    """$TABLE FILE= must use the correct run ID."""
+    issues: List[ValidationIssue] = []
+    fidx = 0
+    while True:
+        m = re.search(r"(?im)^\s*\$TABLE", text[fidx:])
+        if not m:
+            break
+        table_start = fidx + m.start()
+        table_end = text.find("\n$", table_start + 1)
+        if table_end < 0:
+            table_end = len(text)
+        table_block = text[table_start:table_end]
+        table_line_num = _line_number(text, table_start)
+
+        # Check FILE=name
+        file_match = re.search(r"FILE\s*=\s*(\S+)", table_block, re.IGNORECASE)
+        if file_match:
+            fname = file_match.group(1)
+            # Common expected patterns: sdtab{run}, patab{run}, 000{run}.ETA, catab{run}, cotab{run}
+            expected_extensions = {
+                "SDTAB": "", "PATAB": "", "CATAB": "", "COTAB": "",
+                "000": ".ETA",
+            }
+            upper_fname = fname.upper()
+            found_run = None
+            for prefix, suffix in expected_extensions.items():
+                if upper_fname.startswith(prefix) and upper_fname.endswith(suffix.upper()):
+                    inner = upper_fname[len(prefix):]
+                    if suffix:
+                        inner = inner[:-len(suffix)] if suffix else inner
+                    if inner.isdigit():
+                        found_run = int(inner)
+                    break
+            if found_run is not None and found_run != int(run_id):
+                issues.append(ValidationIssue(
+                    severity="error", section="$TABLE", line_number=table_line_num,
+                    message=f"Table file '{fname}' has run ID {found_run}, expected run {run_id}",
+                    fix_hint=f"Change FILE={fname} to match run {run_id}",
+                    auto_fixable=True,
+                ))
+
+        fidx = table_end + 1
+
+    return issues
+
+
+def check_residual_error_model(text: str) -> List[ValidationIssue]:
+    """Warn on common $ERROR problems."""
+    issues: List[ValidationIssue] = []
+    pk_section = _section_text(text, "$ERROR")
+    if not pk_section:
+        return issues
+
+    error_line_num = _line_number(text, text.find("$ERROR"))
+
+    # Check IPRED = F
+    if "IPRED" not in pk_section:
+        issues.append(ValidationIssue(
+            severity="warning", section="$ERROR", line_number=error_line_num,
+            message="IPRED not defined in $ERROR (recommend: IPRED = F)",
+            fix_hint="Add IPRED = F before residual error computation",
+            auto_fixable=True,
+        ))
+
+    # Check for Y = ... + EPS(1) without SIGMA FIX
+    if "Y =" in pk_section and "EPS(1)" in pk_section:
+        has_sigma_fix = False
+        sigma_sections = _all_section_texts(text, "$SIGMA")
+        for sec in sigma_sections:
+            if "FIX" in sec.upper():
+                has_sigma_fix = True
+                break
+        if not has_sigma_fix:
+            issues.append(ValidationIssue(
+                severity="warning", section="$SIGMA", line_number=error_line_num,
+                message="$SIGMA should typically be 1 FIX when EPS(1) is the residual error scale",
+                fix_hint="Add $SIGMA 1 FIX",
+                auto_fixable=True,
+            ))
+
+    return issues
+
+
+def check_common_typos(text: str) -> List[ValidationIssue]:
+    """Flag known NONMEM pitfalls."""
+    issues: List[ValidationIssue] = []
+
+    # NTIME=DUMP (common in $INPUT if present)
+    m = re.search(r"(?im)NTIME\s*=\s*DUMP", text)
+    if m:
+        line_num = _line_number(text, m.start())
+        issues.append(ValidationIssue(
+            severity="error", section="$INPUT", line_number=line_num,
+            message="NTIME=DUMP typo — DUMP is not a valid NONMEM destination",
+            fix_hint="Use NTIME=DROP to discard the column, or keep as NTIME",
+            auto_fixable=True,
+        ))
+
+    # Check for duplicate $ records (exclude $TABLE — multiple TABLE lines are valid)
+    seen_labels = set()
+    for lbl, s, _ in _section_boundaries(text):
+        line_num = _line_number(text, s)
+        if lbl in ("$PROBLEM", "$TABLE"):
+            continue
+        if lbl in seen_labels:
+            issues.append(ValidationIssue(
+                severity="error", section=lbl, line_number=line_num,
+                message=f"Duplicate {lbl} record",
+                fix_hint="Remove the duplicate record",
+                auto_fixable=False,
+            ))
+        seen_labels.add(lbl)
+
+    # 0 FIX on THETA that's too aggressive
+    theta_section = _section_text(text, "$THETA")
+    if theta_section:
+        lines = theta_section.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if "FIX" in stripped.upper() and re.search(r"\(\s*0\s*\)", stripped):
+                line_num = _line_number(text, text.find("$THETA") if "$THETA" in text else 0) + i
+                issues.append(ValidationIssue(
+                    severity="warning", section="$THETA", line_number=line_num,
+                    message="THETA is FIXed at zero — parameter will never move from boundary",
+                    fix_hint="Change to (0, initial, upper) or remove FIX",
+                    auto_fixable=False,
+                ))
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def validate_mod(
+    mod_path: Path,
+    project_dir: Optional[Path] = None,
+    csv_path: Optional[Path] = None,
+    run_id: Optional[str] = None,
+) -> ValidationResult:
+    """Run all static checks on a .mod file.
+
+    Parameters
+    ----------
+    mod_path : Path
+        Path to the .mod file to validate.
+    project_dir : Path, optional
+        Project root (used to resolve relative $DATA paths).  Defaults to
+        the parent of mod_path.
+    csv_path : Path, optional
+        Path to the dataset CSV (for $INPUT column matching).  If omitted
+        the check that requires it is skipped.
+    run_id : str, optional
+        Expected run ID (for $TABLE file names).  If omitted, extracted from
+        the filename (``run{run_id}.mod``).
+
+    Returns
+    -------
+    ValidationResult
+    """
+    mod_path = Path(mod_path)
+    project_dir = Path(project_dir) if project_dir else mod_path.parent
+    if not run_id:
+        m = re.match(r"run(\d+)", mod_path.stem, re.IGNORECASE)
+        run_id = m.group(1) if m else "0"
+
+    text = mod_path.read_text(encoding="utf-8", errors="ignore")
+    lines = text.splitlines()
+
+    # Run all checks
+    check_fns = [
+        check_input_comment_column,
+        lambda l, t: check_input_matches_csv(l, t, csv_path),
+        check_theta_omega_count,
+        lambda l, t: check_data_path(t, project_dir),
+        lambda l, t: check_sigma_placement(t),
+        lambda l, t: check_table_files(t, run_id),
+        lambda l, t: check_residual_error_model(t),
+        lambda l, t: check_common_typos(t),
+    ]
+
+    all_issues: List[ValidationIssue] = []
+    for fn in check_fns:
+        all_issues.extend(fn(lines, text))
+
+    result = ValidationResult(path=mod_path, issues=all_issues,
+                              critical_count=sum(1 for i in all_issues if i.severity == "error"))
+    return result
+
+
+def validate_mod_safe(
+    mod_path: Path,
+    project_dir: Optional[Path] = None,
+    csv_path: Optional[Path] = None,
+    run_id: Optional[str] = None,
+) -> ValidationResult:
+    """Non‑throwing wrapper around :func:`validate_mod`."""
+    from .mod_validator import validate_mod
+    try:
+        return validate_mod(mod_path, project_dir, csv_path, run_id)
+    except Exception as exc:
+        return ValidationResult(
+            path=Path(mod_path),
+            issues=[ValidationIssue(
+                severity="error", section="Validator", line_number=0,
+                message=f"Validator crashed: {exc}",
+                fix_hint="Fix the validator or check file encoding",
+                auto_fixable=False,
+            )],
+            critical_count=1,
+        )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Preflight check a NONMEM .mod file")
+    parser.add_argument("mod_path", type=Path)
+    parser.add_argument("--project-dir", type=Path, default=None)
+    parser.add_argument("--csv", type=Path, default=None,
+                        help="CSV dataset path (for $INPUT column validation)")
+    parser.add_argument("--run-id", default=None)
+    args = parser.parse_args()
+
+    result = validate_mod(args.mod_path, args.project_dir, args.csv, args.run_id)
+    print(result.summary())
+    return 0 if result.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

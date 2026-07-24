@@ -1,0 +1,260 @@
+$VAR1 = {
+          'CL' => {
+                    'WT' => {
+                              'nthetas' => {
+                                             '5' => 1,
+                                             '1' => 0
+                                           },
+                              'inits' => {
+                                           '1' => [],
+                                           '5' => [
+                                                    '0.001'
+                                                  ]
+                                         },
+                              'ofv_changes' => {
+                                                 '10' => '18.31',
+                                                 '9' => '16.92',
+                                                 '3' => '7.81',
+                                                 '5' => '11.07',
+                                                 '4' => '9.49',
+                                                 '2' => '5.99',
+                                                 '6' => '12.59',
+                                                 '7' => '14.07',
+                                                 '1' => '3.84',
+                                                 '8' => '15.51'
+                                               },
+                              'continuous' => 1,
+                              'bounds' => {
+                                            '5' => {
+                                                     'upper' => [
+                                                                  100000
+                                                                ],
+                                                     'lower' => [
+                                                                  -100
+                                                                ]
+                                                   },
+                                            '1' => {
+                                                     'upper' => [],
+                                                     'lower' => []
+                                                   }
+                                          },
+                              'code' => {
+                                          '5' => [
+                                                   '   CLWT = ((WT/0)**THETA(1))
+'
+                                                 ],
+                                          '1' => [
+                                                   '   CLWT = 1
+'
+                                                 ]
+                                        },
+                              'state' => 1
+                            },
+                    'SEX' => {
+                               'state' => 1,
+                               'code' => {
+                                           '2' => [
+                                                    'IF(SEX.EQ.0) CLSEX = 1  ; Most common
+',
+                                                    'IF(SEX.EQ.1) CLSEX = ( 1 + THETA(1))
+'
+                                                  ],
+                                           '1' => [
+                                                    '   CLSEX = 1
+'
+                                                  ]
+                                         },
+                               'bounds' => {
+                                             '2' => {
+                                                      'lower' => [
+                                                                   -1
+                                                                 ],
+                                                      'upper' => [
+                                                                   5
+                                                                 ]
+                                                    },
+                                             '1' => {
+                                                      'upper' => [],
+                                                      'lower' => []
+                                                    }
+                                           },
+                               'continuous' => 0,
+                               'ofv_changes' => {},
+                               'inits' => {
+                                            '2' => [
+                                                     '-0.001'
+                                                   ],
+                                            '1' => []
+                                          },
+                               'nthetas' => {
+                                              '1' => 0,
+                                              '2' => 1
+                                            }
+                             },
+                    'AGE' => {
+                               'ofv_changes' => {},
+                               'inits' => {
+                                            '1' => [],
+                                            '5' => [
+                                                     '0.001'
+                                                   ]
+                                          },
+                               'nthetas' => {
+                                              '1' => 0,
+                                              '5' => 1
+                                            },
+                               'bounds' => {
+                                             '5' => {
+                                                      'upper' => [
+                                                                   100000
+                                                                 ],
+                                                      'lower' => [
+                                                                   -100
+                                                                 ]
+                                                    },
+                                             '1' => {
+                                                      'upper' => [],
+                                                      'lower' => []
+                                                    }
+                                           },
+                               'continuous' => 1,
+                               'state' => 1,
+                               'code' => {
+                                           '5' => [
+                                                    '   CLAGE = ((AGE/17)**THETA(1))
+'
+                                                  ],
+                                           '1' => [
+                                                    '   CLAGE = 1
+'
+                                                  ]
+                                         }
+                             }
+                  },
+          'CLM' => {
+                     'AGE' => {
+                                'nthetas' => {
+                                               '5' => 1,
+                                               '1' => 0
+                                             },
+                                'ofv_changes' => {},
+                                'inits' => {
+                                             '5' => [
+                                                      '0.001'
+                                                    ],
+                                             '1' => []
+                                           },
+                                'continuous' => 1,
+                                'bounds' => {
+                                              '5' => {
+                                                       'upper' => [
+                                                                    100000
+                                                                  ],
+                                                       'lower' => [
+                                                                    -100
+                                                                  ]
+                                                     },
+                                              '1' => {
+                                                       'upper' => [],
+                                                       'lower' => []
+                                                     }
+                                            },
+                                'code' => {
+                                            '5' => [
+                                                     '   CLMAGE = ((AGE/17)**THETA(1))
+'
+                                                   ],
+                                            '1' => [
+                                                     '   CLMAGE = 1
+'
+                                                   ]
+                                          },
+                                'state' => 1
+                              },
+                     'SEX' => {
+                                'nthetas' => {
+                                               '1' => 0,
+                                               '2' => 1
+                                             },
+                                'inits' => {
+                                             '2' => [
+                                                      '-0.001'
+                                                    ],
+                                             '1' => []
+                                           },
+                                'ofv_changes' => {},
+                                'code' => {
+                                            '2' => [
+                                                     'IF(SEX.EQ.0) CLMSEX = 1  ; Most common
+',
+                                                     'IF(SEX.EQ.1) CLMSEX = ( 1 + THETA(1))
+'
+                                                   ],
+                                            '1' => [
+                                                     '   CLMSEX = 1
+'
+                                                   ]
+                                          },
+                                'state' => 1,
+                                'continuous' => 0,
+                                'bounds' => {
+                                              '2' => {
+                                                       'upper' => [
+                                                                    5
+                                                                  ],
+                                                       'lower' => [
+                                                                    -1
+                                                                  ]
+                                                     },
+                                              '1' => {
+                                                       'lower' => [],
+                                                       'upper' => []
+                                                     }
+                                            }
+                              },
+                     'WT' => {
+                               'inits' => {
+                                            '5' => [
+                                                     '0.001'
+                                                   ],
+                                            '1' => []
+                                          },
+                               'ofv_changes' => {},
+                               'nthetas' => {
+                                              '5' => 1,
+                                              '1' => 0
+                                            },
+                               'bounds' => {
+                                             '5' => {
+                                                      'lower' => [
+                                                                   -100
+                                                                 ],
+                                                      'upper' => [
+                                                                   100000
+                                                                 ]
+                                                    },
+                                             '1' => {
+                                                      'upper' => [],
+                                                      'lower' => []
+                                                    }
+                                           },
+                               'continuous' => 1,
+                               'state' => 1,
+                               'code' => {
+                                           '1' => [
+                                                    '   CLMWT = 1
+'
+                                                  ],
+                                           '5' => [
+                                                    '   CLMWT = ((WT/0)**THETA(1))
+'
+                                                  ]
+                                         }
+                             }
+                   }
+        };
+$VAR1->{'CL'}{'SEX'}{'ofv_changes'} = $VAR1->{'CL'}{'WT'}{'ofv_changes'};
+$VAR1->{'CL'}{'AGE'}{'ofv_changes'} = $VAR1->{'CL'}{'WT'}{'ofv_changes'};
+$VAR1->{'CLM'}{'AGE'}{'ofv_changes'} = $VAR1->{'CL'}{'WT'}{'ofv_changes'};
+$VAR1->{'CLM'}{'SEX'}{'ofv_changes'} = $VAR1->{'CL'}{'WT'}{'ofv_changes'};
+$VAR1->{'CLM'}{'WT'}{'ofv_changes'} = $VAR1->{'CL'}{'WT'}{'ofv_changes'};

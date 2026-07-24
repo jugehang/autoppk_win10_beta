@@ -15,6 +15,19 @@ Packages/
 # Build artifacts
 dist/
 
+# IDE
+.codebuddy/
+
+# DMG installer
+*.dmg
+
+# Sub-projects (pushed separately)
+AutoPMX_Web/
+AutoPMX_Windows/
+
+# Node (just in case)
+node_modules/
+
 # Unnecessary resources
 Resources/AutoPMX.icns
 Resources/AutoPMX.ics

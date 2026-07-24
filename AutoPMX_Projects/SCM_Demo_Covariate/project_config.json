@@ -1,0 +1,5 @@
+{
+  "project_name": "SCM_Demo_Covariate",
+  "units": { "time": "Time (h)", "conc": "Concentration" },
+  "grouping": { "factor": "STUDY", "label": "Study" }
+}

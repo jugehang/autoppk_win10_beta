@@ -45,7 +45,7 @@ struct AutoPMXApp: App {
             // Help menu
             CommandGroup(replacing: .help) {
                 Button("AutoPMX Help") {
-                    if let helpURL = Bundle.main.url(forResource: "Help", withExtension: "html") {
+                    if let helpURL = BundledResource.url(forResource: "Help", withExtension: "html") {
                         NSWorkspace.shared.open(helpURL)
                     }
                 }

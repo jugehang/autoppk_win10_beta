@@ -100,38 +100,49 @@ final class ProcessRunner: ObservableObject {
         isRunning = true
         append("$ \(command)")
 
-        return await withCheckedContinuation { continuation in
-            let task = configuredTask(command: command, directory: directory)
-            currentTask = task
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError = pipe
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let task = configuredTask(command: command, directory: directory)
+                currentTask = task
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = pipe
+                var resumed = false
 
-            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-                let data = handle.availableData
-                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-                Task { @MainActor in
-                    self?.logText += text
+                pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                    let data = handle.availableData
+                    guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+                    Task { @MainActor in
+                        self?.logText += text
+                    }
+                }
+
+                task.terminationHandler = { [weak self] process in
+                    pipe.fileHandleForReading.readabilityHandler = nil
+                    Task { @MainActor in
+                        guard !resumed else { return }
+                        resumed = true
+                        self?.append("[exit \(process.terminationStatus)]")
+                        self?.isRunning = false
+                        self?.currentTask = nil
+                        continuation.resume(returning: process.terminationStatus)
+                    }
+                }
+
+                do {
+                    try task.run()
+                } catch {
+                    guard !resumed else { return }
+                    resumed = true
+                    append("Failed to start command: \(error.localizedDescription)")
+                    isRunning = false
+                    currentTask = nil
+                    continuation.resume(returning: 127)
                 }
             }
-
-            task.terminationHandler = { [weak self] process in
-                pipe.fileHandleForReading.readabilityHandler = nil
-                Task { @MainActor in
-                    self?.append("[exit \(process.terminationStatus)]")
-                    self?.isRunning = false
-                    self?.currentTask = nil
-                    continuation.resume(returning: process.terminationStatus)
-                }
-            }
-
-            do {
-                try task.run()
-            } catch {
-                append("Failed to start command: \(error.localizedDescription)")
-                isRunning = false
-                currentTask = nil
-                continuation.resume(returning: 127)
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                self?.currentTask?.terminate()
             }
         }
     }

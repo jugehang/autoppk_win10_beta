@@ -120,10 +120,12 @@ struct SidebarAssetRow: View {
                             .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 3))
                     }
                 }
-                Text(asset.relativePath)
-                    .font(.system(size: 10))
-                    .foregroundStyle(isHovered ? .secondary : .tertiary)
-                    .lineLimit(1)
+                if asset.relativePath != asset.title {
+                    Text(asset.relativePath)
+                        .font(.system(size: 10))
+                        .foregroundStyle(isHovered ? .secondary : .tertiary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 4)
@@ -138,6 +140,7 @@ struct SidebarAssetRow: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .contentShape(Rectangle())
+        .liquidGlassHover(cornerRadius: 5)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) {
                 isHovered = hovering
@@ -216,7 +219,7 @@ struct SidebarAssetContextMenu: View {
                 Label("Bootstrap", systemImage: "repeat")
             }
             Button {
-                store.runSCM(for: runID)
+                store.presentSCMDialog(runID: runID)
             } label: {
                 Label("SCM", systemImage: "point.3.connected.trianglepath.dotted")
             }
@@ -227,6 +230,13 @@ struct SidebarAssetContextMenu: View {
                 store.evaluateModelWithAI(runID)
             } label: {
                 Label("AI Evaluate This Model", systemImage: "sparkles")
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 0.15, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.65, blue: 1.0)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
 
             Divider()
@@ -245,6 +255,13 @@ struct SidebarAssetContextMenu: View {
                 store.interpretAssetWithAI(asset)
             } label: {
                 Label(aiInterpretTitle, systemImage: "sparkles")
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 0.15, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.65, blue: 1.0)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
 
             Divider()

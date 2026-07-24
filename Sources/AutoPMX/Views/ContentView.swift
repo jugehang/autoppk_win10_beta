@@ -5,6 +5,7 @@ import AppKit
 
 struct ContentView: View {
     @EnvironmentObject private var store: WorkbenchStore
+    @ObservedObject private var lang = LanguageStore.shared
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -36,6 +37,16 @@ struct ContentView: View {
 
             AIAssistantOverlay()
                 .padding(24)
+
+            if store.showDemoGuide {
+                DemoGuideView()
+                    .padding(24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: store.showDemoGuide)
+        .sheet(isPresented: $store.showSCMDialog) {
+            SCMSetupSheetView().environmentObject(store)
         }
         .alert("Move File to Trash?", isPresented: $store.isDeleteConfirmationPresented) {
             Button("Cancel", role: .cancel) { store.cancelDelete() }
@@ -43,6 +54,8 @@ struct ContentView: View {
         } message: {
             Text(store.deleteConfirmationText)
         }
+        .environment(\.particleEffectsEnabled, store.particleEffectsEnabled)
+        .environment(\.particleCount, store.particleCount)
     }
 }
 
@@ -53,23 +66,21 @@ struct WorkbenchToolbar: View {
     @State private var projectName = "Run_Project"
     @State private var showingProjectSheet = false
     @State private var projectCreationMode: ProjectCreationMode = .fromRun
-    @State private var hoveredButton: String? = nil
-
     var body: some View {
         HStack(spacing: 6) {
             ToolbarBrand()
 
             Divider().frame(height: 26).opacity(0.4).padding(.horizontal, 2)
 
-            toolbarButton("New Project", "folder.badge.plus") {
+            LiquidGlassToolbarButton("New Project", icon: "folder.badge.plus") {
                 projectName = "New_AutoPMX_Project"
                 projectCreationMode = .blank
                 showingProjectSheet = true
             }
-            toolbarButton("Open", "folder") { openProjectPanel() }
-            toolbarButton("Demo", "sparkles") { store.openDemoProject() }
-            toolbarButton("Root", "house") { store.openWorkspaceRoot() }
-            toolbarButton("From Run", "doc.badge.plus") {
+            LiquidGlassToolbarButton("Open", icon: "folder") { openProjectPanel() }
+            demoButton
+            LiquidGlassToolbarButton("Root", icon: "house") { store.openWorkspaceRoot() }
+            LiquidGlassToolbarButton("From Run", icon: "doc.badge.plus") {
                 projectName = "Run\(store.currentRun)_Project"
                 projectCreationMode = .fromRun
                 showingProjectSheet = true
@@ -77,7 +88,7 @@ struct WorkbenchToolbar: View {
 
             Divider().frame(height: 26).opacity(0.4).padding(.horizontal, 2)
 
-            toolbarButton("Refresh", "arrow.clockwise") { store.refreshWorkspace() }
+            LiquidGlassToolbarButton("Refresh", icon: "arrow.clockwise") { store.refreshWorkspace() }
 
             Button {
                 store.runCurrentModel()
@@ -107,6 +118,7 @@ struct WorkbenchToolbar: View {
                 .shadow(color: .blue.opacity(0.2), radius: 4, y: 2)
             }
             .buttonStyle(.plain)
+            .liquidGlassHover(cornerRadius: 8)
             .disabled(store.runner.isRunning)
             .opacity(store.runner.isRunning ? 0.6 : 1)
             .scaleEffect(store.runner.isRunning ? 0.97 : 1)
@@ -128,13 +140,9 @@ struct WorkbenchToolbar: View {
                     .padding(.horizontal, 10)
                     .frame(height: 26)
                     .foregroundStyle(.purple)
-                    .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(.purple.opacity(0.25), lineWidth: 1)
-                    )
                 }
                 .buttonStyle(.plain)
+                .liquidGlassHover(cornerRadius: 7, colors: [.purple, Color(red: 0.6, green: 0.3, blue: 0.9)])
                 .help("Open Claude Code in Terminal")
             }
 
@@ -194,31 +202,28 @@ struct WorkbenchToolbar: View {
         }
     }
 
-    private func toolbarButton(_ label: String, _ icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(label, systemImage: icon)
+    private var demoButton: some View {
+        Button {
+            store.openDemoProject()
+        } label: {
+            Label("Demo", systemImage: "sparkles")
                 .font(.system(size: 11.5, weight: .medium))
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .frame(height: 28)
+                .foregroundStyle(.white)
                 .background(
-                    hoveredButton == label
-                        ? Color.primary.opacity(0.08)
-                        : Color.primary.opacity(0.04),
+                    LinearGradient(
+                        colors: [Color(red: 0.15, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.65, blue: 1.0)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(.primary.opacity(hoveredButton == label ? 0.12 : 0.06), lineWidth: 0.5)
                 )
         }
         .buttonStyle(.plain)
-        .help(label)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                hoveredButton = hovering ? label : nil
-            }
-        }
+        .liquidGlassHover(cornerRadius: 7)
+        .help("Open Demo Project with guided AI PPK examples")
     }
 
     private func openProjectPanel() {
@@ -289,10 +294,8 @@ struct ToolbarBrand: View {
     private var duDuLogoImage: NSImage? {
         // Try multiple locations: Resources folder, app bundle
         let candidates = [
-            Bundle.main.url(forResource: "DuDuPMxButton", withExtension: "png"),
-            Bundle.main.url(forResource: "DuDuPMxSource", withExtension: "png"),
-            Bundle.main.resourceURL?.appendingPathComponent("DuDuPMxButton.png"),
-            Bundle.main.resourceURL?.appendingPathComponent("DuDuPMxSource.png"),
+            BundledResource.url(forResource: "DuDuPMxButton", withExtension: "png"),
+            BundledResource.url(forResource: "DuDuPMxSource", withExtension: "png"),
         ]
         for url in candidates {
             if let url, let image = NSImage(contentsOf: url) {

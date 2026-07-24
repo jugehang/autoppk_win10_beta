@@ -32,6 +32,23 @@ fi
 if [[ -f "$ROOT/Resources/autopmx_ga.py" ]]; then
   cp "$ROOT/Resources/autopmx_ga.py" "$BUNDLE/Contents/Resources/autopmx_ga.py"
 fi
+# Rule library files
+for rule in poppk_rules.json poppk_model_library.md PopPK_Expert_Audit_Report.md "NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md" "pk parameters script.R"; do
+  if [[ -f "$ROOT/Resources/$rule" ]]; then
+    cp "$ROOT/Resources/$rule" "$BUNDLE/Contents/Resources/$rule"
+  fi
+done
+# Core diagnostic scripts
+cp "$ROOT/Resources/dose_normalized_ct_plot.R" "$BUNDLE/Contents/Resources/dose_normalized_ct_plot.R"
+for script in autopmx_cli.py Auto_diagnostics.py gof_audit_agent.py gof_plot_script.R \
+    "individual_plot_script.R" "individual plot.R" LST_script.R "model fit agent_lst_pk parameters.py" \
+    model_eval_mod41.R model_generator.py mod_validator.py pop_agent.py poppk_model_templates.py \
+    pydarwin_optimizer.py vpc_audit_agent.py vpc_plot_script.R vpc_plot_script.R.py \
+    workbench_core.py audit_tasks.py autompmx_workbench.py; do
+  if [[ -f "$ROOT/Resources/$script" ]]; then
+    cp "$ROOT/Resources/$script" "$BUNDLE/Contents/Resources/$script"
+  fi
+done
 
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

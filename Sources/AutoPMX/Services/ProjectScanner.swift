@@ -69,8 +69,11 @@ struct ProjectScanner {
 
     static func scanAssets(in projectURL: URL) -> [AssetCategory: [ProjectAsset]] {
         var result = Dictionary(uniqueKeysWithValues: AssetCategory.allCases.map { ($0, [ProjectAsset]()) })
-        // Collect files from project root only (depth 0), plus subdirectory .lst/.ext/.cov artifacts
-        let rootFiles = (try? FileManager.default.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        // Collect files from project root only (depth 0), filter out directories
+        let rootFiles = ((try? FileManager.default.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []).filter { url in
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            return values?.isDirectory != true
+        }
         // Also collect NONMEM table outputs from run directories (catab, cotab, etc.)
         let subdirArtifacts = recursiveFiles(in: projectURL, maxDepth: 1).filter { url in
             let name = url.lastPathComponent
@@ -79,8 +82,19 @@ struct ProjectScanner {
                    upper.hasPrefix("CATAB") || upper.hasPrefix("COTAB") ||
                    upper.hasPrefix("000")
         }
+        // Also collect SCM output files from SCM_run*/ subdirectories (exclude raw data copies like NM_dat.csv)
+        let scmArtifacts = recursiveFiles(in: projectURL, maxDepth: 1).filter { url in
+            let name = url.lastPathComponent.lowercased()
+            let path = url.path.lowercased()
+            guard path.contains("/scm_run") || path.contains("/scm_") else { return false }
+            // Skip raw data copies (original dataset files copied into SCM dir)
+            if name == "nm_dat.csv" || name == "nm_dat_new.csv" { return false }
+            return name.hasPrefix("scm_") || name == "scm_log.txt"
+                || name == "scm_final.xml" || name == "scm_results.csv"
+                || name.hasPrefix("runconcov") || name.hasSuffix(".scm")
+        }
 
-        let allFiles = rootFiles + subdirArtifacts
+        let allFiles = rootFiles + subdirArtifacts + scmArtifacts
         var seenPaths = Set<String>()
 
         for url in allFiles {
@@ -107,21 +121,28 @@ struct ProjectScanner {
     static func parameterEstimates(runID: String, in projectURL: URL) -> [ParameterEstimateRow] {
         let semanticURL = projectURL.appendingPathComponent("data_run\(runID).csv")
         let epsilonShrinkage = parseEpsilonShrinkage(runID: runID, in: projectURL)
+        let etaShrinkages = parseEtaShrinkages(runID: runID, in: projectURL)
 
         if let text = try? String(contentsOf: semanticURL, encoding: .utf8) {
             var rows = ParameterEstimateParser.parseSemanticCSV(text)
             if !rows.isEmpty {
-                // Inject shrinkage into Residual group rows
+                // Inject shrinkage into IIV and Residual group rows
                 rows = rows.map { row in
                     if row.group == "Residual" {
                         return ParameterEstimateRow(
-                            group: row.group,
-                            name: row.name,
-                            estimate: row.estimate,
-                            standardError: row.standardError,
+                            group: row.group, name: row.name,
+                            estimate: row.estimate, standardError: row.standardError,
                             shrinkage: epsilonShrinkage,
-                            estimateText: row.estimateText,
-                            standardErrorText: row.standardErrorText,
+                            estimateText: row.estimateText, standardErrorText: row.standardErrorText,
+                            rseText: row.rseText
+                        )
+                    }
+                    if row.group == "IIV", let s = etaShrinkages[row.name.uppercased()] ?? etaShrinkages["ETA" + row.name.dropFirst("ETA".count)] {
+                        return ParameterEstimateRow(
+                            group: row.group, name: row.name,
+                            estimate: row.estimate, standardError: row.standardError,
+                            shrinkage: s,
+                            estimateText: row.estimateText, standardErrorText: row.standardErrorText,
                             rseText: row.rseText
                         )
                     }
@@ -139,17 +160,23 @@ struct ProjectScanner {
         let modURL = projectURL.appendingPathComponent("run\(runID).mod")
         let modText = try? String(contentsOf: modURL, encoding: .utf8)
         var rows = ParameterEstimateParser.parseExt(text, modText: modText)
-        // Inject epsilon-shrinkage into Residual group rows
+        // Inject shrinkage into IIV and Residual rows
         rows = rows.map { row in
             if row.group == "Residual" {
                 return ParameterEstimateRow(
-                    group: row.group,
-                    name: row.name,
-                    estimate: row.estimate,
-                    standardError: row.standardError,
+                    group: row.group, name: row.name,
+                    estimate: row.estimate, standardError: row.standardError,
                     shrinkage: epsilonShrinkage,
-                    estimateText: row.estimateText,
-                    standardErrorText: row.standardErrorText,
+                    estimateText: row.estimateText, standardErrorText: row.standardErrorText,
+                    rseText: row.rseText
+                )
+            }
+            if row.group == "IIV", let s = etaShrinkages[row.name.uppercased()] ?? etaShrinkages["ETA" + row.name.dropFirst("ETA".count)] {
+                return ParameterEstimateRow(
+                    group: row.group, name: row.name,
+                    estimate: row.estimate, standardError: row.standardError,
+                    shrinkage: s,
+                    estimateText: row.estimateText, standardErrorText: row.standardErrorText,
                     rseText: row.rseText
                 )
             }
@@ -222,6 +249,31 @@ struct ProjectScanner {
             }
         }
         return nil
+    }
+
+    /// Parse ETA-shrinkage from .lst file. Returns a dict mapping ETA name → shrinkage %.
+    static func parseEtaShrinkages(runID: String, in projectURL: URL) -> [String: Double] {
+        let lstURL = projectURL.appendingPathComponent("run\(runID).lst")
+        guard let text = try? String(contentsOf: lstURL, encoding: .utf8) else { return [:] }
+        var result: [String: Double] = [:]
+        // Pattern: "ETASHRINKSD(%)  1.2345E+01  4.5678E+00  ..."
+        // NONMEM prints ETASHRINKSD(%) then the shrinkage % for each ETA
+        let pattern = try? NSRegularExpression(
+            pattern: #"ETASHRINKSD\(%\)((?:\s+[\d.]+(?:[Ee][+-]?\d+)?)+)"#,
+            options: []
+        )
+        let nsText = text as NSString
+        if let match = pattern?.firstMatch(in: text, options: [], range: NSRange(location: 0, length: nsText.length)),
+           match.numberOfRanges > 1 {
+            let valStr = nsText.substring(with: match.range(at: 1))
+            let values = valStr.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            for (i, v) in values.enumerated() {
+                if let pct = Double(v), pct.isFinite {
+                    result["ETA\(i+1)"] = pct
+                }
+            }
+        }
+        return result
     }
 
     static func dataPathCheck(runID: String, dataFile: String, in projectURL: URL) -> DataPathCheck {
@@ -383,8 +435,17 @@ struct ProjectScanner {
         let name = url.lastPathComponent
         let ext = url.pathExtension.lowercased()
         let upper = name.uppercased()
-        if ext == "mod", runIDString(from: name) != nil { return .models }
+        if ext == "mod" { return .models }
         if ["lst", "ext", "cov"].contains(ext), runIDString(from: name) != nil { return .outputs }
+
+        // ── SCM output files (check BEFORE data to capture scm_results.csv etc.) ──
+        let lowerName = name.lowercased()
+        let lowerPath = url.path.lowercased()
+        let isInSCMDir = lowerPath.contains("/scm_run") || lowerPath.contains("/scm_")
+        if lowerName.hasPrefix("scm_") ||
+           ext == "scm" ||
+           (isInSCMDir && (ext == "csv" || ext == "xml" || ext == "txt" || ext == "html")) { return .scm }
+
         // CSV/XLSX files AND NONMEM table files all go under Data
         if ["csv", "xlsx"].contains(ext) ||
            upper.hasPrefix("SDTAB") || upper.hasPrefix("PATAB") ||
@@ -406,14 +467,22 @@ struct ProjectScanner {
         if source.hasPrefix("/") {
             return [URL(fileURLWithPath: source)]
         }
-        return [
+        var candidates: [URL] = [
             projectURL.appendingPathComponent(source),
             workspaceURL.appendingPathComponent(source)
         ]
+        // Also search in app bundle Resources for built-in rule files
+        if let bundleURL = Bundle.main.resourceURL?.appendingPathComponent(source) {
+            candidates.append(bundleURL)
+        }
+        return candidates
     }
 
     private static func isRuleSourceAllowed(_ url: URL, projectURL: URL, workspaceURL: URL) -> Bool {
-        isInside(url, root: projectURL) || isInside(url, root: workspaceURL)
+        if isInside(url, root: projectURL) || isInside(url, root: workspaceURL) { return true }
+        // Allow rule files bundled in the app's Resources
+        if let bundleRes = Bundle.main.resourceURL, isInside(url, root: bundleRes) { return true }
+        return false
     }
 
     private static func isInside(_ url: URL, root: URL) -> Bool {
@@ -456,6 +525,9 @@ struct ProjectScanner {
         let ext = URL(fileURLWithPath: lower).pathExtension
         let stem = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
 
+        // Accept standard mod/lst/ext/cov extensions
+        guard ["mod", "lst", "ext", "cov"].contains(ext) else { return nil }
+
         // Accept GA-prefixed mods: GA001.mod → run ID "001"
         if lower.hasPrefix("ga") {
             let after = String(stem.dropFirst(2))
@@ -469,14 +541,27 @@ struct ProjectScanner {
             return nil
         }
 
+        // Must start with "run"
         guard lower.hasPrefix("run") else { return nil }
 
-        // Accept standard mod/lst/ext/cov extensions
-        guard ["mod", "lst", "ext", "cov"].contains(ext) else { return nil }
+        // "run" followed by pure digits: run32.mod → "32"
+        let afterRun = String(stem.dropFirst(3))
+        if afterRun.allSatisfy(\.isNumber) {
+            return afterRun
+        }
 
-        let start = stem.index(stem.startIndex, offsetBy: 3)
-        let value = String(stem[start...])
-        return value.allSatisfy(\.isNumber) ? value : nil
+        // "run" followed by digits then underscore (descriptive naming): run_32_Dofetilide_Oct_ad3.mod → "32"
+        if let match = firstCapture(in: lower, pattern: #"^run[\W_]?(\d+)"#) {
+            return match
+        }
+
+        // "run" + arbitrary text with embedded digits: run_Dofetilide_Oct_ad3.mod → "3"
+        // use the last digit group in the stem as fallback run ID
+        if let match = firstCapture(in: stem, pattern: #"(\d+)"#) {
+            return match
+        }
+
+        return nil
     }
 
     private static func firstCapture(in text: String, pattern: String) -> String? {

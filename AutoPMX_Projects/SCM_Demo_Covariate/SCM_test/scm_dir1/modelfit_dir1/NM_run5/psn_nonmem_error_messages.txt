@@ -1,0 +1,3 @@
+
+It seems like Fortran compilation by NONMEM's nmfe script failed. Cannot start NONMEM.
+Go to the NM_run5 subdirectory and run psn.mod with NONMEM's nmfe script to diagnose the problem.

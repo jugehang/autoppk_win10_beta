@@ -1,7 +1,7 @@
 import Foundation
 
 struct DatasetProfile {
-    let route: String              // "IV Bolus", "IV Infusion", "Oral", "Mixed"
+    let route: String
     let hasIVBolus: Bool
     let hasIVInfusion: Bool
     let hasOral: Bool
@@ -15,22 +15,51 @@ struct DatasetProfile {
     let hasSTUDY: Bool
     let hasBQL: Bool
     // Data-driven initial value guidance
-    let typicalDV: Double?         // median non-zero DV in the dataset
-    let dvRange: (Double, Double)? // (min, max) of non-zero DV values
+    let typicalDV: Double?
+    let dvRange: (Double, Double)?
+    // Detailed covariate statistics
+    let wtRange: (Double, Double)?     // (min, max) of WT
+    let wtMedian: Double?
+    let ageRange: (Double, Double)?    // (min, max) of AGE
+    let ageMedian: Double?
+    let sexLevels: [Int]               // unique SEX values found
+    let studyLevels: [Int]             // unique STUDY values found
 
     var summary: String {
         var lines = ["Dataset Profile:"]
         lines.append("  Administration route: \(route)")
-        if !doseLevels.isEmpty { lines.append("  Dose levels: \(doseLevels.map { String($0) }.joined(separator: ", "))") }
+        if !doseLevels.isEmpty { lines.append("  Dose groups: \(doseLevels.map { String($0) }.joined(separator: ", ")) (\(doseLevels.count) levels)") }
         lines.append("  Subjects: \(subjectCount), Observations: \(observationCount)")
-        lines.append("  Time range: \(String(format: "%.1f", timeRangeDays.0))–\(String(format: "%.1f", timeRangeDays.1)) days")
-        var covs = [String]()
-        if hasWT { covs.append("WT") }
-        if hasAGE { covs.append("AGE") }
-        if hasSEX { covs.append("SEX") }
-        if hasSTUDY { covs.append("STUDY") }
-        if !covs.isEmpty { lines.append("  Available covariates: \(covs.joined(separator: ", "))") }
-        if hasBQL { lines.append("  BQL flag present") }
+        // TIME unit: PK datasets use hours as standard. Display raw TIME values as hours.
+        lines.append("  Time span: \(String(format: "%.1f", timeRangeDays.0))–\(String(format: "%.1f", timeRangeDays.1)) h")
+        lines.append("  DV range: \(dvRange.map { "\(String(format: "%.1f", $0.0))–\(String(format: "%.1f", $0.1))" } ?? "N/A") (concentration range)")
+        lines.append("")
+
+        lines.append("  ━━━ Available CoVariates ━━━")
+
+        // WT (continuous)
+        if hasWT {
+            lines.append("  WT: \(wtRange.map { "\(String(format: "%.0f", $0.0))–\(String(format: "%.0f", $0.1)) kg" } ?? "N/A"), median = \(wtMedian.map { "\(String(format: "%.0f", $0)) kg" } ?? "N/A")")
+        }
+
+        // AGE (continuous)
+        if hasAGE {
+            lines.append("  AGE: \(ageRange.map { "\(String(format: "%.0f", $0.0))–\(String(format: "%.0f", $0.1)) yr" } ?? "N/A"), median = \(ageMedian.map { "\(String(format: "%.0f", $0)) yr" } ?? "N/A")")
+        }
+
+        // SEX (categorical)
+        if hasSEX {
+            let counts = sexLevels.sorted().map { "\($0)" }.joined(separator: ", ")
+            lines.append("  SEX: \(sexLevels.count) levels (\(counts))")
+        }
+
+        // STUDY (categorical)
+        if hasSTUDY {
+            let counts = studyLevels.sorted().map { "study \($0)" }.joined(separator: ", ")
+            lines.append("  STUDY: \(studyLevels.count) levels (\(counts))")
+        }
+
+        if hasBQL { lines.append("  BQL: flag present in dataset") }
         return lines.joined(separator: "\n")
     }
 }
@@ -489,10 +518,16 @@ struct LLMCommandService {
         if nsError.domain == NSURLErrorDomain {
             switch code {
             case .cannotConnectToHost, .networkConnectionLost, .timedOut, .notConnectedToInternet:
+                let tips = baseURL.contains("11434") ? """
+
+                📌 Ollama 偶发断连是已知问题：大数据量上下文推理时 Ollama 默认 2 分钟超时会导致服务端断开。
+                重启时建议：OLLAMA_NUM_PARALLEL=1 OLLAMA_CONTEXT_LENGTH=131072 ollama serve
+                也可考虑换成 MLX（Apple Silicon）或 LM Studio，长时间运行更稳定。
+                """ : ""
                 return """
                 无法连接本地 LLM 服务：\(baseURL)。
 
-                请先启动 OpenAI-compatible 本地服务（Ollama / LM Studio / MLX 等），然后在 AutoPMX 里按 Test LLM。
+                请先启动 OpenAI-compatible 本地服务（Ollama / LM Studio / MLX 等），然后在 AutoPMX 里按 Test LLM。\(tips)
                 """
             case .badURL:
                 return "LLM Base URL 不合法。LM Studio 通常使用 http://127.0.0.1:1234/v1。"
@@ -527,7 +562,9 @@ struct LLMCommandService {
         runID: String,
         dataFile: String,
         rules: String,
-        apiKey: String = ""
+        apiKey: String = "",
+        hasLag: Bool = false,
+        lagTime: Double = 0
     ) async throws -> String {
         let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
         let profile = analyzeDataset(projectURL: projectURL, dataFile: dataFile)
@@ -629,6 +666,17 @@ struct LLMCommandService {
 
         \(routeHardRule)
 
+        \(hasLag ? """
+        ━━━ ABSORPTION LAG DETECTED ━━━
+        Dose-normalized C-T analysis detected absorption lag (Tlag ≈ \(String(format: "%.2f", lagTime))).
+        Most subjects have near-zero DV at the earliest post-dose time point.
+        Include ALAG1 in $PK for ADVAN2/ADVAN4 models, or define TLAG for ADVAN13:
+          ALAG1 = THETA(n)   (for ADVAN2/ADVAN4)
+          or: TLAG = THETA(n); DADT(1) = KA * A(1) ... with lag logic (for ADVAN13)
+        Add THETA for lag time: (0, \(String(format: "%.2f", max(lagTime * 0.5, 0.1)))) FIX ; Tlag
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        """ : "")}
         \(profile.summary)
 
         TEMPLATE-FIRST RULES:
@@ -803,6 +851,25 @@ struct LLMCommandService {
 
         Start with exactly one word: ACCEPT or REVISE.
 
+        ━━━ OFV DECISION RULE — HARD CONSTRAINT (OVERRIDES ALL ELSE) ━━━
+        When the Evidence includes an OFV table or .ext file with OBJ values for BOTH the current run
+        and a previous run of a DIFFERENT compartment count, compute ΔOFV = OFV_simpler − OFV_complex.
+        This rule is ABSOLUTE — you CANNOT override it with GOF/VPC/subjective judgment:
+
+        ΔOFV > 10.83 (p<0.001, 2 df): The more complex model (2-comp vs 1-comp, or 3-comp vs 2-comp)
+            is STATISTICALLY SIGNIFICANTLY better. You MUST REVISE to continue with the MORE COMPLEX model.
+            Do NOT say ACCEPT. Do NOT say "1-comp is adequate." The data proves otherwise.
+        ΔOFV > 3.84 (p<0.05, 1 df): The improvement is significant. REVISE and favor the complex model.
+        ΔOFV ≤ 3.84: The improvement is NOT significant. The simpler model is preferred.
+
+        If the Evidence contains an OFV for the current 2-comp run and you know the 1-comp OFV
+        (from Parameter Estimates or the .ext file), you MUST compute and apply this rule.
+        If you cannot find both OFV values, note this and proceed with diagnostic evidence.
+
+        EXAMPLE: If 1-comp OFV=850.0 and 2-comp OFV=835.0, then ΔOFV=15.0 > 10.83.
+        You MUST output REVISE and continue with the 2-compartment model.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
         ERROR-FIRST DECISION RULE:
         - If the Evidence contains NONMEM/PsN/NMTRAN failure messages, FMSG text, "AN ERROR WAS FOUND", "NMtran failed", "There is no output", "Could not parse the output file", or a non-zero NONMEM/PsN exit code, you MUST start with REVISE.
         - In that case, diagnose the exact failing control-stream block first and give NEXT_ACTION as one code-level repair. Do not recommend GOF/VPC, covariates, extra compartments, or parameter refinement until the model compiles and produces run*.lst/run*.ext.
@@ -816,21 +883,34 @@ struct LLMCommandService {
         IV 1-cmt: S1=V/1000. IV 2+/3-cmt: S1=V1/1000. Oral: S2=V/1000 or S2=V2/1000.
         The scale parameter references V or V1/V2 which must be defined BEFORE the S1/S2 line.
 
-        PROGRESSIVE MODELING STRATEGY — follow this priority order. All criteria below apply ONLY once the model compiles and the covariance step succeeds:
+        PROGRESSIVE MODELING STRATEGY — follow this priority order:
         1. First establish the best structural model:
-           - ALWAYS start with 1-compartment (ADVAN1 TRANS2 for IV, ADVAN2 TRANS2 for oral). Do NOT jump to 2-comp directly in run002.
-           - Even if 1-comp GOF looks excellent, you MUST escalate to 2-comp to confirm the simpler model is truly better. The OFV drop criterion (>10.83) is used to judge whether the extra compartment is justified.
-           - Only add a second compartment if GOF/VPC clearly show distribution-phase misspecification OR as a deliberate escalation test per Phase 1 of the TWO-PHASE STRATEGY below.
-        2. Then refine the residual error model:
-           - Combined proportional+additive is default. Simplify only if one component is clearly unsupported (RSE > 100% or estimate at boundary). Do NOT toggle prop↔comb in consecutive iterations — oscillating proposals waste runs.
-        3. Then add inter-individual variability (IIV):
-           - Start with IIV on ALL PK parameters (including newly added Q, V2, Q3, V3 when escalating compartments).
-           - Use modest initial OMEGA values (0.04-0.09) for newly added parameters.
+           - Run 1-comp (ADVAN1 TRANS2 for IV, ADVAN2 TRANS2 for oral) as run001.
+           - ALWAYS escalate to 2-comp in the next run to compare. The ΔOFV rule above is the SOLE arbiter.
+           - If 2-comp ΔOFV > 10.83, continue with 2-comp. Then test 3-comp to confirm 2-comp is best.
+           - If 2-comp ΔOFV ≤ 3.84, you may return to 1-comp.
+        2. When escalating compartments (1→2 or 2→3):
+           - RESPECT inherited IIV state from parent: if parent removed V IIV, keep it removed.
+           - If V (central volume) IIV was fixed → V2, V3 IIV start FIXED (same chain: CL→Q, V→V2/V3).
+           - New peripheral parameters (Q, Q3, V2, V3): start with OMEGA FIXED at 0.04 on first 3-comp attempt.
+             If the run converges, try unfixing one at a time in subsequent runs. If it fails, keep all peripheral IIV FIXED.
+           - Only aggressively unfix all IIV on a 3-comp when the 2-comp had ALL IIV freely estimated.
+           - 3-comp models that converge with fixed peripheral IIV are MORE useful than crashed 3-comp models — they still provide structural information (ΔOFV vs 2-comp).
+        3. Covariance or minimization failure on higher-compartment model:
+           - DO NOT retreat to simpler model immediately.
+           - Fix ONE parameter's IIV at a time, in this order:
+             a) Fix IIV on Q3 (3-comp) or Q (2-comp) — peripheral clearances first.
+             b) Fix IIV on V3 (3-comp) or V2 (2-comp).  
+             c) Fix IIV on remaining peripheral parameters one at a time.
+           - Also try: reduce OMEGA BLOCK size, switch to DIAGONAL OMEGA.
+           - Only after 3+ single-parameter fix attempts fail, consider retreating.
+        4. Then refine the residual error model:
+           - Combined proportional+additive is default. Simplify only if one component is clearly unsupported (RSE > 100% or estimate at boundary).
+        5. Then refine IIV on existing parameters:
            - Only remove IIV if eta-shrinkage > 30% or RSE > 50%.
-           - Use eta-shrinkage < 30% to confirm the data supports the random effect.
-        4. Last, screen covariates:
-           - WT on CL or V1, AGE, SEX, STUDY only when supported by eta-covariate plots or OFV drop > 3.84.
-           - Use power function allometric scaling for WT: (WT/median_WT)^THETA.
+
+        COVARIATES ARE FORBIDDEN IN PHASE 1. Any step 6 (covariate) is a PHASE VIOLATION.
+        Covariates begin ONLY after Phase 1 ACCEPT transitions to Phase 2.
 
         ANTI-OSCILLATION RULES:
         - NEVER propose a change that UNDOES what the previous iteration just did (e.g., if run(N-1) removed IIV on V, do NOT re-add it in runN).
@@ -839,45 +919,74 @@ struct LLMCommandService {
         If REVISE, provide:
         - NEXT_ACTION: exactly ONE concrete model change (which record/subroutine/parameter changes)
         - TEMPLATE_ID: the AutoPMX template to use if a structural change is needed; otherwise KEEP_CURRENT_TEMPLATE
-        - RATIONALE: which diagnostic evidence (GOF pattern, VPC misfit, parameter RSE, OFV change) supports it
+        - RATIONALE: which diagnostic evidence (GOF pattern, VPC misfit, parameter RSE, OFV change) supports it, WITH @ref[source] citation
         - SAFETY_CHECK: NONMEM syntax rule to preserve
+
+        All RATIONALE lines must include at least one @ref[RULE_ID: description] citation from the rule context.
 
         ACCEPT only when:
         - All GOF plots show no systematic bias
         - VPC prediction intervals capture observed data well
-        - Parameter RSE < 50%, covariance step successful
-        - No boundary estimates
+        - Parameter RSE < 50% for key structural parameters (CL, V1, V2, Q)
+        - Covariance step successful OR (covariance failed but RSE from $COV UNCONDITIONAL are < 50%)
+        - No boundary estimates for primary PK parameters
         - CWRES centered around zero without trends
+        - (Phase 2 only) ALL available covariates from the Dataset have been tested
+
+        COVARIANCE FAILURE ON HIGHER-COMPARTMENT MODELS:
+        - A 2-comp or 3-comp model with successful minimization but failed covariance step is NOT automatically rejected.
+        - First try the covariance-failure fixes listed in PROGRESSIVE MODELING STRATEGY step 3.
+        - Standard errors from a $COV UNCONDITIONAL run may still be adequate.
+        - Only if RSE > 50% for ALL new compartment parameters (Q, V2, Q3, V3) after trying fixes, consider that the data may not support the extra compartment.
 
         TWO-PHASE MODELING STRATEGY:
 
+        ━━━ IRON RULE: TWO PHASES ARE COMPLETELY SEPARATE ━━━
+        Phase 1 = ONLY structural model work. Phase 2 = ONLY covariates.
+        You CANNOT work on both in the same run. You CANNOT start Phase 2 until Phase 1 is ACCEPTed.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
         ═══ PHASE 1: BASE MODEL SELECTION ═══
-        You must test the NEXT compartment level before accepting the current one.
+        The OFV DECISION RULE at the top of this prompt is the FINAL authority.
 
-        ACCEPT 1-comp: ONLY AFTER 2-comp was tested and fails OFV drop (>10.83) or fails covariance.
-        ACCEPT 2-comp: ONLY AFTER 3-comp was tested and fails OFV drop (>10.83) or fails covariance.
-        NEVER accept at 1-comp without testing 2-comp. NEVER accept at 2-comp without testing 3-comp.
+        ALLOWED changes in Phase 1: compartment count, error model, IIV structure.
+        FORBIDDEN in Phase 1: WT scaling, AGE, SEX, STUDY, or ANY covariate relationship.
+        If you suggest a covariate in Phase 1, that is a PHASE VIOLATION.
 
-        OFV THRESHOLD:
-        - ΔOFV > 10.83 (p<0.001, 2 df): the more complex model is SIGNIFICANTLY better. You MUST continue.
-        - ΔOFV > 3.84 (p<0.05, 1 df): improvement is significant. Favor the complex model.
-        - Do NOT prefer simpler model just because it's simpler. Use the ΔOFV threshold.
+        MUST escalate: 1-comp → 2-comp → 3-comp (test ONE level higher each time)
+        NEVER skip a level. After 2-comp is tested vs 1-comp, test 3-comp vs 2-comp before finalizing.
+        The ΔOFV computed from the Evidence dictates the decision. No exceptions.
+        ONLY output ACCEPT when the structural model is truly finalized (all compartment levels tested).
 
         ═══ PHASE 2: COVARIATE MODEL BUILDING ═══
-        After Phase 1 base model is accepted (usually at 2-comp or 3-comp), IMMEDIATELY begin covariate screening.
-        The next run AFTER base model acceptance MUST add at least one covariate. Do NOT stop — the project
-        continues automatically into Phase 2.
+        FORBIDDEN in Phase 2: changing compartment count, error model type, or IIV structure.
+        If you suggest a structural change in Phase 2, that is a PHASE VIOLATION.
+        ONLY allowed in Phase 2: adding/removing covariate relationships.
+        After Phase 1 base model is accepted, IMMEDIATELY begin covariate screening.
+        The next run AFTER base model acceptance MUST add at least one covariate.
 
-        When the base model is accepted (structural + error + IIV finalized):
-        - If REVISEd because compartment escalation is incomplete, continue Phase 1.
-        - If ACCEPTed and base model is truly finalized: NEXT run MUST start Phase 2 covariate screening.
+        ━━━ COVARIATE COMPLETENESS CHECK (HARD RULE) ━━━
+        Check the "Dataset:" section at the top of Evidence: "Available covariates: WT, AGE, SEX, ...".
+        EVERY available covariate MUST be tested. For each covariate, test against EVERY relevant PK param.
+        If any listed covariate has NOT been tested, you MUST output REVISE (not ACCEPT).
+        Required tests per covariate:
+        - WT: CL, V, Q (all clearance + all volume params) → mandatory FIRST
+        - AGE: CL, V → mandatory SECOND
+        - SEX: CL, V → mandatory THIRD
+        - STUDY: CL, V (if available) → mandatory FOURTH
+        Each covariate is an INDEPENDENT scientific question. One being significant does NOT excuse skipping another.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
         Steps:
-        1. WT allometric scaling on CL, V (mandatory first step): add (WT/median_WT)^THETA to CL and V.
-        2. Forward inclusion: add covariates one at a time (OFV drop > 3.84 keeps)
-        3. Backward elimination: remove each, keep if OFV increase > 6.63
-        4. Clinical significance: PK ratio must be outside 0.8-1.25 to keep
-        5. Bootstrap (≥200 samples) validates final model
+        1. WT allometric scaling: apply to ALL PK params (0.75 for CL/Q, 1.0 for V).
+        2. AGE on CL and V: continuous power/linear. Test separately.
+        3. SEX on CL and V: categorical proportional shift (SEXCOV = 1 + THETA * (SEX - ref)).
+        4. STUDY on CL and V (if multiple studies): categorical shift.
+        Keep each if ΔOFV > 3.84 (forward). Remove if ΔOFV < 6.63 (backward).
+        5. Clinical significance: PK ratio 0.8–1.25.
+        6. Bootstrap (≥200 samples) validates final model.
+
+        Do NOT accept Phase 2 until ALL available covariates from the dataset have been tested.
 
         Previous run: \(previousRun ?? "none")
         Current run: \(runID)
@@ -905,6 +1014,8 @@ struct LLMCommandService {
         nextRun: String,
         rules: String,
         diagnosticSummary: String,
+        isCovariatePhase: Bool = false,
+        forceCompartmentEscalation: Bool = false,
         apiKey: String = ""
     ) async throws -> String {
         let source = projectURL.appendingPathComponent("run\(sourceRun).mod")
@@ -919,6 +1030,133 @@ struct LLMCommandService {
         Create run\(nextRun).mod by applying EXACTLY ONE specific improvement to run\(sourceRun).mod.
         Return ONLY the complete .mod file. No markdown, no explanation.
 
+        ━━━ SOURCE CITATION ━━━
+        At the bottom of the .mod file AFTER $TABLE, add a comment block:
+        ; --- AutoPMX Decision Rationale ---
+        ; @ref[RULE_ID: brief reason]
+        Cite the specific rule, template, or evidence that justifies each change you made.
+        ━━━━━━━━━━━━━━━━━━━┛
+
+        \(forceCompartmentEscalation ? """
+        ━━━ FORCED COMPARTMENT ESCALATION — SYSTEM OVERRIDE ━━━
+        The ACCEPT decision was overridden — next compartment MUST be tested before finalizing.
+        Your ONLY task: upgrade compartment count while preserving the route.
+        1-comp→2-comp: ADVAN1→ADVAN3 (IV) or ADVAN2→ADVAN4 (oral). Add Q, V2.
+        2-comp→3-comp: ADVAN3→ADVAN11 (IV) or ADVAN4→ADVAN12 (oral). Add Q3, V3.
+        Copy all parent THETA values. Add IIV on ALL new params (OMEGA 0.04-0.09).
+        Do NOT change error model, existing IIV, or add covariates.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        """ : "")}
+        \(isCovariatePhase ? """
+        ━━━ COVARIATE SCREENING PHASE (PHASE 2) — ACTIVE NOW ━━━
+        The base structural model has been ACCEPTED. You are NOW in covariate screening.
+        Do NOT change the structural model (ADVAN/TRANS), error model, or IIV structure — they are FINALIZED.
+        Your ONLY task: add EXACTLY ONE covariate relationship per run, following this order:
+
+        STEP 1 (mandatory first): WT allometric scaling — APPLY TO ALL PK PARAMETERS.
+
+        ━━━ CORRECT EXPONENTS (FIXED, not estimated) ━━━
+        Clearance-related: CL, Q, Q2, Q3 → exponent = 0.75 FIX
+        Volume-related:    V, V1, V2, V3   → exponent = 1.0  FIX
+        Add EXACTLY 2 new THETAs: (0, 0.75) FIX and (0, 1.0) FIX
+        REUSE the same exponent THETA for all params of the same type
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        Example for 2-comp IV model:
+          TVCL = THETA(1) * (WT/median_WT)**THETA(NEW_CL_EXP)    → exponent = 0.75 FIX
+          TVV1 = THETA(2) * (WT/median_WT)**THETA(NEW_V_EXP)     → exponent = 1.0  FIX
+          TVQ  = THETA(3) * (WT/median_WT)**THETA(NEW_CL_EXP)    → SAME 0.75 exponent
+          TVV2 = THETA(4) * (WT/median_WT)**THETA(NEW_V_EXP)     → SAME 1.0  exponent
+        Do NOT create separate exponents for each parameter.
+
+        Compute median_WT from the dataset's WT column. Use the actual numeric value.
+
+        STEP 2: SCM-style fast screening — test ALL available covariates as univariate additions.
+          Check the Dataset profile embedded in the Diagnosis: "Available covariates: ..."
+          Test EVERY covariate listed there against ALL relevant PK parameters:
+          - WT → CL, Q, V1, V2 (all params)
+          - AGE → CL, V1
+          - SEX → CL, V1
+          - STUDY → CL, V1 (if available)
+          Run each as a SEPARATE model. Rank candidates by ΔOFV.
+          Keep entries with ΔOFV > 3.84 (p<0.05, 1 df).
+          Do NOT skip any covariate from the dataset profile — each must be tested.
+
+        COVARIATE WRITING RULES BY TYPE:
+        ━━━ CONTINUOUS covariates (WT, AGE, BSA, eGFR, etc.) ━━━
+        Use POWER function centered at the median:
+          TVCL = THETA(CL) * (COV/median_COV)**THETA(COV_exp)
+        Initial exponent: 0.75 for WT on clearance, 1.0 for WT on volume.
+        For AGE: try linear first → TVCL = THETA(CL) * (1 + THETA(AGE_eff)*(AGE-median_AGE))
+        For other continuous covariates: estimate exponent from data (initial 0.1).
+
+        ━━━ CATEGORICAL covariates (SEX, STUDY, RACE, etc.) ━━━
+        Use PROPORTIONAL shift with indicator variable:
+          IF (SEX.EQ.0) SEXFX = 1 + THETA(SEX_CL)   ! female effect
+          IF (SEX.EQ.1) SEXFX = 1                     ! male reference
+          TVCL = THETA(CL) * SEXFX
+        Initial THETA for categorical: small value like 0.1 (10% difference).
+        For STUDY with >2 levels: use nested IF statements or a separate THETA per level.
+
+        ━━━ COMBINATION covariates ━━━
+        WT + AGE combined:  TVCL = THETA(CL) * (WT/70)**0.75 * (1 + THETA(AGE)*(AGE-40))
+        Only test combinations AFTER univariate screening confirms individual significance.
+
+        STEP 3: Forward inclusion (full model building):
+          Add significant covariates one at a time, most significant first.
+          After each addition, re-evaluate remaining candidates (they may become non-significant).
+
+        STEP 4: Backward elimination:
+          From the full model, remove each covariate one at a time.
+          Keep if ΔOFV increase > 6.63 (p<0.01, 1 df).
+          Re-evaluate after each removal.
+
+        STEP 5: Clinical significance:
+          For each retained covariate, compute the PK parameter ratio at extreme covariate values.
+          If ratio stays within 0.8–1.25, the covariate is statistically significant but NOT clinically relevant — remove it.
+
+        Report results after completion: which covariates were kept, which removed, and why.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        """ : "")}
+        ━━━ PARAMETER INHERITANCE — CRITICAL STABILITY RULE ━━━
+        The NEXT model's initial $THETA values MUST be based on the FINAL estimates from the PREVIOUS run.
+        Read the PARAMETER ESTIMATES (.ext file) section below to find the final estimate for each THETA.
+        Then apply these rules to produce initial values for the NEXT model:
+
+        RULE 1 — DIRECT COPY (same parameter, same meaning):
+          If the parameter has the same meaning in both runs (e.g. CL→CL, V→V1):
+            Copy the final estimate, then round UP to 3 significant figures.
+            Example: final CL=23.471 → initial CL=23.5
+            Example: final V1=87.30  → initial V1=87.3
+
+        RULE 2 — GENTLE PERTURBATION (new parameter introduced):
+          When introducing a NEW parameter (e.g. Q when escalating 1→2 comp):
+            Use a SMALL fraction of the nearest existing parameter (see STRUCTURAL ESCALATION below).
+            Do NOT use large arbitrary values — they WILL cause minimization failure.
+
+        RULE 3 — NEVER REGRESS:
+          Do NOT reset parameters to arbitrary round numbers (0.1, 1, 10, 100).
+          The model already converged — the final estimates ARE the best starting point for the next iteration.
+          If CL converged to 23.5, starting the next run with CL=10 is a guaranteed regression and may crash.
+
+        RULE 4 — UPWARD BIAS (safe side):
+          When rounding, always round UP (toward larger values), never down.
+          An initial value slightly above the final estimate is safer than one below.
+          If the final estimate is exactly on a round number boundary, keep it as-is.
+
+        RULE 5 — $OMEGA AND $SIGMA:
+          Copy $OMEGA and $SIGMA initial values from the previous run's $OMEGA/$SIGMA blocks.
+          When adding a new ETA, start with modest variance: 0.04-0.09.
+          $SIGMA 1 FIX is the default for combined error models — keep it FIXed.
+
+        RULE 6 — BOUNDARY CONSTRAINTS:
+          Keep the same (0, value) or (lower, value) boundaries from the previous run.
+          Only tighten a boundary when the final estimate is approaching it.
+          Do NOT set a lower bound > 0 unless the previous run's final estimate is safely above that bound.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
         ━━━ ROUTE IS LOCKED — DO NOT CHANGE ROUTE ━━━
         The route (IV/Oral) was determined from the dataset and is FIXED for the entire modeling run.
         - If source is IV (ADVAN1/ADVAN3/ADVAN11), DO NOT switch to ADVAN2/ADVAN4/ADVAN12 (oral). DO NOT add KA, F1, or depot.
@@ -926,20 +1164,59 @@ struct LLMCommandService {
         - Only allowed structural change: 1-comp → 2-comp → 3-comp within the same route.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
+        \(isCovariatePhase ? """
+        ━━━ PHASE 2 HARD RULE — NO STRUCTURAL CHANGES ━━━
+        The structural model is FINALIZED. Do NOT change ADVAN, TRANS, compartment count, error model type, or IIV architecture.
+        ONLY add/examine/remove covariates. If you touch $SUBROUTINES or change compartment count, the model is WRONG.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+        """ : """
+        ━━━ PHASE 1 HARD RULE — NO COVARIATES ━━━
+        Covariates are ONLY allowed in Phase 2. Do NOT add WT scaling, AGE, SEX, or any covariate relationship.
+        Only work on: structural model (compartments), error model, and IIV.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+        """)}
         EVOLUTION RULES:
-        - FIRST PASS: refine structural model within SAME route (1-comp → 2-comp if evidence supports it)
-        - SECOND PASS: refine error model (combined is default; consider proportional-only or additive-only if justified)
-        - THIRD PASS: add IIV to one parameter at a time (start with CL then V)
-        - FOURTH+ PASS: screen covariates (WT on CL/V1, then SEX, AGE, STUDY)
-        - FIFTH PASS (only when oral+IV data both exist): fit bioavailability F1 relative to IV reference
+        - FIRST PASS: refine structural model (1-comp → 2-comp → 3-comp, test each level)
+        - SECOND PASS: refine error model (combined is default)
+        - THIRD PASS: add/remove IIV one parameter at a time
 
-        PHASE 2 — COVARIATE AUTOSTART:
-        When the AI evaluation says ACCEPT and the base model is finalized (structural + error + IIV done),
-        the NEXT run you produce MUST begin covariate screening. Do NOT generate another copy of the same
-        base model. Add WT allometric scaling on CL and V as the first covariate step:
-          TVCL = THETA(1) * (WT/median_WT)**THETA(5)
-          TVV  = THETA(2) * (WT/median_WT)**THETA(6)
-        Then continue with SEX, AGE, STUDY one at a time in subsequent runs.
+        PHASE 2 — COVARIATE AUTOSTART (WT ALLOMETRIC SCALING):
+
+        ━━━ CRITICAL: CORRECT ALLOMETRIC EXPONENTS ━━━
+        Clearance-related parameters (CL, Q, Q2, Q3): exponent = 0.75 (fixed, not estimated)
+        Volume-related parameters    (V1, V2, V3, V):  exponent = 1.0  (fixed, not estimated)
+
+        APPLY TO ALL PK PARAMETERS — do NOT skip any:
+
+        For a 1-comp model:
+          TVCL = THETA(CL) * (WT/median_WT)**0.75
+          TVV  = THETA(V)  * (WT/median_WT)**1.0
+          → Add 2 new THETAs: (0, 0.75) FIX for CL exponent, (0, 1.0) FIX for V exponent
+
+        For a 2-comp model:
+          TVCL = THETA(CL) * (WT/median_WT)**0.75
+          TVV1 = THETA(V1) * (WT/median_WT)**1.0
+          TVQ  = THETA(Q)  * (WT/median_WT)**0.75
+          TVV2 = THETA(V2) * (WT/median_WT)**1.0
+          → Add 2 new THETAs: (0, 0.75) FIX for clearance exponent, (0, 1.0) FIX for volume exponent
+          → REUSE the same exponent THETA for ALL clearance params and ALL volume params
+          → Do NOT create separate exponents for each parameter
+
+        For a 3-comp model:
+          TVCL = THETA(CL) * (WT/median_WT)**0.75
+          TVV1 = THETA(V1) * (WT/median_WT)**1.0
+          TVQ2 = THETA(Q2) * (WT/median_WT)**0.75
+          TVV2 = THETA(V2) * (WT/median_WT)**1.0
+          TVQ3 = THETA(Q3) * (WT/median_WT)**0.75
+          TVV3 = THETA(V3) * (WT/median_WT)**1.0
+          → Same 2 new THETAs: (0, 0.75) FIX and (0, 1.0) FIX
+
+        COMPUTE median_WT from the dataset's WT column. Use the actual value.
+        If unavailable, use 70 kg as default.
+
+        VIOLATION CHECK: if any clearance param uses 1.0 or any volume param uses 0.75,
+        the model is WRONG. Fix it.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
         STRUCTURAL ESCALATION INITIAL VALUES (CRITICAL — prevents minimization failure):
         When escalating 1-comp → 2-comp: copy CL and V directly from parent run's THETA as CL and V1.
@@ -951,10 +1228,40 @@ struct LLMCommandService {
         Set V3 = V1 * 0.3 to 0.5. Set Q3 = CL * 0.3 to 0.6 (even smaller for third compartment).
 
         IIV STRATEGY FOR NEW COMPARTMENTS (CRITICAL):
-        When adding new compartments (1→2 or 2→3), START WITH IIV ON ALL PK PARAMETERS.
-        This includes the newly added Q, V2, Q3, V3 — give every parameter a chance to be estimated with IIV.
-        Use modest initial OMEGA values: 0.04-0.09 for each new ETA (smaller than CL/V IIV).
-        Only REMOVE IIV on a parameter if RSE > 50% or eta-shrinkage > 30% in the NEXT iteration.
+
+        RULE 1 — RESPECT PREVIOUS IIV DECISIONS:
+        Examine the PARENT run's $OMEGA and $PK blocks. If a parameter's IIV was already REMOVED
+        (ETA absent from $PK, or OMEGA row for that parameter is gone/0 FIX):
+        → Do NOT re-add IIV on that parameter in the escalated model.
+        → For related parameters in new compartments, START WITH IIV FIXED too.
+
+        RULE 2 — CENTRAL → PERIPHERAL IIV CHAIN:
+        If central volume V (or V1) IIV could NOT be estimated (removed in previous run due to shrinkage > 30%
+        or RSE > 50%), then peripheral volumes V2, V3 MUST also start with FIXED IIV.
+        Rationale: if you can't estimate between-subject variability for the central compartment,
+        you certainly cannot estimate it for peripheral compartments.
+        Same chain applies: if CL IIV was fixed → Q, Q2, Q3 IIV start fixed.
+
+        RULE 3 — 3-COMPARTMENT CONVERGENCE STRATEGY (ONE PARAMETER AT A TIME):
+        When a 3-comp model fails minimization:
+        a) First fix: remove IIV on Q3 ONLY (keep Q, V2, V3 IIV if they were estimated before).
+        b) If still fails: remove IIV on V3 ONLY (re-add Q3 IIV, remove V3 IIV).
+        c) If still fails: remove IIV on Q ONLY, keep CL, V1 IIV.
+        d) If still fails: remove IIV on V2 ONLY.
+        e) If still fails with CL+V1-only IIV: ACCEPT 2-comp as the base model.
+        NEVER fix two parameters' IIV in the same run — always one at a time.
+
+        When adding a NEW 3-comp from a stable 2-comp:
+        a) First 3-comp run: inherit ALL existing IIV state from 2-comp (keep what was free, keep what was fixed).
+           Add new Q3, V3 parameters WITHOUT IIV (no OMEGA rows for them).
+        b) If minimization succeeds → add IIV to Q3 in next run (modest 0.04), run again.
+        c) If Q3 IIV succeeds → add IIV to V3 in next run.
+        d) At each step, if adding IIV causes failure, remove it and keep the model as-is.
+        e) A 3-comp model with only CL, V1 IIV is still useful for ΔOFV comparison vs 2-comp.
+
+        RULE 4 — START MODEST:
+        When first adding IIV to a new parameter: OMEGA = 0.04 (not estimated yet, fixed or diagonal).
+        Only increase to 0.09 and unfix after the model converges with 0.04.
         UNIT CONSISTENCY (CRITICAL): Keep the SAME unit for each parameter as the parent run.
         If run001 has CL in L/h, ALL subsequent runs MUST use L/h — NEVER switch to L/day.
         If run001 has CL in L/day, ALL subsequent runs MUST use L/day — NEVER switch to L/h.
@@ -1119,7 +1426,8 @@ struct LLMCommandService {
         projectURL: URL,
         currentRun: String,
         rules: String,
-        apiKey: String = ""
+        apiKey: String = "",
+        personality: String = ""
     ) async throws -> String {
         let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
 
@@ -1131,12 +1439,28 @@ struct LLMCommandService {
 
         var apiMessages: [ChatRequest.Message] = [
             .init(role: "system", content: """
-            You are DuDu PMx, AutoPMX's local AI pharmacometrics assistant.
-            Help with NONMEM, PsN, diagnostics, model iteration, and PopPK reasoning.
-            Keep answers concise, practical, and safety-aware.
-            When drafting NONMEM, use the AutoPMX PopPK model library first and fill templates instead of inventing syntax.
-            For AutoPMX datasets using IGNORE=C, $INPUT must mirror the CSV header order; the C column must stay as literal C and never be C=DROP.
-            Use the active AutoPMX rule/knowledge context together with the model library when answering.
+            You are DuDu PMx, AutoPMX's AI pharmacometrics assistant.
+
+            \(personality)
+
+            Professional rules (always follow these):
+            - Help with NONMEM, PsN, diagnostics, model iteration, and PopPK reasoning.
+            - When drafting NONMEM, use the AutoPMX PopPK model library first and fill templates instead of inventing syntax.
+            - For AutoPMX datasets using IGNORE=C, $INPUT must mirror the CSV header order; the C column must stay as literal C and never be C=DROP.
+            - Use the active AutoPMX rule/knowledge context together with the model library when answering.
+
+            ━━━ SOURCE CITATION REQUIREMENT ━━━
+            For EVERY factual claim or recommendation, cite the source rule ID or knowledge base section
+            using the format: @ref[SOURCE_ID: brief label]
+            Examples:
+              @ref[PMX-COV-001: allometric scaling exponents 0.75/1.0]
+              @ref[FDA-PopPK-2022: Section IV.B structural model selection]
+              @ref[poppk_model_library.md: ADVAN3 TRANS4 template]
+              @ref[NONMEM_RULE: $INPUT must mirror CSV header order]
+            Place citations at the END of each paragraph or bullet point.
+            If multiple rules support a point, cite all with separate @ref[...] tags.
+            Do NOT omit citations — users want to see the evidential basis for your advice.
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
             Current project: \(projectURL.path)
             Current run: \(currentRun)
             project_config.json:
@@ -1244,22 +1568,68 @@ struct LLMCommandService {
         timeout: TimeInterval,
         apiKey: String
     ) async throws -> String {
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = timeout
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuthorization(apiKey, to: &request)
-        request.httpBody = try JSONEncoder().encode(
-            ChatRequest(model: model, messages: [.init(role: "user", content: prompt)], temperature: temperature)
-        )
+        let maxRetries = 3
+        var lastError: Error?
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "LLMCommandService", code: http.statusCode, userInfo: [
-                NSLocalizedDescriptionKey: "LLM request failed with HTTP \(http.statusCode)"
-            ])
+        for attempt in 1...maxRetries {
+            do {
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.timeoutInterval = timeout
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                applyAuthorization(apiKey, to: &request)
+                request.httpBody = try JSONEncoder().encode(
+                    ChatRequest(model: model, messages: [.init(role: "user", content: prompt)], temperature: temperature)
+                )
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw NSError(domain: "LLMCommandService", code: http.statusCode, userInfo: [
+                        NSLocalizedDescriptionKey: "LLM request failed with HTTP \(http.statusCode)"
+                    ])
+                }
+                return try JSONDecoder().decode(ChatResponse.self, from: data).choices.first?.message.content ?? ""
+            } catch {
+                lastError = error
+                let nsError = error as NSError
+                let isConnectionError = nsError.domain == NSURLErrorDomain &&
+                    (nsError.code == NSURLErrorCannotConnectToHost ||
+                     nsError.code == NSURLErrorNetworkConnectionLost ||
+                     nsError.code == NSURLErrorTimedOut ||
+                     nsError.code == NSURLErrorNotConnectedToInternet)
+
+                if isConnectionError && attempt < maxRetries {
+                    let delay = UInt64(pow(2.0, Double(attempt))) * 1_000_000_000  // 2s, 4s, 8s
+                    print("[LLM] Connection lost (attempt \(attempt)/\(maxRetries)), retrying in \(delay/1_000_000_000)s...")
+                    try? await Task.sleep(nanoseconds: delay)
+                    // Quick probe on the base path to see if server is recovering
+                    if let endpoint = URL(string: url.absoluteString.replacingOccurrences(of: "/chat/completions", with: "/models")) {
+                        var probe = URLRequest(url: endpoint)
+                        probe.httpMethod = "GET"
+                        probe.timeoutInterval = 5
+                        applyAuthorization(apiKey, to: &probe)
+                        _ = try? await URLSession.shared.data(for: probe)
+                    }
+                    continue
+                }
+                break
+            }
         }
-        return try JSONDecoder().decode(ChatResponse.self, from: data).choices.first?.message.content ?? ""
+        throw NSError(domain: "LLMCommandService", code: (lastError as? NSError)?.code ?? -1, userInfo: [
+            NSLocalizedDescriptionKey: """
+                无法连接本地 LLM 服务。
+
+                可能原因：
+                1. Ollama / MLX / LM Studio 服务意外中断（大数据量推理时偶发）
+                2. 模型上下文超载导致服务崩溃
+
+                建议：
+                1. 重启本地 LLM 服务后点击 Test LLM
+                2. 增加服务的上下文窗口（如 Ollama: ollama serve 时设置 OLLAMA_NUM_PARALLEL=1 OLLAMA_CONTEXT_LENGTH=131072）
+                3. 使用更大内存容量的模型或降低并发请求
+                4. 在 AutoPMX 中重试
+                """
+        ])
     }
 
     private static func cleanControlStream(_ content: String, projectURL: URL? = nil, dataFile: String? = nil) throws -> String {
@@ -1489,36 +1859,46 @@ struct LLMCommandService {
         """
     }
 
-    static func analyzeDataset(projectURL: URL, dataFile: String) -> DatasetProfile {
+    private static func defaultProfile(hasWT: Bool = false, hasAGE: Bool = false, hasSEX: Bool = false,
+                                        hasSTUDY: Bool = false, hasBQL: Bool = false, obs: Int = 0) -> DatasetProfile {
+        DatasetProfile(route: "Unknown", hasIVBolus: false, hasIVInfusion: false, hasOral: false,
+                       doseLevels: [], subjectCount: 0, observationCount: obs,
+                       timeRangeDays: (0, 0), hasWT: hasWT, hasAGE: hasAGE, hasSEX: hasSEX,
+                       hasSTUDY: hasSTUDY, hasBQL: hasBQL, typicalDV: nil, dvRange: nil,
+                       wtRange: nil, wtMedian: nil, ageRange: nil, ageMedian: nil,
+                       sexLevels: [], studyLevels: [])
+    }
+
+    static func analyzeDataset(projectURL: URL, dataFile: String, log: ((String) -> Void)? = nil) -> DatasetProfile {
         let url = projectURL.appendingPathComponent(dataFile)
+        log?("ANA diag: reading \(dataFile) from \(url.path)")
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
-            return DatasetProfile(route: "Unknown", hasIVBolus: false, hasIVInfusion: false, hasOral: false,
-                                  doseLevels: [], subjectCount: 0, observationCount: 0,
-                                  timeRangeDays: (0, 0), hasWT: false, hasAGE: false, hasSEX: false,
-                                  hasSTUDY: false, hasBQL: false, typicalDV: nil, dvRange: nil)
+            log?("ANA diag: FAILED to read file at \(url.path) — file may not exist or encoding wrong")
+            return defaultProfile()
         }
-        let lines = raw.split(separator: "\n", omittingEmptySubsequences: true)
+        // Normalize line endings: handle \r\n (Windows), \r (old Mac), \n (Unix)
+        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+                             .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: true)
         guard let headerLine = lines.first, lines.count > 1 else {
-            return DatasetProfile(route: "Unknown", hasIVBolus: false, hasIVInfusion: false, hasOral: false,
-                                  doseLevels: [], subjectCount: 0, observationCount: 0,
-                                  timeRangeDays: (0, 0), hasWT: false, hasAGE: false, hasSEX: false,
-                                  hasSTUDY: false, hasBQL: false, typicalDV: nil, dvRange: nil)
+            log?("ANA diag: file has no header or only 1 line (lines=\(lines.count), rawLen=\(raw.count))")
+            return defaultProfile()
         }
         let headers = parseCSVLine(String(headerLine)).map { $0.trimmingCharacters(in: .whitespaces).uppercased() }
+        log?("ANA diag: CSV headers parsed = \(headers.joined(separator: ", "))")
         let hasWT = headers.contains("WT")
         let hasAGE = headers.contains("AGE")
         let hasSEX = headers.contains("SEX")
         let hasSTUDY = headers.contains("STUDY")
         let hasBQL = headers.contains("BQL")
+        log?("ANA diag: hasWT=\(hasWT) hasAGE=\(hasAGE) hasSEX=\(hasSEX) hasSTUDY=\(hasSTUDY) hasBQL=\(hasBQL)")
 
         // Find column indices
         guard let idIdx = headers.firstIndex(of: "ID"),
               let timeIdx = headers.firstIndex(of: "TIME"),
               let dvIdx = headers.firstIndex(of: "DV") else {
-            return DatasetProfile(route: "Unknown", hasIVBolus: false, hasIVInfusion: false, hasOral: false,
-                                  doseLevels: [], subjectCount: 0, observationCount: lines.count - 1,
-                                  timeRangeDays: (0, 0), hasWT: hasWT, hasAGE: hasAGE, hasSEX: hasSEX,
-                                  hasSTUDY: hasSTUDY, hasBQL: hasBQL, typicalDV: nil, dvRange: nil)
+            return defaultProfile(hasWT: hasWT, hasAGE: hasAGE, hasSEX: hasSEX,
+                                  hasSTUDY: hasSTUDY, hasBQL: hasBQL, obs: lines.count - 1)
         }
         let cmtIdx = headers.firstIndex(of: "CMT")
         let amtIdx = headers.firstIndex(of: "AMT")
@@ -1528,12 +1908,22 @@ struct LLMCommandService {
         let evidIdx = headers.firstIndex(of: "EVID")
 
         var subjectIDs = Set<String>()
+        var covariateSubjects = Set<String>()  // track which subjects we've extracted covariates from
         var doseValues = Set<Double>()
         var hasIVBolus = false
         var hasIVInfusion = false
         var hasOral = false
         var minTime = Double.infinity
         var maxTime = -Double.infinity
+        // Covariate statistics
+        var wtValues = [Double]()
+        var ageValues = [Double]()
+        var sexValues = Set<Int>()
+        var studyValues = Set<Int>()
+        let wtIdx = headers.firstIndex(of: "WT")
+        let ageIdx = headers.firstIndex(of: "AGE")
+        let sexIdx = headers.firstIndex(of: "SEX")
+        let studyIdx = headers.firstIndex(of: "STUDY")
         let dataRows = lines.dropFirst()
 
         for line in dataRows {
@@ -1557,6 +1947,15 @@ struct LLMCommandService {
             if let tVal = Double(cols[timeIdx]) {
                 minTime = min(minTime, tVal)
                 maxTime = max(maxTime, tVal)
+            }
+
+            // Extract covariate values (only once per subject)
+            if !idStr.isEmpty, idStr != ".", !covariateSubjects.contains(idStr) {
+                covariateSubjects.insert(idStr)
+                if let w = doubleValue(at: wtIdx), w > 0 { wtValues.append(w) }
+                if let a = doubleValue(at: ageIdx), a > 0 { ageValues.append(a) }
+                if let s = intValue(at: sexIdx) { sexValues.insert(s) }
+                if let st = intValue(at: studyIdx) { studyValues.insert(st) }
             }
 
             // Analyze dosing records (EVID=1 or EVID=4 typically)
@@ -1629,7 +2028,13 @@ struct LLMCommandService {
             hasSTUDY: hasSTUDY,
             hasBQL: hasBQL,
             typicalDV: typicalDV,
-            dvRange: dvRange
+            dvRange: dvRange,
+            wtRange: wtValues.isEmpty ? nil : (wtValues.min()!, wtValues.max()!),
+            wtMedian: wtValues.isEmpty ? nil : wtValues.sorted()[wtValues.count / 2],
+            ageRange: ageValues.isEmpty ? nil : (ageValues.min()!, ageValues.max()!),
+            ageMedian: ageValues.isEmpty ? nil : ageValues.sorted()[ageValues.count / 2],
+            sexLevels: Array(sexValues),
+            studyLevels: Array(studyValues)
         )
     }
 
@@ -1652,5 +2057,307 @@ struct LLMCommandService {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         request.addValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
+    }
+
+    // MARK: - SCM Config Generation
+
+    /// Build a PsN SCM configuration file. Swift builds all the static parts.
+    /// AI is only asked to detect PK parameters with IIV from the $PK block.
+    static func generateSCMConfig(
+        baseURL: String,
+        model: String,
+        modText: String,
+        dataFile: String,
+        modFileName: String,       // e.g. "run32.mod"
+        projectURL: URL,
+        apiKey: String = "",
+        pForward: String = "0.01",
+        pBackward: String = "0.001",
+        log: ((String) -> Void)? = nil
+    ) async throws -> String {
+        let profile = analyzeDataset(projectURL: projectURL, dataFile: dataFile, log: log)
+
+        // ── Find $INPUT line ──
+        let rawInputLine = modText.components(separatedBy: "\n")
+            .first(where: { $0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("$INPUT") })?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        log?("SCM diag: raw $INPUT line: \(rawInputLine)")
+
+        // Strip $INPUT prefix to get column names only
+        let inputLine = rawInputLine.uppercased().hasPrefix("$INPUT")
+            ? String(rawInputLine.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            : rawInputLine
+        let modelInput = inputLine.uppercased()
+        log?("SCM diag: columns from $INPUT: \(modelInput)")
+
+        // ── Pre‑compute covariate lists from dataset profile + $INPUT cross‑check ──
+        log?("SCM diag: dataset profile - hasWT:\(profile.hasWT) hasAGE:\(profile.hasAGE) hasSEX:\(profile.hasSEX)")
+        log?("SCM diag: modelInput contains AGE:\(modelInput.contains("AGE")), WT:\(modelInput.contains("WT")), SEX:\(modelInput.contains("SEX"))")
+
+        // Fallback: if analyzeDataset() didn't find ANY covariate columns (likely file/parse error),
+        // trust the $INPUT line directly — it IS the authoritative source for model columns.
+        let dsAllFalse = !profile.hasWT && !profile.hasAGE && !profile.hasSEX && !profile.hasSTUDY
+        let inputHasAny = modelInput.contains("WT") || modelInput.contains("AGE") || modelInput.contains("SEX") || modelInput.contains("STUD")
+        let useInputFallback = dsAllFalse && inputHasAny
+        if useInputFallback {
+            log?("SCM diag: dataset profile returned NO covariates, falling back to $INPUT line")
+        }
+        let effectiveHasWT  = useInputFallback ? modelInput.contains("WT")  : profile.hasWT
+        let effectiveHasAGE = useInputFallback ? modelInput.contains("AGE") : profile.hasAGE
+        let effectiveHasSEX = useInputFallback ? modelInput.contains("SEX") : profile.hasSEX
+        let effectiveHasSTUDY = useInputFallback ? (modelInput.contains("STUD") || modelInput.contains("STUDY")) : profile.hasSTUDY
+        log?("SCM diag: effective — hasWT:\(effectiveHasWT) hasAGE:\(effectiveHasAGE) hasSEX:\(effectiveHasSEX) hasSTUDY:\(effectiveHasSTUDY)")
+
+        let contCovs: [String] = {
+            var list: [String] = []
+            if effectiveHasAGE && modelInput.contains("AGE") { list.append("AGE") }
+            if effectiveHasWT && modelInput.contains("WT") { list.append("WT") }
+            return list
+        }()
+        let catCovs: [String] = {
+            var list: [String] = []
+            if effectiveHasSEX && modelInput.contains("SEX") { list.append("SEX") }
+            if effectiveHasSTUDY && (modelInput.contains("STUD") || modelInput.contains("STUDY")) { list.append("STUD") }
+            return list
+        }()
+        let contCovStr = contCovs.joined(separator: ",")
+        let catCovStr = catCovs.joined(separator: ",")
+        let allCovs = contCovs + catCovs
+        let allCovStr = allCovs.joined(separator: ",")
+        log?("SCM diag: contCovs=[\(contCovStr)], catCovs=[\(catCovStr)], allCovs=[\(allCovStr)]")
+
+        // valid_states: continuous = 1, {N+3}; categorical = 1, {M+1}
+        // Use max() to avoid "1,1" duplicate states error when no covariates
+        let contMaxState = max(contCovs.count + 3, 3)
+        let catMaxState = max(catCovs.count + 1, 1)
+        log?("SCM diag: valid_states → continuous=1,\(contMaxState) categorical=1,\(catMaxState)")
+
+        // ── Ask AI ONLY to detect IIV params from $PK ──
+        var iivParams: [String] = []
+        do {
+            iivParams = try await detectIIVParams(
+                baseURL: baseURL, model: model,
+                modText: modText, apiKey: apiKey
+            )
+            log?("SCM diag: AI-detected IIV params: \(iivParams)")
+        } catch {
+            log?("SCM diag: AI IIV detection failed (\(error.localizedDescription)), using fallback")
+            iivParams = fallbackIIVDetection(modText: modText)
+            log?("SCM diag: fallback IIV detection: \(iivParams)")
+        }
+
+        // ── Build the config entirely in Swift ──
+        var lines: [String] = []
+        lines.append("model = \(modFileName)")
+        lines.append("threads =40")
+        lines.append("search_direction=\(pForward == pBackward ? "forward" : "both")")
+        lines.append("p_forward=\(pForward)")
+        lines.append("p_backward=\(pBackward)")
+        lines.append("abort_on_fail=0")
+        lines.append("")
+        lines.append("continuous_covariates=\(contCovStr)")
+        lines.append("categorical_covariates=\(catCovStr)")
+        lines.append("")
+        lines.append("[test_relations]")
+        for param in iivParams {
+            lines.append("\(param)=\(allCovStr)")
+        }
+        lines.append("")
+        lines.append("[valid_states]")
+        lines.append("continuous = 1,\(contMaxState)")
+        lines.append("categorical = 1,\(catMaxState)")
+
+        let config = lines.joined(separator: "\n") + "\n"
+        log?("SCM diag: generated config (\(config.count) bytes)")
+        return config
+    }
+
+    /// Ask AI ONLY: which PK parameters in the $PK block have IIV (i.e. are multiplied by EXP(ETA)).
+    /// Returns a list of parameter names like ["CL", "CLM"].
+    private static func detectIIVParams(
+        baseURL: String,
+        model: String,
+        modText: String,
+        apiKey: String
+    ) async throws -> [String] {
+        let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
+
+        let prompt = """
+        You are analyzing a NONMEM $PK block. Find ALL PK parameters that have IIV (inter‑individual variability).
+        IIV means the parameter definition contains "EXP(ETA" — for example:
+          CL = THETA(1)*EXP(ETA(1))   →  param name = CL
+          V2 = THETA(2)*EXP(ETA(2))   →  param name = V2
+
+        ⚠️ CRITICAL: Output ONLY the parameter names, ONE PER LINE. NO markdown, NO explanations, NO commentary.
+
+        $PK block:
+        \(modText.prefix(20_000))
+
+        List PK params with IIV (one per line):
+        """
+
+        let raw = try await sendChatPrompt(url: url, model: model, prompt: prompt, temperature: 0.0, timeout: 60, apiKey: apiKey)
+        let stripped = raw
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Parse: one param per line, skip empty lines
+        let params = stripped.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") && !$0.hasPrefix("//") && !$0.hasPrefix("-") && !$0.hasPrefix("*") }
+            .filter { $0.rangeOfCharacter(from: .letters) != nil }
+
+        // Fallback: if AI returned garbage, do a simple regex scan in Swift
+        if params.isEmpty {
+            return fallbackIIVDetection(modText: modText)
+        }
+        return params
+    }
+
+    /// Simple fallback: scan $PK block for EXP(ETA(...)) and extract the variable name.
+    private static func fallbackIIVDetection(modText: String) -> [String] {
+        var params: [String] = []
+        let lines = modText.components(separatedBy: "\n")
+        var inPK = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.uppercased().hasPrefix("$PK") { inPK = true; continue }
+            if inPK && trimmed.hasPrefix("$") && !trimmed.uppercased().hasPrefix("$PK") { inPK = false; continue }
+            guard inPK else { continue }
+
+            if trimmed.uppercased().contains("EXP(ETA") {
+                // Extract the PK param name (left side of first =)
+                let eqParts = trimmed.components(separatedBy: "=")
+                if let lhs = eqParts.first {
+                    let name = lhs.trimmingCharacters(in: .whitespaces)
+                    if !name.isEmpty, name.rangeOfCharacter(from: .letters) != nil {
+                        params.append(name)
+                    }
+                }
+            }
+        }
+        return params
+    }
+
+    /// AI suggests a fix for a failing SCM config. Returns the FIXED config built in Swift.
+    static func fixSCMConfig(
+        baseURL: String,
+        model: String,
+        currentConfig: String,
+        errorLog: String,
+        modelText: String,
+        skillMemory: String = "",
+        apiKey: String = "",
+        pForward: String = "0.01",
+        pBackward: String = "0.001"
+    ) async throws -> String {
+        let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
+
+        // Extract current config values (these are already correct from the initial build)
+        let cfgLines = currentConfig.components(separatedBy: "\n")
+        var modelFile = "model.mod"
+        var contCovs = "WT,AGE"
+        var catCovs = "SEX"
+        var searchDir = "both"
+        var iivParams: [String] = []
+        for line in cfgLines {
+            let lower = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if lower.hasPrefix("model") && line.contains("=") {
+                modelFile = line.components(separatedBy: "=").last?.trimmingCharacters(in: .whitespaces) ?? modelFile
+            }
+            if lower.hasPrefix("continuous_covariates") {
+                let val = line.components(separatedBy: "=").last?.trimmingCharacters(in: .whitespaces) ?? ""
+                if !val.isEmpty { contCovs = val }
+            }
+            if lower.hasPrefix("categorical_covariates") {
+                let val = line.components(separatedBy: "=").last?.trimmingCharacters(in: .whitespaces) ?? ""
+                catCovs = val
+            }
+            if lower.hasPrefix("search_direction") {
+                let val = line.components(separatedBy: "=").last?.trimmingCharacters(in: .whitespaces) ?? "both"
+                searchDir = val
+            }
+        }
+
+        // Ask AI ONLY what to change (remove which covs, change direction, etc.)
+        let prompt = """
+        A PsN SCM run failed. Based on the error, suggest what to CHANGE (not rewrite the whole config).
+
+        ━━━ CURRENT CONFIG ━━━
+        \(currentConfig)
+
+        ━━━ ERROR ━━━
+        \(errorLog)
+
+        \(skillMemory)
+
+        ━━━ INSTRUCTIONS ━━━
+        Output ONLY the FIXES, one per line. Valid fix lines:
+          REMOVE_COV=AGE        → remove AGE from all covariate lists
+          REMOVE_COV=WT         → remove WT from all covariate lists
+          REMOVE_COV=SEX        → remove SEX from all covariate lists
+          SEARCH_DIR=forward    → change search_direction to forward
+          SEARCH_DIR=backward   → change search_direction to backward
+          SEARCH_DIR=both       → keep both
+
+        For MINIMIZATION TERMINATED: try REMOVE_COV for the least important covariate first.
+        For ROUNDING ERROR: REMOVE_COV for the covariate with near-zero variance.
+        For Hessian/COVARIANCE STEP: try SEARCH_DIR=forward first, then REMOVE_COV if still failing.
+
+        Output fix lines ONLY:
+        """
+
+        let raw = try await sendChatPrompt(url: url, model: model, prompt: prompt, temperature: 0.1, timeout: 60, apiKey: apiKey)
+        let stripped = raw
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Parse AI fix instructions
+        for line in stripped.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("REMOVE_COV=") {
+                let cov = trimmed.replacingOccurrences(of: "REMOVE_COV=", with: "").trimmingCharacters(in: .whitespaces)
+                contCovs = contCovs.components(separatedBy: ",").filter { $0.trimmingCharacters(in: .whitespaces) != cov }.joined(separator: ",")
+                catCovs = catCovs.components(separatedBy: ",").filter { $0.trimmingCharacters(in: .whitespaces) != cov }.joined(separator: ",")
+            }
+            if trimmed.hasPrefix("SEARCH_DIR=") {
+                let dir = trimmed.replacingOccurrences(of: "SEARCH_DIR=", with: "").trimmingCharacters(in: .whitespaces)
+                searchDir = dir
+            }
+        }
+
+        // Re-detect IIV params (may have changed if model was modified)
+        let params = fallbackIIVDetection(modText: modelText)
+        if !params.isEmpty { iivParams = params }
+
+        // Rebuild the config with AI‑suggested fixes
+        let contCovStr = contCovs.trimmingCharacters(in: CharacterSet(charactersIn: ","))
+        let catCovStr = catCovs.trimmingCharacters(in: CharacterSet(charactersIn: ","))
+        let allCovStr = [contCovStr, catCovStr].filter { !$0.isEmpty }.joined(separator: ",")
+        let contMax = max(contCovStr.split(separator: ",").count + 3, 3)
+        let catMax = max(catCovStr.split(separator: ",").count + 1, 1)
+
+        var lines: [String] = []
+        lines.append("model = \(modelFile)")
+        lines.append("threads =40")
+        lines.append("search_direction=\(searchDir)")
+        lines.append("p_forward=\(pForward)")
+        lines.append("p_backward=\(pBackward)")
+        lines.append("abort_on_fail=0")
+        lines.append("")
+        lines.append("continuous_covariates=\(contCovStr)")
+        lines.append("categorical_covariates=\(catCovStr)")
+        lines.append("")
+        lines.append("[test_relations]")
+        for param in iivParams {
+            lines.append("\(param)=\(allCovStr)")
+        }
+        lines.append("")
+        lines.append("[valid_states]")
+        lines.append("continuous = 1,\(contMax)")
+        lines.append("categorical = 1,\(catMax)")
+
+        return lines.joined(separator: "\n") + "\n"
     }
 }
