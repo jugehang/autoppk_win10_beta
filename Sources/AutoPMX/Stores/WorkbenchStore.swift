@@ -2208,14 +2208,18 @@ final class WorkbenchStore: ObservableObject {
                     // Show the C-T plot to the user in the chat
                     let ctImgName = activeDataFile.replacingOccurrences(of: ".csv", with: "") + "_dose_norm_ct.png"
                     let ctImgPath = projectURL.appendingPathComponent(ctImgName).path
-                    if FileManager.default.fileExists(atPath: ctImgPath) {
+                    let ctPlotGenerated = FileManager.default.fileExists(atPath: ctImgPath)
+                    if ctPlotGenerated {
                         assistantMessages.append(AssistantMessage(role: .system, text: "📊 Dose-Normalized C-T Plot: file://\(ctImgPath)"))
                     }
-                    if lagInfo.hasLag {
+                    if ctPlotGenerated && lagInfo.hasLag {
                         runner.append("CT analysis: absorption lag detected (Tlag ≈ \(String(format: "%.2f", lagInfo.lagTime))).\n\(lagInfo.recommendation)")
                         assistantMessages.append(AssistantMessage(role: .system, text: "📈 C-T 分析：检测到吸收滞后（Tlag ≈ \(String(format: "%.2f", lagInfo.lagTime))）。\n\n\(lagInfo.recommendation)"))
-                    } else {
+                    } else if ctPlotGenerated {
                         assistantMessages.append(AssistantMessage(role: .system, text: "📈 C-T 分析完成：未检测到吸收滞后。C-T 曲线图已在侧边栏 Figures 中查看。"))
+                    } else {
+                        updateLastThinkingStep(type: .error, detail: "C-T plot failed — R script error")
+                        assistantMessages.append(AssistantMessage(role: .system, text: "⚠️ C-T 曲线绘制失败，请检查 R 环境（需安装 ggplot2 / dplyr / tidyr）。"))
                     }
                 }
 
@@ -3603,16 +3607,27 @@ final class WorkbenchStore: ObservableObject {
         // Run synchronously (fast R script)
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = ["-c", cmd + " 2>/dev/null"]
+        task.arguments = ["-c", cmd]
         task.currentDirectoryURL = projectURL
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        task.standardOutput = stdoutPipe
+        task.standardError = stderrPipe
         try? task.run()
         task.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
+        let exitCode = task.terminationStatus
+        let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = (String(data: outData, encoding: .utf8) ?? "")
+        let errors = (String(data: errData, encoding: .utf8) ?? "")
+        if exitCode != 0 {
+            runner.append("C-T analysis R script failed (exit \(exitCode))")
+            if !errors.isEmpty { runner.append(errors) }
+            refreshWorkspace()
+            return (false, 0, "")
+        }
         runner.append(output)
+        if !errors.isEmpty { runner.append(errors) }
 
         // Parse structured output
         var hasLag = false
