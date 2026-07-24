@@ -9,9 +9,10 @@ library(RColorBrewer)
 # 1. 获取参数
 args <- commandArgs(trailingOnly = TRUE)
 mod_index <- if(length(args) > 0) args[1] else "41"
+# 第二个参数为真实 sdtab 文件名（由 Python 层从 $TABLE FILE= 检测）
+sdtab_name <- if(length(args) > 1) args[2] else paste0("sdtab", mod_index)
 
 config_file <- "project_config.json"
-sdtab_name  <- paste0("sdtab", mod_index)
 
 if (!file.exists(sdtab_name))  stop(paste0("❌ 错误：未找到数据文件 ", sdtab_name))
 

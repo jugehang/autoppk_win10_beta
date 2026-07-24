@@ -7,6 +7,8 @@ library(jsonlite)
 
 args <- commandArgs(trailingOnly = TRUE)
 mod_index <- if(length(args) > 0) args[1] else "41"
+# 第二个参数为真实 sdtab 文件名（由 Python 层从 $TABLE FILE= 检测）
+sdtab_name <- if(length(args) > 1) args[2] else paste0("sdtab", mod_index)
 
 # 1. 加载配置与数据（缺失时使用内置默认值）
 if (file.exists("project_config.json")) {
@@ -15,7 +17,6 @@ if (file.exists("project_config.json")) {
   message("⚠️ project_config.json 未找到，使用内置默认配置")
   config <- list(units = list(time = "Time (h)", conc = "Concentration"))
 }
-sdtab_name <- paste0("sdtab", mod_index)
 
 if (!file.exists(sdtab_name)) stop(paste0("❌ 未找到数据：", sdtab_name))
 mydata <- read.table(sdtab_name, skip = 1, header = TRUE) %>% filter(MDV == 0)

@@ -625,6 +625,41 @@ class TaskRunner:
         )
         self.log(f"Auto-generated project_config.json (grouping factor: {group_factor})")
 
+    def _find_sdtab_file(self, run_id: str) -> str:
+        """Detect actual sdtab filename from mod file $TABLE record or project directory.
+
+        Priority:
+        1. Parse FILE= from the mod file's $TABLE line (e.g. sdtab1_Dofetilide_Oct_1)
+        2. Scan project directory for any sdtab* file
+        3. Fallback to conventional name sdtab{run_id}
+        """
+        # 1. Try parsing $TABLE FILE= from mod file
+        mod_path = self.root / f"run{run_id}.mod"
+        if mod_path.exists():
+            try:
+                text = mod_path.read_text(encoding="utf-8", errors="ignore")
+                import re
+                match = re.search(r"(?im)^\s*\$TABLE\b.*?\bFILE\s*=\s*(\S+)", text)
+                if match:
+                    filename = match.group(1).rstrip(",;")
+                    candidate = self.root / filename
+                    if candidate.exists():
+                        self.log(f"Detected sdtab from $TABLE: {filename}")
+                        return filename
+            except Exception:
+                pass
+
+        # 2. Scan project directory for any sdtab* file
+        candidates = sorted(
+            p for p in self.root.glob("sdtab*") if p.is_file()
+        )
+        if candidates:
+            self.log(f"Detected sdtab from directory scan: {candidates[0].name}")
+            return candidates[0].name
+
+        # 3. Fallback to conventional name
+        return f"sdtab{run_id}"
+
     def _run_r_diagnostic_script(self, script: str, label: str, outputs: List[str]) -> int:
         run = self.settings.curr_run
         self._ensure_project_config()
@@ -635,7 +670,12 @@ class TaskRunner:
         if not script_path.exists():
             self.log(f"Skip {label}: missing {script}")
             return 2
-        return stream_subprocess(["Rscript", str(script_path), run], self.root, self.log)
+        # Pass detected sdtab filename for scripts that need it (gof, individual plots)
+        rscript_args = ["Rscript", str(script_path), run]
+        if script in ("gof_plot_script.R", "individual_plot_script.R"):
+            sdtab_name = self._find_sdtab_file(run)
+            rscript_args.append(sdtab_name)
+        return stream_subprocess(rscript_args, self.root, self.log)
 
     def run_pk_parameters(self) -> int:
         run = self.settings.curr_run
