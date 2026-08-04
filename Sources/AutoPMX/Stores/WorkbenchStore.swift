@@ -6338,6 +6338,7 @@ final class WorkbenchStore: ObservableObject {
         | Group | Parameter | Estimate | SE | RSE (%) | Shrinkage (%) |
         |---|---|---|---|---|---|
         """
+        md += "\n"
         for row in parameterRows {
             md += "| \(row.group) | \(row.name) | \(row.estimateText) | \(row.standardErrorText) | \(row.rseText) | \(row.shrinkageText) |\n"
         }
@@ -6366,9 +6367,7 @@ final class WorkbenchStore: ObservableObject {
 
         Bootstrap status: \(bootstrapSucceeded ? "Completed" : "Not completed / failed")
 
-        ```
         \(bootstrapTable.prefix(24_000))
-        ```
 
         ## Limitations
 

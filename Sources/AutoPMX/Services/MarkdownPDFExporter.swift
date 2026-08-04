@@ -43,6 +43,11 @@ enum MarkdownPDFExporter {
             font-size: 11px;
             word-break: break-word;
           }
+          th.num, td.num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+          }
           th { background: #f0f0f4; font-weight: 600; }
           tr:nth-child(even) td { background: #fafafa; }
           tr { page-break-inside: avoid; }
@@ -239,16 +244,32 @@ enum MarkdownPDFExporter {
                 .map { $0.trimmingCharacters(in: .whitespaces) }
         }
         guard let header = rows.first else { return "" }
+        let numericColumns = header.map(isNumericHeader)
         var table = "<table><thead><tr>"
-        table += header.map { "<th>\(inline($0))</th>" }.joined()
+        for (index, heading) in header.enumerated() {
+            let alignment = index < numericColumns.count && numericColumns[index] ? " class=\"num\"" : ""
+            table += "<th\(alignment)>\(inline(heading))</th>"
+        }
         table += "</tr></thead><tbody>"
         for row in rows.dropFirst() {
             table += "<tr>"
-            table += row.map { "<td>\(inline($0))</td>" }.joined()
+            for (index, cell) in row.enumerated() {
+                let alignment = index < numericColumns.count && numericColumns[index] ? " class=\"num\"" : ""
+                table += "<td\(alignment)>\(inline(cell))</td>"
+            }
             table += "</tr>"
         }
         table += "</tbody></table>"
         return table
+    }
+
+    private static func isNumericHeader(_ text: String) -> Bool {
+        let upper = text.uppercased()
+        let terms = [
+            "ESTIMATE", "EST.", "SE", "RSE", "MEDIAN", "MEAN", "BIAS",
+            "OFV", "2.5%", "97.5%", "VALUE", "%"
+        ]
+        return terms.contains { upper.contains($0) }
     }
 
     private static func inline(_ text: String) -> String {
