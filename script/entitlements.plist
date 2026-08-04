@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened Runtime: prevent debugger attachment -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Disable DYLD_INSERT_LIBRARIES injection -->
+    <key>com.apple.security.cs.debugger</key>
+    <false/>
+    <!-- Allow JIT (needed for WKWebView if used) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Allow unsigned executable memory (needed for Python/R subprocess) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

@@ -1,15 +1,22 @@
 import SwiftUI
 
-// MARK: - Liquid Glass Hover Effect (Particles + Gradient)
+extension Color {
+    /// High-contrast text color for liquid-glass sheets: pure black in light mode
+    /// and near-white in dark mode, so the same UI stays readable in both appearances.
+    static let adaptiveSheetText = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(calibratedWhite: 0.97, alpha: 1)
+            : NSColor.black
+    }))
+}
+
+// MARK: - Liquid Glass Hover Effect (Gradient)
 
 struct LiquidGlassHoverModifier: ViewModifier {
     let cornerRadius: CGFloat
     let gradientColors: [Color]
 
     @State private var isHovered = false
-    @Environment(\.particleEffectsEnabled) private var effectsEnabled
-    @Environment(\.particleCount) private var maxParticles
-
     func body(content: Content) -> some View {
         content
             .background(
@@ -31,41 +38,6 @@ struct LiquidGlassHoverModifier: ViewModifier {
                                     endPoint: .bottomTrailing
                                 )
                             )
-                    }
-
-                    // Fine floating particles — random drift, blue gradient, 3× speed
-                    if isHovered, effectsEnabled, maxParticles > 0 {
-                        TimelineView(.animation) { timeline in
-                            let t = timeline.date.timeIntervalSinceReferenceDate
-                            let displayCount = min(maxParticles, 10000)
-                            Canvas { context, size in
-                                for i in 0..<displayCount {
-                                    let seed   = Double(i) * 1.9 + 0.3
-                                    let phaseX = Double(i) * 0.619
-                                    let phaseY = Double(i) * 0.427
-                                    // 3× faster multi-octave pseudo-random drift
-                                    let rawX = sin(t * 0.54 + phaseX) * cos(t * 0.39 + phaseX * 2.7) * 0.6
-                                             + sin(t * 0.27 + phaseX * 0.4) * 0.4
-                                    let rawY = cos(t * 0.48 + phaseY) * sin(t * 0.33 + phaseY * 1.6) * 0.6
-                                             + cos(t * 0.21 + phaseY * 1.1) * 0.4
-                                    let x = size.width  * (0.08 + 0.84 * ((rawX + 1.0) / 2.0))
-                                    let y = size.height * (0.10 + 0.80 * ((rawY + 1.0) / 2.0))
-                                    let alpha  = 0.10 + 0.10 * sin(t * 2.1 + seed)
-                                    let radius = 0.6 + 0.7 * sin(t * 1.05 + seed * 0.7)
-
-                                    // Blue gradient shades
-                                    let bright = 0.55 + 0.45 * sin(t * 0.8 + seed * 1.3)
-                                    let color = Color(
-                                        hue: 0.58 + 0.05 * sin(t * 0.3 + seed),
-                                        saturation: 0.65 + 0.35 * sin(t * 0.4 + seed * 0.6),
-                                        brightness: bright
-                                    ).opacity(alpha)
-                                    let rect = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
-                                    context.fill(Path(ellipseIn: rect), with: .color(color))
-                                }
-                            }
-                        }
-                        .allowsHitTesting(false)
                     }
 
                     // Liquid glass border
@@ -99,6 +71,71 @@ extension View {
     }
 }
 
+// MARK: - Liquid Glass Backdrop
+
+struct LiquidGlassBackdrop: View {
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+            LinearGradient(
+                colors: [
+                    Color.blue.opacity(0.06),
+                    Color.purple.opacity(0.04),
+                    Color.cyan.opacity(0.04),
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Rectangle()
+                .fill(.ultraThinMaterial)
+        }
+    }
+}
+
+// MARK: - Liquid Glass Card
+
+struct LiquidGlassCardModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [tint.opacity(0.14), Color.primary.opacity(0.04)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.5
+                    )
+            )
+            .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+    }
+}
+
+extension View {
+    func liquidGlassCard(cornerRadius: CGFloat = 10, tint: Color = Color.blue) -> some View {
+        modifier(LiquidGlassCardModifier(cornerRadius: cornerRadius, tint: tint))
+    }
+}
+
+extension Button {
+    func liquidGlassButton(
+        cornerRadius: CGFloat = 7,
+        colors: [Color] = [Color(red: 0.15, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.65, blue: 1.0)],
+        height: CGFloat = 26
+    ) -> some View {
+        buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(minHeight: height)
+            .liquidGlassHover(cornerRadius: cornerRadius, colors: colors)
+    }
+}
+
 // MARK: - Liquid Glass Toolbar Button
 
 struct LiquidGlassToolbarButton: View {
@@ -125,26 +162,5 @@ struct LiquidGlassToolbarButton: View {
         .buttonStyle(.plain)
         .liquidGlassHover(cornerRadius: 7, colors: colors)
         .help(label)
-    }
-}
-
-// MARK: - Environment Keys for Particle Settings
-
-private struct ParticleEffectsEnabledKey: EnvironmentKey {
-    static let defaultValue: Bool = true
-}
-
-private struct ParticleCountKey: EnvironmentKey {
-    static let defaultValue: Int = 30
-}
-
-extension EnvironmentValues {
-    var particleEffectsEnabled: Bool {
-        get { self[ParticleEffectsEnabledKey.self] }
-        set { self[ParticleEffectsEnabledKey.self] = newValue }
-    }
-    var particleCount: Int {
-        get { self[ParticleCountKey.self] }
-        set { self[ParticleCountKey.self] = newValue }
     }
 }

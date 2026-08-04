@@ -5,7 +5,7 @@ struct ModelRunEvidence {
     AutoPMX NONMEM control-stream block contract:
     - $PROBLEM: One short human-readable model description. Include run ID, route, structural model, and the single intended change from the parent run.
     - $INPUT: Dataset column labels in exact CSV header order. Do not invent, omit, or reorder labels. C must remain literal C with $DATA IGNORE=C.
-    - $DATA: Dataset file plus filtering rule. For AutoPMX NM_dat_new.csv, use $DATA NM_dat_new.csv IGNORE=C unless the user changes the dataset.
+    - $DATA: Dataset file plus filtering rule. Use $DATA <dataset.csv> IGNORE=C for the project's dataset file unless the user changes it.
     - $SUBROUTINES: PREDPP ADVAN/TRANS choice. Use library templates; choose ADVAN1/2 for 1-compartment, ADVAN3/4 for 2-compartment, ADVAN13 only for explicit ODEs.
     - $MODEL: Only when required by the selected ADVAN or custom ODE. Define COMP names and dosing/observation compartments consistently with CMT.
     - $DES: Only for custom ODE models. Define each DADT(n) and all rates used by the ODE before use.
@@ -15,7 +15,7 @@ struct ModelRunEvidence {
     - $OMEGA: ETA variances or blocks. ETA count and OMEGA dimensions must match ETA references in $PK/$ERROR. Values are variances, not SDs.
     - $SIGMA: EPS residual-error variances or fixed residual scale. EPS count and SIGMA dimensions must match EPS references in $ERROR.
     - $ESTIMATION: Estimation method and runtime controls. AutoPMX default is METHOD=1 INTER MAXEVAL=9999 NOABORT SIG=3 PRINT=10.
-    - $COVARIANCE: Request covariance after estimation. Use UNCONDITIONAL for AutoPMX default unless diagnostics justify otherwise.
+    - $COVARIANCE: Request covariance after estimation. Use PRINT=E MATRIX=S for AutoPMX default unless diagnostics justify otherwise.
     - $TABLE: Output variables for diagnostics. Every table item must be a valid input item, NONMEM item, or variable defined in $PK/$ERROR. Use run-specific FILE names.
     """
 
@@ -106,21 +106,23 @@ struct ModelRunEvidence {
 
     static func fileLooksLikeFailure(_ url: URL) -> Bool {
         let name = url.lastPathComponent
-        if name == "FMSG" || name == "psn_nonmem_error_messages.txt" {
-            return true
-        }
+        // FMSG and psn_nonmem_error_messages.txt often exist even for successful runs
+        // — they contain warnings, not failures. Only treat them as failure if they
+        // actually contain fatal-level content.
+        if name == "psn_nonmem_error_messages.txt" { return true }
 
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
             return false
         }
         let upper = text.uppercased()
+        // Only hard / fatal failures. "UNDEFINED" is a common NONMEM output keyword
+        // (e.g. in NM-TRAN table headers) and must NOT be treated as a failure signal.
         let failureKeywords = [
             "AN ERROR WAS FOUND IN THE CONTROL STATEMENTS",
             "NMTRAN FAILED",
             "THERE IS NO OUTPUT",
             "COULD NOT PARSE",
-            "NEITHER NAME IS A NONMEM OR PREDPP DATA ITEM",
-            "UNDEFINED"
+            "NEITHER NAME IS A NONMEM OR PREDPP DATA ITEM"
         ]
         // Check for real failure keywords (not just $ERROR or 0ERROR)
         return failureKeywords.contains { upper.contains($0) }

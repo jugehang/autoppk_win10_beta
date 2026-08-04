@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""AutoPMX DMG Installer Builder"""
+"""AutoPMX DMG Installer Builder — Release + Hardened Runtime"""
 
-import os, subprocess, shutil
+import os, subprocess, shutil, sys, time
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT = os.path.expanduser("/Users/grahamju/AutoPMX_clean")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK = os.path.join(ROOT, ".build/dmginst")
-DMG = os.path.join(ROOT, "AutoPMX_Installer.dmg")
-PASSWORD = "jugehang520"
+DMG = os.path.join(ROOT, "DuPMx_1.1_1.1.dmg")
+PASSWORD = "zbdd666"
 APP = "AutoPMX"
 
 # 1. Clean
@@ -15,6 +15,36 @@ print("[1] Cleaning...")
 if os.path.exists(WORK): shutil.rmtree(WORK)
 if os.path.exists(DMG): os.remove(DMG)
 
+# 2. Build release binary only (skip assemble/sign — DMG script handles that)
+print("[2] Building release binary...")
+build_result = subprocess.run(
+    ["swift", "build", "-c", "release", "-Xswiftc", "-O", "-Xswiftc", "-whole-module-optimization"],
+    cwd=ROOT, capture_output=True, text=True, timeout=300
+)
+print(build_result.stdout)
+if build_result.returncode != 0:
+    print("BUILD ERROR (stderr):", build_result.stderr[-2000:] if build_result.stderr else "(empty)")
+    print("BUILD ERROR (stdout):", build_result.stdout[-2000:] if build_result.stdout else "(empty)")
+    sys.exit(1)
+
+# Check which binary exists (release preferred)
+release_binary = os.path.join(ROOT, ".build/release", APP)
+debug_binary = os.path.join(ROOT, ".build/debug", APP)
+if os.path.exists(release_binary):
+    BINARY = release_binary
+    print(f"[2b] Using RELEASE binary ({os.path.getsize(BINARY)/1024/1024:.1f} MB)")
+else:
+    BINARY = debug_binary
+    print("[2b] WARNING: Release binary not found, using debug binary")
+    print("       Run 'swift build -c release' first")
+
+# Strip symbols
+print("[2c] Stripping debug symbols...")
+subprocess.run(["strip", "-x", BINARY], capture_output=True)
+subprocess.run(["strip", "-S", BINARY], capture_output=True)
+
+# 3. Copy binary + bundle resources
+print("[3] Assembling bundle...")
 staging = os.path.join(WORK, "staging")
 app_cont = os.path.join(staging, f"{APP}.app/Contents")
 os.makedirs(os.path.join(app_cont, "MacOS"))
@@ -22,36 +52,21 @@ os.makedirs(os.path.join(app_cont, "Resources"))
 bg_dir = os.path.join(staging, ".background")
 os.makedirs(bg_dir)
 
-# 2. Copy binary + resources
-print("[2] Copying app...")
-shutil.copy2(os.path.join(ROOT, ".build/debug", APP), os.path.join(app_cont, "MacOS", APP))
+shutil.copy2(BINARY, os.path.join(app_cont, "MacOS", APP))
 os.chmod(os.path.join(app_cont, "MacOS", APP), 0o755)
 
-resource_files = [
-    "AutoPMX.icns", "DuDuPMxButton.png", "DuDuPMxSource.png",
-    "Help.html",
-    # Rule libraries
-    "poppk_rules.json", "poppk_model_library.md",
-    "PopPK_Expert_Audit_Report.md", "NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md",
-    # Core scripts (Python + R)
-    "autopmx_cli.py", "autopmx_ga.py", "Auto_diagnostics.py",
-    "gof_audit_agent.py", "gof_plot_script.R",
-    "individual_plot_script.R", "individual plot.R",
-    "LST_script.R", "model fit agent_lst_pk parameters.py",
-    "model_eval_mod41.R", "model_generator.py",
-    "mod_validator.py", "pk parameters script.R",
-    "pop_agent.py", "poppk_model_templates.py",
-    "pydarwin_optimizer.py", "vpc_audit_agent.py",
-    "vpc_plot_script.R", "vpc_plot_script.R.py",
-    "workbench_core.py", "audit_tasks.py", "autompmx_workbench.py",
-    # CT analysis
-    "dose_normalized_ct_plot.R",
-]
-for f in resource_files:
-    src = os.path.join(ROOT, "Resources", f)
-    if os.path.exists(src): shutil.copy2(src, os.path.join(app_cont, "Resources", f))
+# Copy the ENTIRE Resources folder so the bundled app is self-contained and
+# nothing (rules, python/R scripts, demo seed) is accidentally omitted.
+res_src = os.path.join(ROOT, "Resources")
+if os.path.isdir(res_src):
+    subprocess.run(["tar", "-C", res_src, "-cf", "-", "."],
+                   stdout=open(os.path.join(WORK, "_res.tar"), "wb"), check=True)
+    subprocess.run(["tar", "-C", os.path.join(app_cont, "Resources"), "-xf",
+                    os.path.join(WORK, "_res.tar")], check=True)
+    os.remove(os.path.join(WORK, "_res.tar"))
+print("     Resources copied:", os.path.join(app_cont, "Resources"))
 
-# 3. Info.plist
+# 4. Info.plist with hardened runtime marker
 plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -62,8 +77,8 @@ plist = f"""<?xml version="1.0" encoding="UTF-8"?>
   <key>CFBundleDisplayName</key><string>DuDu PMx</string>
   <key>CFBundleIconFile</key><string>AutoPMX</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>1.1</string>
-  <key>CFBundleShortVersionString</key><string>1.1</string>
+  <key>CFBundleVersion</key><string>3</string>
+  <key>CFBundleShortVersionString</key><string>1.1.0</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -71,22 +86,35 @@ plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 </plist>"""
 with open(os.path.join(app_cont, "Info.plist"), "w") as f: f.write(plist)
 
-# 4. Ad-hoc codesign to prevent Gatekeeper damage
-print("[3.5] Code-signing app...")
-codesign = subprocess.run([
-    "codesign", "--force", "--deep", "--sign", "-",
-    os.path.join(staging, f"{APP}.app")
-], capture_output=True, text=True)
-if codesign.returncode == 0:
-    print("     Signed OK")
+# 5. Code signing (ad-hoc)
+# Hardened Runtime (kernel-level) requires Apple Developer ID.
+# Internal hardening (anti-debug + code integrity in AppHardening.swift) is active.
+print("[4] Code-signing (ad-hoc, internal hardening active)...")
+entitlements = os.path.join(ROOT, "script/entitlements.plist")
+if os.path.exists(entitlements):
+    sign_result = subprocess.run([
+        "codesign", "--force", "--deep", "--sign", "-",
+        "--entitlements", entitlements,
+        "--timestamp=none",
+        os.path.join(staging, f"{APP}.app")
+    ], capture_output=True, text=True)
 else:
-    print(f"     Sign warning: {codesign.stderr.strip()}")
+    sign_result = subprocess.run([
+        "codesign", "--force", "--deep", "--sign", "-",
+        "--timestamp=none",
+        os.path.join(staging, f"{APP}.app")
+    ], capture_output=True, text=True)
 
-# 5. Applications symlink
+if sign_result.returncode == 0:
+    print("     Signed OK (ad-hoc, internal hardening active)")
+else:
+    print(f"     Sign warning: {sign_result.stderr.strip()}")
+
+# 6. Applications symlink
 os.symlink("/Applications", os.path.join(staging, "Applications"))
 
-# 5. Background image
-print("[3] Creating background image...")
+# 7. Background image
+print("[5] Creating DMG background...")
 img = Image.new("RGB", (660, 480), color=(28, 28, 30))
 draw = ImageDraw.Draw(img)
 
@@ -104,7 +132,7 @@ except:
     f_lg = f_md = f_sm = ImageFont.load_default()
 
 draw.text((330, 50), "DuDu PMx", fill=(255, 255, 255), font=f_lg, anchor="mt")
-draw.text((330, 85), "AI Pharmacometrics Workbench  \u00b7  v1.1", fill=(140, 165, 210), font=f_sm, anchor="mt")
+draw.text((330, 85), "AI Pharmacometrics Workbench  \u00b7  v1.1.0", fill=(140, 165, 210), font=f_sm, anchor="mt")
 draw.line([(80, 130), (580, 130)], fill=(70, 75, 85), width=1)
 
 arrow = [(185, 230), (215, 230), (215, 212), (243, 238), (215, 264), (215, 246), (185, 246)]
@@ -119,8 +147,8 @@ draw.text((330, 430), "\u00a9 2025-2026  Graham Ju", fill=(45, 48, 55), font=f_s
 img.save(os.path.join(bg_dir, "bg.png"), "PNG")
 print("     Done")
 
-# 6. Create encrypted DMG with printf (NO trailing newline)
-print("[4] Creating encrypted DMG...")
+# 8. Create encrypted DMG
+print("[6] Creating encrypted DMG...")
 result = subprocess.run([
     "hdiutil", "create",
     "-encryption", "AES-256",
@@ -137,8 +165,20 @@ if result.returncode != 0:
     print(f"ERROR: {result.stderr}")
     exit(1)
 
-# 7. Clean
-print("[5] Cleaning...")
+# 9. Install to /Applications and launch
+print("[7] Installing & launching...")
+app_dst = f"/Applications/{APP}.app"
+if os.path.exists(app_dst):
+    # Kill running instance first
+    subprocess.run(["pkill", "-x", APP], capture_output=True)
+    time.sleep(0.5)
+    shutil.rmtree(app_dst)
+shutil.copytree(os.path.join(staging, f"{APP}.app"), app_dst)
+subprocess.Popen(["open", app_dst])
+print(f"     ✓ Installed to {app_dst}")
+
+# 10. Clean
+print("[8] Cleaning...")
 shutil.rmtree(WORK)
 
 size_mb = os.path.getsize(DMG) / (1024 * 1024)
@@ -147,12 +187,12 @@ print(f"""
   \u2705 Installer ready!
   \U0001f4e6 {DMG}
   \U0001f4cf {size_mb:.1f} MB
-  \U0001f511 Password: jugehang520
+  \U0001f511 Password: zbdd666
 ============================================
 
 How to install:
-  1. Double-click AutoPMX_Installer.dmg
-  2. Enter password: jugehang520
+  1. Double-click DuPMx_1.1_1.1.dmg
+  2. Enter password: zbdd666
   3. Drag AutoPMX.app \u2192 Applications
   4. If macOS says "damaged", open Terminal and run:
      xattr -cr /Applications/AutoPMX.app

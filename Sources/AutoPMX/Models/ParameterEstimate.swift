@@ -83,7 +83,41 @@ struct ParameterEstimateRow: Identifiable, Hashable {
         if absolute > 0, absolute < 0.001 || absolute >= 10_000 {
             return String(format: "%.3E", value)
         }
-        return String(format: "%.5g", value)
+        return String(format: "%.3g", value)
+    }
+}
+
+extension ParameterEstimateRow {
+    /// Canonical display order for PK parameter tables/reports:
+    /// OFV/AIC → PK parameters → IIV → residual → remaining groups.
+    static func orderedForDisplay(_ rows: [ParameterEstimateRow]) -> [ParameterEstimateRow] {
+        let indexed = rows.enumerated()
+        return indexed.sorted { lhs, rhs in
+            let lr = displayRank(lhs.element)
+            let rr = displayRank(rhs.element)
+            if lr != rr { return lr < rr }
+            if lhs.element.group == "Fit" {
+                let lf = lhs.element.name.uppercased() == "OFV" ? 0 : 1
+                let rf = rhs.element.name.uppercased() == "OFV" ? 0 : 1
+                if lf != rf { return lf < rf }
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
+    private static func displayRank(_ row: ParameterEstimateRow) -> Int {
+        switch row.group {
+        case "Fit":
+            return 0
+        case "PK Parameter", "Fixed", "THETA":
+            return 1
+        case "IIV", "BSV(%)":
+            return 2
+        case "Residual", "SIGMA":
+            return 3
+        default:
+            return 4
+        }
     }
 }
 
@@ -101,7 +135,7 @@ enum ParameterEstimateParser {
         let rseIndex = header.firstIndex(of: "RSE") ?? 3
         let shrinkIdx = header.firstIndex(where: { $0.lowercased().contains("shrink") })
 
-        return rows.compactMap { record in
+        return ParameterEstimateRow.orderedForDisplay(rows.compactMap { record in
             guard record.indices.contains(labelIndex), record.indices.contains(estimateIndex) else { return nil }
             let label = record[labelIndex]
             let estimate = record[estimateIndex]
@@ -122,7 +156,7 @@ enum ParameterEstimateParser {
                 rseText: cleanRSE,
                 shrinkageText: cleanShrink
             )
-        }
+        })
     }
 
     /// Parse .ext file. Uses both the table rows (estimates + SE) and the R-matrix when
@@ -137,77 +171,82 @@ enum ParameterEstimateParser {
             return []
         }
 
-        // Parse header names
-        let names = headerLine
+        // Parse header names — keep ALL including OBJ (last)
+        let allNames = headerLine
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
-            .dropFirst()
-            .dropLast()
+            .dropFirst() // drop "ITERATION"
+        let names = Array(allNames)
 
         // Find final estimates (-1000000000 line)
         guard let finalLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("-1000000000") }) else {
             return []
         }
-        let estimates = numericValuesFromLine(finalLine)
+        let allValues = numericValuesFromLine(finalLine)
+        // Partial fix: keep the full line including OBJ
+        let parts = finalLine.split(whereSeparator: \.isWhitespace).map(String.init)
+        let objValue = parts.last.flatMap { Double($0) }
 
         // Primary SE source: -1000000001 line
         let seLine1 = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("-1000000001") })
-        let seFromLine1 = seLine1.map(numericValuesFromLine) ?? []
+        let seFromLine1 = seLine1.map { numericValuesFromLine($0) } ?? []
 
         // Secondary SE source: -1000000006 line (R-matrix diagonals)
         let seLine6 = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("-1000000006") })
-        let seFromLine6 = seLine6.map(numericValuesFromLine) ?? []
+        let seFromLine6 = seLine6.map { numericValuesFromLine($0) } ?? []
 
-        // Tertiary SE source: -1000000004 line (correlation matrix diagonals = variance of each param)
-        // sqrt(variance) = SE. Available even when COVARIANCE STEP ABORTED.
+        // Tertiary SE source: -1000000004 line (correlation matrix diagonals)
         let seLine4 = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("-1000000004") })
-        let seFromLine4 = seLine4.map(numericValuesFromLine) ?? []
+        let seFromLine4 = seLine4.map { numericValuesFromLine($0) } ?? []
 
-        // Map each parameter
-        let paramNames = Array(names)
         var result: [ParameterEstimateRow] = []
-        for (index, name) in paramNames.enumerated() {
-            guard index < estimates.count else { continue }
-            let estimate = estimates[index]
 
-            // Try multiple SE sources in priority order
+        // Always show OFV as the first row (Fit group)
+        if let ofv = objValue, ofv > 0 {
+            result.append(ParameterEstimateRow(
+                group: "Fit", name: "OFV",
+                estimate: ofv, standardError: nil
+            ))
+            // AIC ≈ OFV + 2 * (number_of_estimated_params)
+            let nParams = names.count  // conservative estimate of parameter count
+            let aic = ofv + 2 * Double(nParams)
+            result.append(ParameterEstimateRow(
+                group: "Fit", name: "AIC",
+                estimate: aic, standardError: nil
+            ))
+        }
+
+        // Map PK parameters (all columns except the last OBJ column)
+        let paramNames = names.dropLast()  // drop OBJ column for parameters
+        for (index, name) in paramNames.enumerated() {
+            guard index < allValues.count else { continue }
+            let estimate = allValues[index]
+
             var se: Double? = nil
-            if index < seFromLine1.count {
-                se = cleanStandardError(seFromLine1[index])
-            }
-            if se == nil, index < seFromLine6.count {
-                se = cleanStandardError(seFromLine6[index])
-            }
-            // -1000000005 (variance table)
+            if index < seFromLine1.count { se = cleanStandardError(seFromLine1[index]) }
+            if se == nil, index < seFromLine6.count { se = cleanStandardError(seFromLine6[index]) }
             if se == nil && !seFromLine1.isEmpty {
                 let seLine5 = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("-1000000005") })
-                if let se5 = seLine5.map(numericValuesFromLine), index < se5.count {
-                    se = cleanStandardError(se5[index])
-                }
+                if let se5 = seLine5.map({ numericValuesFromLine($0) }), index < se5.count { se = cleanStandardError(se5[index]) }
             }
-            // -1000000004: correlation diagonals → sqrt = SE (use when COV step abort)
             if se == nil, index < seFromLine4.count {
                 let variance = seFromLine4[index]
-                if variance > 0 {
-                    se = cleanStandardError(sqrt(variance))
-                }
+                if variance > 0 { se = cleanStandardError(sqrt(variance)) }
             }
 
-            // Skip off-diagonal zero OMEGA elements
             if shouldExcludeFromDisplay(name: name, estimate: estimate) { continue }
-
-            // Skip SIGMA(1,1) when $SIGMA 1 FIX (residual estimated as THETA)
             if shouldHideSIGMA(name: name, modText: modText) { continue }
+
+            // If the parameter is FIXED in .mod, SE/RSE/shinkage are meaningless → nil
+            let finalSE = isParameterFixed(name: name, index: index, modText: modText) ? nil : se
 
             let displayName = labeledName(for: name, modText: modText) ?? name
             result.append(ParameterEstimateRow(
-                group: groupName(for: name),
-                name: displayName,
-                estimate: estimate,
-                standardError: se
+                group: groupName(for: name), name: displayName,
+                estimate: estimate, standardError: finalSE
             ))
         }
-        return result
+        return ParameterEstimateRow.orderedForDisplay(result)
     }
 
     /// Parse numeric values from a line, skipping the first and last token (labels)
@@ -246,6 +285,48 @@ enum ParameterEstimateParser {
             if sigmaBlock.uppercased().contains("FIX") {
                 return true
             }
+        }
+        return false
+    }
+
+    /// Check if a THETA or OMEGA parameter at a given logical index is FIXED in the .mod file.
+    /// A FIXED parameter still appears in .ext but its SE/RSE/shinkage should show as "NA"
+    /// because it was not estimated — it was held constant.
+    private static func isParameterFixed(name: String, index: Int, modText: String?) -> Bool {
+        guard let mod = modText else { return false }
+        let upper = mod.uppercased()
+        if name.hasPrefix("THETA") {
+            // Find all $THETA blocks (there should be one, but be safe)
+            guard let thetaStart = upper.range(of: "$THETA") else { return false }
+            // Find the end of $THETA block (next $ block)
+            let afterTheta = upper[thetaStart.upperBound...]
+            let thetaBlock: Substring
+            if let nextDollar = afterTheta.firstIndex(of: "$") {
+                thetaBlock = afterTheta[..<nextDollar]
+            } else {
+                thetaBlock = afterTheta
+            }
+            // Split by newline, skip empty lines
+            let thetaLines = thetaBlock.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            // The index in .ext corresponds to the Nth non-empty THETA line (0-based)
+            guard index < thetaLines.count else { return false }
+            return thetaLines[index].uppercased().contains("FIX")
+        }
+        if name.hasPrefix("OMEGA") {
+            // Similar logic for OMEGA blocks
+            guard let omegaStart = upper.range(of: "$OMEGA") else { return false }
+            let afterOmega = upper[omegaStart.upperBound...]
+            let omegaBlock: Substring
+            if let nextDollar = afterOmega.firstIndex(of: "$") {
+                omegaBlock = afterOmega[..<nextDollar]
+            } else {
+                omegaBlock = afterOmega
+            }
+            let omegaLines = omegaBlock.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            // For OMEGA, the .ext names are like OMEGA(1,1), OMEGA(2,1), OMEGA(2,2)
+            // The line index in .mod should correspond to diagonal elements in reading order
+            guard index < omegaLines.count else { return false }
+            return omegaLines[index].uppercased().contains("FIX")
         }
         return false
     }

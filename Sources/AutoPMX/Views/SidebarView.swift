@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject private var store: WorkbenchStore
-    @State private var expandedCategories = Set(AssetCategory.allCases)
+    @State private var expandedCategories = Set<AssetCategory>()
 
     var body: some View {
         List(selection: Binding(
@@ -42,22 +42,6 @@ struct SidebarView: View {
                         .contentShape(Rectangle())
                     }
                 }
-            } header: {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sidebar.left")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                        Text("Project Explorer")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    Text("Models, diagnostics, reports")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 18)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 8)
             }
         }
         .listStyle(.sidebar)
@@ -104,6 +88,11 @@ struct SidebarAssetRow: View {
                 .font(.system(size: 11))
                 .foregroundStyle(isHovered ? Color.blue.opacity(0.6) : Color.secondary.opacity(0.6))
                 .frame(width: 16)
+            if asset.category == .models, let markColor = store.modelMarkColor(for: asset) {
+                Circle()
+                    .fill(markColor)
+                    .frame(width: 8, height: 8)
+            }
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
@@ -113,7 +102,7 @@ struct SidebarAssetRow: View {
                     if asset.category == .data,
                        asset.url.pathExtension.lowercased() == "csv",
                        store.dataFile == asset.title {
-                        Text("Dataset")
+                        Text(L10n.sidebarDataset)
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(.blue)
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -136,9 +125,10 @@ struct SidebarAssetRow: View {
                     .foregroundStyle(.blue.opacity(0.5))
             }
         }
-        .padding(.vertical, 3)
-        .padding(.leading, 4)
-        .padding(.trailing, 2)
+        .padding(.vertical, 8)
+        .padding(.leading, 6)
+        .padding(.trailing, 4)
+        .frame(minHeight: 34)
         .contentShape(Rectangle())
         .liquidGlassHover(cornerRadius: 5)
         .onHover { hovering in
@@ -160,6 +150,38 @@ struct SidebarAssetContextMenu: View {
 
     var body: some View {
         if asset.category == .models, let runID = asset.relatedRunID {
+            Menu {
+                ForEach(WorkbenchStore.modelMarkPalette, id: \.name) { entry in
+                    Button {
+                        store.setModelMark(entry.name, for: asset)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(entry.color)
+                                .frame(width: 10, height: 10)
+                            Text(entry.label)
+                            if store.modelMarkName(for: asset) == entry.name {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                        }
+                    }
+                }
+                if store.modelMarkName(for: asset) != nil {
+                    Divider()
+                    Button {
+                        store.setModelMark(nil, for: asset)
+                    } label: {
+                        Label(L10n.markClear, systemImage: "xmark.circle")
+                    }
+                }
+            } label: {
+                Label(L10n.markTitle, systemImage: "tag")
+            }
+
+            Divider()
+
             Button {
                 store.activateRun(withModFileName: asset.title)
                 store.runCurrentModel()
@@ -210,11 +232,22 @@ struct SidebarAssetContextMenu: View {
             } label: {
                 Label("Extract PK Parameters", systemImage: "tablecells")
             }
+            Button {
+                store.runETACovariateScreening(for: runID)
+            } label: {
+                Label(L10n.quickETAScreen, systemImage: "chart.bar.doc.horizontal")
+            }
 
             Divider()
 
             Button {
-                store.runBootstrap(for: runID)
+                store.analyzeFinalModel(runID: runID)
+            } label: {
+                Label("Final Model Analysis", systemImage: "doc.text.magnifyingglass")
+            }
+
+            Button {
+                store.presentBootstrapSheet(for: runID)
             } label: {
                 Label("Bootstrap", systemImage: "repeat")
             }
@@ -243,10 +276,24 @@ struct SidebarAssetContextMenu: View {
         } else if asset.category == .data, asset.url.pathExtension.lowercased() == "csv" {
             let isCurrent = store.dataFile == asset.title
             Button {
-                store.dataFile = asset.title
+                store.switchDataFile(asset.title)
                 store.refreshChecks()
             } label: {
                 Label(isCurrent ? "✓ Modeling Dataset" : "Set as Modeling Dataset", systemImage: isCurrent ? "checkmark.circle.fill" : "tablecells")
+            }
+
+            Divider()
+
+            Button {
+                store.runEDA(dataFile: asset.title)
+            } label: {
+                Label("EDA Analysis", systemImage: "chart.bar")
+            }
+
+            Button {
+                store.runCTCurves(dataFile: asset.title)
+            } label: {
+                Label("C-T Curves", systemImage: "chart.xyaxis.line")
             }
 
             Divider()

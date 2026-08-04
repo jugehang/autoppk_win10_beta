@@ -6,228 +6,491 @@
 <title>AutoPMX (DuDu PMx Workbench) — 项目全域文档</title>
 <style>
   :root {
-    --bg: #f6f6f6; --card-bg: #ffffff; --text: #1d1d1f;
-    --text-secondary: #6e6e73; --accent: #2667cc; --accent-light: #e8f0fe;
-    --border: #e0e0e5; --code-bg: #f0f0f5; --radius: 12px;
-    --danger: #ff3b30; --success: #34c759; --warning: #ff9f0a;
+    --bg: #1a1a2e;
+    --slide-bg: #16213e;
+    --text: #e4e4e7;
+    --text-secondary: #a1a1aa;
+    --accent: #60a5fa;
+    --accent-light: #1e3a5f;
+    --border: #2d3a52;
+    --radius: 12px;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
   }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  
   body {
-    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.65;
-    padding: 0; max-width: 1100px; margin: 0 auto;
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
   }
-  /* ── Hero ── */
-  .hero {
-    background: linear-gradient(135deg, #2667cc 0%, #59a6ff 50%, #7dd3fc 100%);
-    color: #fff; padding: 60px 48px 48px; text-align: center;
-    border-radius: 0 0 32px 32px;
-  }
-  .hero h1 { font-size: 2.4em; font-weight: 700; letter-spacing: -0.02em; }
-  .hero .sub { font-size: 1.1em; opacity: 0.88; margin-top: 8px; font-weight: 400; }
-  .hero .meta { margin-top: 16px; font-size: 0.9em; opacity: 0.75; }
-  .hero .badges { margin-top: 18px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .hero .badge {
-    background: rgba(255,255,255,0.2); backdrop-filter: blur(8px);
-    padding: 5px 14px; border-radius: 20px; font-size: 0.85em; font-weight: 500;
-  }
-  /* ── Content ── */
-  .content { padding: 36px 32px 60px; }
-  section { margin-bottom: 48px; }
-  section h2 {
-    font-size: 1.6em; font-weight: 700; color: var(--text);
-    border-bottom: 3px solid var(--accent); padding-bottom: 8px; margin-bottom: 20px;
-  }
-  section h3 {
-    font-size: 1.2em; font-weight: 600; color: var(--accent);
-    margin-top: 28px; margin-bottom: 10px;
-  }
-  section h4 {
-    font-size: 1.05em; font-weight: 600; color: var(--text);
-    margin-top: 20px; margin-bottom: 8px;
-  }
-  p { margin-bottom: 12px; color: var(--text-secondary); }
-  p strong { color: var(--text); }
-  ul, ol { margin: 8px 0 16px 24px; color: var(--text-secondary); }
-  li { margin-bottom: 6px; }
-  li strong { color: var(--text); }
 
-  /* Cards */
-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  /* ── Slide Deck Container ── */
+  .deck {
+    width: 1280px;
+    height: 720px;
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    box-shadow: 0 0 60px rgba(96, 165, 250, 0.15);
+  }
+
+  /* ── Slides ── */
+  .slides {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    background: var(--slide-bg);
+    padding: 56px 72px;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    transform: translateX(40px);
+    transition: opacity 0.45s ease, transform 0.45s ease;
+    pointer-events: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .slide h2 {
+    font-size: 1.5em;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent-light);
+    padding-bottom: 12px;
+    flex-shrink: 0;
+  }
+
+  .slide h3 {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 20px;
+    margin-bottom: 10px;
+    flex-shrink: 0;
+  }
+
+  .slide h4 {
+    font-size: 1em;
+    font-weight: 600;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+  }
+
+  .slide p { margin-bottom: 10px; color: var(--text-secondary); line-height: 1.6; }
+  .slide p strong { color: var(--text); }
+
+  .slide ul, .slide ol { margin: 6px 0 14px 22px; color: var(--text-secondary); line-height: 1.6; }
+  .slide li { margin-bottom: 4px; }
+  .slide li strong { color: var(--text); }
+
+  /* ── Cover Slide ── */
+  .slide.cover {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background: linear-gradient(160deg, #0f172a 0%, #1e3a5f 50%, #16213e 100%);
+  }
+    .slide.cover .logo-icon {
+    margin-bottom: 20px;
+  }
+    .slide.cover .logo-icon img {
+    width: 120px; height: 120px; border-radius: 22%; object-fit: contain;
+    filter: drop-shadow(0 4px 20px rgba(96, 165, 250, 0.3));
+  }
+  .slide.cover h1 {
+    font-size: 2.8em;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #34d399 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+  }
+  .slide.cover .subtitle {
+    font-size: 1.15em;
+    color: var(--text-secondary);
+    margin-bottom: 40px;
+    font-weight: 400;
+  }
+  .slide.cover .cover-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 0.95em;
+    color: var(--text-secondary);
+  }
+  .slide.cover .cover-meta .author {
+    font-size: 1.1em;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .slide.cover .cover-meta .company {
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .slide.cover .cover-line {
+    width: 60px;
+    height: 2px;
+    background: var(--accent);
+    margin: 20px auto;
+    border-radius: 1px;
+  }
+
+  /* ── Navigation ── */
+  .nav {
+    position: absolute;
+    bottom: 24px;
+    right: 32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 10;
+    font-size: 0.85em;
+  }
+
+  .nav-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: rgba(45, 58, 82, 0.6);
+    backdrop-filter: blur(8px);
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1em;
+    transition: all 0.2s;
+  }
+  .nav-btn:hover { background: var(--accent-light); border-color: var(--accent); }
+  .nav-btn:disabled { opacity: 0.3; cursor: default; }
+
+  .page-indicator {
+    display: flex;
+    gap: 6px;
+    margin: 0 6px;
+  }
+  .page-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all 0.3s;
+  }
+  .page-dot.active {
+    background: var(--accent);
+    width: 24px;
+    border-radius: 4px;
+  }
+
+  .page-num {
+    color: var(--text-secondary);
+    min-width: 50px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Cards ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .card-grid.two { grid-template-columns: repeat(2, 1fr); }
+  .card-grid.four { grid-template-columns: repeat(4, 1fr); }
+
   .card {
-    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 20px 22px; transition: box-shadow 0.2s;
+    background: rgba(30, 58, 95, 0.3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    transition: border-color 0.2s;
   }
-  .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-  .card .icon { font-size: 1.6em; margin-bottom: 8px; }
-  .card h4 { font-size: 1em; margin-top: 0; margin-bottom: 6px; color: var(--text); }
-  .card p { font-size: 0.92em; margin-bottom: 0; }
+  .card:hover { border-color: var(--accent); }
+  .card .icon { font-size: 1.3em; margin-bottom: 6px; }
+  .card h4 { font-size: 0.93em; margin-top: 0; margin-bottom: 5px; }
+  .card p { font-size: 0.85em; margin-bottom: 0; }
 
-  /* Info table */
-  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 0.93em; }
-  .info-table th, .info-table td {
-    padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border);
+  /* ── Tags ── */
+  .tag {
+    display: inline-block;
+    background: rgba(45, 58, 82, 0.5);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 0.78em;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
-  .info-table th { background: var(--accent-light); color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .tag.accent { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+  .tag.success { background: rgba(52, 211, 153, 0.15); border-color: var(--success); color: var(--success); }
+  .tag.warning { background: rgba(251, 191, 36, 0.15); border-color: var(--warning); color: var(--warning); }
+  .tag.danger  { background: rgba(248, 113, 113, 0.15); border-color: var(--danger); color: var(--danger); }
+
+  /* ── Tables ── */
+  .info-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84em;
+    flex-shrink: 0;
+  }
+  .info-table th, .info-table td {
+    padding: 9px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-table th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
   .info-table td { color: var(--text-secondary); }
   .info-table td:first-child { font-weight: 500; color: var(--text); }
 
-  /* Code */
+  /* ── Code ── */
   code {
-    background: var(--code-bg); padding: 2px 7px; border-radius: 5px;
-    font-family: "SF Mono", "Menlo", "Monaco", monospace; font-size: 0.88em;
+    background: rgba(30, 58, 95, 0.5);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    font-size: 0.85em;
     color: var(--accent);
   }
-  pre { background: #1e1e24; color: #e0e0e0; padding: 18px 20px; border-radius: var(--radius); overflow-x: auto; font-size: 0.85em; line-height: 1.55; margin: 10px 0 16px; }
+  pre {
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 14px 18px;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    font-size: 0.78em;
+    line-height: 1.55;
+    margin: 8px 0 14px;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+  }
 
-  /* Flow diagram (simple) */
-  .flow { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0 24px; }
+  /* ── Flow ── */
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin: 12px 0 18px;
+    flex-shrink: 0;
+  }
   .flow-box {
-    background: var(--accent-light); border: 1.5px solid var(--accent);
-    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 0.9em; color: var(--accent);
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 0.85em;
+    color: var(--accent);
   }
-  .flow-arrow { font-size: 1.3em; color: var(--text-secondary); font-weight: 300; }
+  .flow-arrow { font-size: 1.2em; color: var(--text-secondary); }
 
-  .tag {
-    display: inline-block; background: var(--code-bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 2px 8px; font-size: 0.82em; font-weight: 500; color: var(--text-secondary);
-  }
-  .tag.accent { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
-  .tag.success { background: #e6f9ed; border-color: var(--success); color: #1a7d3a; }
-  .tag.warning { background: #fff3e0; border-color: var(--warning); color: #ad6f00; }
-  .tag.danger  { background: #ffeaea; border-color: var(--danger); color: #c91010; }
-
-  /* Architecture diagram */
-  .arch-layer { margin-bottom: 16px; }
-  .arch-layer h4 { color: var(--accent); margin-bottom: 6px; }
-  .arch-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  /* ── Arch ── */
+  .arch-layer { margin-bottom: 14px; flex-shrink: 0; }
+  .arch-layer h4 { color: var(--accent); margin-bottom: 5px; font-size: 0.9em; }
+  .arch-items { display: flex; flex-wrap: wrap; gap: 6px; }
   .arch-item {
-    background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 14px; font-size: 0.88em;
+    background: rgba(30, 58, 95, 0.3);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 0.82em;
   }
-  .arch-item .name { font-weight: 600; }
-  .arch-item .desc { font-size: 0.82em; color: var(--text-secondary); }
+  .arch-item .name { font-weight: 600; color: var(--text); }
+  .arch-item .desc { font-size: 0.85em; color: var(--text-secondary); }
+
+  /* ── Compact helpers ── */
+  .compact h2 { margin-bottom: 14px; font-size: 1.35em; }
+  .compact h3 { margin-top: 12px; margin-bottom: 6px; font-size: 1em; }
+  .compact .card-grid { gap: 10px; }
+  .compact .card { padding: 12px 14px; }
+  .compact .card h4 { font-size: 0.88em; }
+  .compact .card p { font-size: 0.8em; }
+  .compact .info-table th, .compact .info-table td { padding: 6px 10px; font-size: 0.8em; }
+
+  /* ── TOC grid ── */
+  .toc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .toc-item {
+    background: rgba(30, 58, 95, 0.3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .toc-item:hover { border-color: var(--accent); background: rgba(30, 58, 95, 0.5); }
+  .toc-item .num { font-size: 0.8em; color: var(--accent); margin-bottom: 4px; }
+  .toc-item .title { font-weight: 700; font-size: 1.05em; margin-bottom: 4px; }
+  .toc-item .desc { font-size: 0.82em; color: var(--text-secondary); }
+
+  /* ── Scrollbar ── */
+  .slide::-webkit-scrollbar { width: 5px; }
+  .slide::-webkit-scrollbar-track { background: transparent; }
+  .slide::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Keyboard hint ── */
+  .kb-hint {
+    position: absolute;
+    bottom: 28px;
+    left: 32px;
+    font-size: 0.72em;
+    color: rgba(161, 161, 170, 0.4);
+    z-index: 10;
+  }
 </style>
 </head>
 <body>
 
-<!-- ═══════════════ HERO ═══════════════ -->
-<div class="hero">
-  <h1>🦆 AutoPMX</h1>
-  <p class="sub">DuDu PMx Workbench — AI 驱动的群体药代动力学 (PopPK) 建模智能工作台</p>
-  <p class="meta">v1.1.0 Build 2 · macOS 13+ · SwiftUI 原生 · 作者 Graham Ju · 长沙 Duxact Biotechnology Co., Ltd.</p>
-  <div class="badges">
-    <span class="badge">macOS Native</span>
-    <span class="badge">SwiftUI + AppKit</span>
-    <span class="badge">NONMEM / PsN</span>
-    <span class="badge">AI Agent</span>
-    <span class="badge">R / Python 桥接</span>
-    <span class="badge">零外部 Swift 依赖</span>
+<div class="deck">
+  <div class="slides" id="slidesContainer">
+    <!-- Slides injected by JS -->
   </div>
+
+  <!-- Navigation -->
+  <div class="nav">
+    <button class="nav-btn" id="prevBtn" title="上一页 ←">◀</button>
+    <div class="page-indicator" id="pageDots"></div>
+    <span class="page-num" id="pageNum">1 / 12</span>
+    <button class="nav-btn" id="nextBtn" title="下一页 →">▶</button>
+  </div>
+  <div class="kb-hint">← → 键翻页 · 点击目录跳转</div>
 </div>
 
-<div class="content">
-
-<!-- ═══════════════ 1. 项目目标 ═══════════════ -->
-<section>
-  <h2>1. 项目目标</h2>
-  <p>AutoPMX 的目标是<strong>降低 PopPK 建模的门槛和时间成本</strong>。传统上，NONMEM 建模需要手动编写控制流、逐个调试、手动运行诊断脚本，一个完整的 PopPK 模型可能需要数天甚至数周。AutoPMX 通过 AI 驱动的自动化工作流，将这个过程压缩到<strong>分钟级别</strong>。</p>
-
-  <div class="card-grid">
-    <div class="card">
-      <div class="icon">🤖</div>
-      <h4>AI 自动建模</h4>
-      <p>从原始数据集自动构建结构模型→协变量筛选→模型评估，全程 AI 驱动。DuDu 智能体能理解 PopPK 规则库，自动编写、运行、诊断和修复 NONMEM 模型。</p>
-    </div>
-    <div class="card">
-      <div class="icon">📊</div>
-      <h4>全链路诊断</h4>
-      <p>一键生成 GOF 六宫格、VPC 预测检验、个体拟合图、PK 参数提取。所有可视化由 R 脚本生成，格式统一、出版级质量。</p>
-    </div>
-    <div class="card">
-      <div class="icon">🧬</div>
-      <h4>智能协变量筛选</h4>
-      <p>支持 PsN SCM 自动化协变量筛选，AI 在每步评估 OFV 变化和参数合理性，自动决定前向/后向选择策略。</p>
-    </div>
-    <div class="card">
-      <div class="icon">🧠</div>
-      <h4>经验积累与复用</h4>
-      <p>DuDu 在每次建模中记录成功模式、失败教训、参数优化策略，构建可复用的 PopPK 经验知识库，持续提升建模质量。</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════ 2. 项目架构 ═══════════════ -->
-<section>
-  <h2>2. 项目架构</h2>
-
-  <h3>2.1 架构分层</h3>
-  <div class="arch-layer">
-    <h4>🖥 视图层 (Views/)</h4>
-    <div class="arch-items">
-      <div class="arch-item"><span class="name">ContentView</span><span class="desc"> — 三栏布局根视图</span></div>
-      <div class="arch-item"><span class="name">SidebarView</span><span class="desc"> — 项目文件浏览器 + 右键菜单</span></div>
-      <div class="arch-item"><span class="name">DetailView</span><span class="desc"> — 文件预览 + 参数估计表</span></div>
-      <div class="arch-item"><span class="name">TerminalView</span><span class="desc"> — 命令输出终端</span></div>
-      <div class="arch-item"><span class="name">InspectorView</span><span class="desc"> — 模型状态/收敛检查</span></div>
-      <div class="arch-item"><span class="name">AIAssistantOverlay</span><span class="desc"> — DuDu AI 对话面板</span></div>
-      <div class="arch-item"><span class="name">SettingsView</span><span class="desc"> — 多页设置面板</span></div>
-      <div class="arch-item"><span class="name">DemoGuideView</span><span class="desc"> — Demo 引导</span></div>
-      <div class="arch-item"><span class="name">LiquidGlass</span><span class="desc"> — 液态玻璃视觉效果</span></div>
-    </div>
-  </div>
-
-  <div class="arch-layer">
-    <h4>🗄 状态管理层 (Stores/)</h4>
-    <div class="arch-items">
-      <div class="arch-item"><span class="name">WorkbenchStore</span><span class="desc"> — 核心状态管理 (~3900行)，@ObservableObject</span></div>
-      <div class="arch-item"><span class="name">PPKSkillStore</span><span class="desc"> — AI 经验知识库 (单例)</span></div>
-    </div>
-  </div>
-
-  <div class="arch-layer">
-    <h4>⚙️ 服务层 (Services/)</h4>
-    <div class="arch-items">
-      <div class="arch-item"><span class="name">ProjectScanner</span><span class="desc"> — 文件扫描、分类、参数解析、PsN 命令生成</span></div>
-      <div class="arch-item"><span class="name">ProcessRunner</span><span class="desc"> — 异步 shell 进程执行器</span></div>
-      <div class="arch-item"><span class="name">LLMCommandService</span><span class="desc"> — LLM API 通信 + prompt 构建</span></div>
-    </div>
-  </div>
-
-  <div class="arch-layer">
-    <h4>📦 数据模型层 (Models/)</h4>
-    <div class="arch-items">
-      <div class="arch-item"><span class="name">ProjectModels</span><span class="desc"> — AssetCategory, ProjectAsset, AssistantMessage 等</span></div>
-      <div class="arch-item"><span class="name">ParameterEstimate</span><span class="desc"> — 参数估计行解析 (THETA/OMEGA/SIGMA)</span></div>
-      <div class="arch-item"><span class="name">LLMProviderProfile</span><span class="desc"> — LLM 提供商配置模型</span></div>
-    </div>
-  </div>
-
-  <div class="arch-layer">
-    <h4>🛠 支撑层 (Support/)</h4>
-    <div class="arch-items">
-      <div class="arch-item"><span class="name">L10n</span><span class="desc"> — 中英文本地化字符串 (~600行)</span></div>
-      <div class="arch-item"><span class="name">BundledResource</span><span class="desc"> — Bundle 资源路径解析</span></div>
-    </div>
-  </div>
-
-  <h3>2.2 数据流</h3>
-  <div class="flow">
-    <div class="flow-box">用户操作 (UI)</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">WorkbenchStore</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">Services (Scanner / Runner / LLM)</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">NONMEM / PsN / R / Python</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">文件系统输出</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">refreshWorkspace() → UI 更新</div>
-  </div>
-
-  <h3>2.3 三栏布局</h3>
-  <pre>
+<script>
+// ── Slide Data ──
+const slides = [
+  // 0: Cover
+  {
+    cls: 'cover',
+    html: `
+      <div class="logo-icon"><img src="AutoPMX_appicon.png" alt="AutoPMX"></div>
+      <h1>AutoPMX</h1>
+      <p class="subtitle">DuDu PMx Workbench — AI 驱动的群体药代动力学 (PopPK) 建模智能工作台</p>
+      <div class="cover-line"></div>
+      <div class="cover-meta">
+        <span class="author">Author: Graham Ju</span>
+        <span class="company">长沙都正生物科技股份有限公司</span>
+        <span style="font-size:0.85em; opacity:0.6;">v1.1.0 Build 3 · macOS 13+ · SwiftUI 原生</span>
+      </div>
+    `
+  },
+  // 1: TOC
+  {
+    html: `
+      <h2>目录</h2>
+      <div class="toc-grid">
+        <div class="toc-item" data-slide="2"><div class="num">01</div><div class="title">项目目标</div><div class="desc">降低 PopPK 建模门槛，AI 驱动全流程自动化</div></div>
+        <div class="toc-item" data-slide="3"><div class="num">02</div><div class="title">项目架构</div><div class="desc">视图层 / Store / 服务层 / 模型层 / 支撑层</div></div>
+        <div class="toc-item" data-slide="4"><div class="num">03</div><div class="title">三栏布局 & 数据流</div><div class="desc">Sidebar → Detail → Inspector + Terminal</div></div>
+        <div class="toc-item" data-slide="5"><div class="num">04</div><div class="title">核心板块实现</div><div class="desc">文件管理 / 进程执行 / AI 面板 / 设置</div></div>
+        <div class="toc-item" data-slide="6"><div class="num">05</div><div class="title">DuDu AI 全景</div><div class="desc">AI 代理在建模流程中的 8 大角色</div></div>
+        <div class="toc-item" data-slide="7"><div class="num">06</div><div class="title">AI 经验记录机制</div><div class="desc">PPKSkillStore — 越用越聪明的核心</div></div>
+        <div class="toc-item" data-slide="8"><div class="num">07</div><div class="title">诊断与分析脚本</div><div class="desc">R / Python 脚本矩阵 & 输出说明</div></div>
+        <div class="toc-item" data-slide="9"><div class="num">08</div><div class="title">规则与知识库</div><div class="desc">PopPK 规则 / 模型库 / 审计指南</div></div>
+        <div class="toc-item" data-slide="10"><div class="num">09</div><div class="title">已实现效果</div><div class="desc">10 大核心功能 + 6 阶段建模流程</div></div>
+        <div class="toc-item" data-slide="11"><div class="num">10</div><div class="title">技术亮点 & 路线图</div><div class="desc">零依赖 / 三层桥接 / 跨平台在途</div></div>
+      </div>
+    `
+  },
+  // 2: 项目目标
+  {
+    html: `
+      <h2>1. 项目目标</h2>
+      <p>AutoPMX 的目标是<strong>降低 PopPK 建模的门槛和时间成本</strong>。传统 NONMEM 建模需要手动编写控制流、逐个调试、手动运行诊断脚本，一个完整模型可能需要数天甚至数周。AutoPMX 通过 AI 驱动的自动化工作流，将这个过程压缩到<strong>分钟级别</strong>。</p>
+      <div class="card-grid four">
+        <div class="card"><div class="icon">🤖</div><h4>AI 自动建模</h4><p>从原始数据集自动构建结构模型→协变量筛选→模型评估，全程 AI 驱动</p></div>
+        <div class="card"><div class="icon">📊</div><h4>全链路诊断</h4><p>GOF 六宫格、VPC 预测检验、个体拟合图、PK 参数提取，一键生成出版级图表</p></div>
+        <div class="card"><div class="icon">🧬</div><h4>智能协变量筛选</h4><p>PsN SCM 自动化筛选，AI 评估 OFV 变化和参数合理性，自动决定前向/后向策略</p></div>
+        <div class="card"><div class="icon">🧠</div><h4>经验积累与复用</h4><p>记录成功模式、失败教训、参数优化策略，构建可复用的 PopPK 经验知识库</p></div>
+      </div>
+    `
+  },
+  // 3: 项目架构
+  {
+    cls: 'compact',
+    html: `
+      <h2>2. 项目架构</h2>
+      <div class="arch-layer"><h4>🖥 视图层 (Views/)</h4>
+        <div class="arch-items">
+          <div class="arch-item"><span class="name">ContentView</span><span class="desc"> — 三栏布局根视图</span></div>
+          <div class="arch-item"><span class="name">SidebarView</span><span class="desc"> — 项目文件浏览器</span></div>
+          <div class="arch-item"><span class="name">DetailView</span><span class="desc"> — 文件预览 + 参数表</span></div>
+          <div class="arch-item"><span class="name">TerminalView</span><span class="desc"> — 命令输出终端</span></div>
+          <div class="arch-item"><span class="name">InspectorView</span><span class="desc"> — 模型状态检查</span></div>
+          <div class="arch-item"><span class="name">AIAssistantOverlay</span><span class="desc"> — DuDu AI 对话面板</span></div>
+          <div class="arch-item"><span class="name">SettingsView</span><span class="desc"> — 多页设置面板</span></div>
+          <div class="arch-item"><span class="name">DemoGuideView</span><span class="desc"> — Demo 引导</span></div>
+          <div class="arch-item"><span class="name">LiquidGlass</span><span class="desc"> — 液态玻璃视觉效果</span></div>
+        </div>
+      </div>
+      <div class="arch-layer"><h4>🗄 状态管理层 (Stores/)</h4>
+        <div class="arch-items">
+          <div class="arch-item"><span class="name">WorkbenchStore</span><span class="desc"> — 核心状态管理 (~3900行)</span></div>
+          <div class="arch-item"><span class="name">PPKSkillStore</span><span class="desc"> — AI 经验知识库 (单例)</span></div>
+        </div>
+      </div>
+      <div class="arch-layer"><h4>⚙️ 服务层 (Services/)</h4>
+        <div class="arch-items">
+          <div class="arch-item"><span class="name">ProjectScanner</span><span class="desc"> — 文件扫描、参数解析、PsN 命令</span></div>
+          <div class="arch-item"><span class="name">ProcessRunner</span><span class="desc"> — 异步 shell 进程执行器</span></div>
+          <div class="arch-item"><span class="name">LLMCommandService</span><span class="desc"> — LLM API 通信 + prompt 构建</span></div>
+        </div>
+      </div>
+      <div class="arch-layer"><h4>📦 模型层 (Models/)</h4>
+        <div class="arch-items">
+          <div class="arch-item"><span class="name">ProjectModels</span><span class="desc"> — AssetCategory, ProjectAsset</span></div>
+          <div class="arch-item"><span class="name">ParameterEstimate</span><span class="desc"> — THETA/OMEGA/SIGMA 解析</span></div>
+          <div class="arch-item"><span class="name">LLMProviderProfile</span><span class="desc"> — LLM 配置模型</span></div>
+        </div>
+      </div>
+      <div class="arch-layer"><h4>🛠 支撑层 (Support/)</h4>
+        <div class="arch-items">
+          <div class="arch-item"><span class="name">L10n</span><span class="desc"> — 中英文本地化 (~600行)</span></div>
+          <div class="arch-item"><span class="name">BundledResource</span><span class="desc"> — Bundle 资源路径</span></div>
+        </div>
+      </div>
+    `
+  },
+  // 4: 三栏布局 & 数据流
+  {
+    html: `
+      <h2>3. 三栏布局 & 数据流</h2>
+      <h3>三栏布局</h3>
+      <pre>
 ┌─────────────────────────────────────────────────────┐
 │                  WorkbenchToolbar                   │
 ├──────────┬────────────────────────┬─────────────────┤
@@ -238,405 +501,289 @@
 │          │      (命令输出)         │                 │
 ├──────────┴────────────────────────┴─────────────────┤
 │                    DuDu AI 浮动面板                   │
-└─────────────────────────────────────────────────────┘
-  </pre>
-</section>
+└─────────────────────────────────────────────────────┘</pre>
+      <h3>数据流</h3>
+      <div class="flow">
+        <div class="flow-box">用户操作 (UI)</div><span class="flow-arrow">→</span>
+        <div class="flow-box">WorkbenchStore</div><span class="flow-arrow">→</span>
+        <div class="flow-box">Services</div><span class="flow-arrow">→</span>
+        <div class="flow-box">NONMEM / PsN / R / Python</div><span class="flow-arrow">→</span>
+        <div class="flow-box">文件系统输出</div><span class="flow-arrow">→</span>
+        <div class="flow-box">refreshWorkspace() → UI 更新</div>
+      </div>
+    `
+  },
+  // 5: 核心板块实现
+  {
+    cls: 'compact',
+    html: `
+      <h2>4. 核心板块实现</h2>
+      <h3>项目文件管理 (ProjectScanner.swift)</h3>
+      <table class="info-table">
+        <tr><th>功能</th><th>实现方式</th></tr>
+        <tr><td>文件分类</td><td>按扩展名/命名规则分 7 类：Models、Data、Outputs、Figures、Reports、SCM、Scripts</td></tr>
+        <tr><td>Run ID 提取</td><td>正则匹配 <code>run(\\d+).mod</code>、<code>GA(\\d+).mod</code> 等</td></tr>
+        <tr><td>参数估计解析</td><td>从 .ext 文件解析 THETA/OMEGA/SIGMA 参数表</td></tr>
+        <tr><td>$DATA 路径检查</td><td>解析 .mod 中 <code>$DATA</code> 行，验证路径正确性</td></tr>
+        <tr><td>项目创建</td><td>创建标准项目结构 + project_config.json + 规则文件 + 诊断脚本</td></tr>
+      </table>
+      <h3>AI 对话面板 (AIAssistantOverlay.swift)</h3>
+      <table class="info-table">
+        <tr><th>功能</th><th>实现方式</th></tr>
+        <tr><td>浮动面板</td><td>可拖拽 + 可调整大小，玻璃模糊效果背景</td></tr>
+        <tr><td>消息气泡</td><td>用户 (右/蓝)、AI (左/灰)、系统 (中/彩色) 三种样式</td></tr>
+        <tr><td>快速操作</td><td>自动建模 / GOF / VPC / 个体图 / PK参数 / SCM / 模型比较</td></tr>
+        <tr><td>Skill Chips</td><td>预设 prompt 模板：分析、修复、比较、协变量、写新模型</td></tr>
+        <tr><td>Aurora 特效</td><td>AI 思考时浮动按钮周围显示极光粒子动画</td></tr>
+      </table>
+    `
+  },
+  // 6: AI 全景
+  {
+    cls: 'compact',
+    html: `
+      <h2>5. DuDu AI 作用全景</h2>
+      <div class="flow">
+        <div class="flow-box">📂 数据读取</div><span class="flow-arrow">→</span>
+        <div class="flow-box">🧠 DuDu 分析</div><span class="flow-arrow">→</span>
+        <div class="flow-box">📝 写 runXXX.mod</div><span class="flow-arrow">→</span>
+        <div class="flow-box">▶️ 运行 NONMEM</div><span class="flow-arrow">→</span>
+        <div class="flow-box">🔍 AI 诊断</div><span class="flow-arrow">→</span>
+        <div class="flow-box">🔄 修复/优化</div>
+      </div>
+      <table class="info-table">
+        <tr><th>AI 能力</th><th>描述</th></tr>
+        <tr><td><span class="tag accent">自动建模</span></td><td>从数据集自动设计结构模型、残差模型，迭代优化至收敛</td></tr>
+        <tr><td><span class="tag accent">模型提案</span></td><td>分析 LST/EXT 输出，给出 ACCEPT 或 REVISE 及具体修改建议</td></tr>
+        <tr><td><span class="tag accent">错误修复</span></td><td>解析 NONMEM 错误信息，按规则库自动修正控制流语法错误</td></tr>
+        <tr><td><span class="tag accent">协变量筛选</span></td><td>评估 WT/SEX/AGE/STUDY 等协变量，控制前向/后向选择策略</td></tr>
+        <tr><td><span class="tag accent">诊断图解读</span></td><td>分析 GOF/VPC 图片，识别模型偏差、预测区间覆盖质量</td></tr>
+        <tr><td><span class="tag accent">参数审计</span></td><td>审阅 THETA 合理性、OMEGA 收缩率、SIGMA 大小</td></tr>
+        <tr><td><span class="tag accent">C-T 分析</span></td><td>剂量归一化 C-T 曲线 + 吸收滞后 + TMDD + ADA 检测</td></tr>
+        <tr><td><span class="tag accent">知识检索</span></td><td>加载 PopPK 规则库、模板库、审计报告作为系统提示词</td></tr>
+      </table>
+      <h4>LLM 提供商</h4>
+      <table class="info-table">
+        <tr><th>提供商</th><th>典型配置</th></tr>
+        <tr><td>OpenAI</td><td>GPT-4o / GPT-4 — 高精度模型提案和诊断</td></tr>
+        <tr><td>DeepSeek</td><td>deepseek-chat — 高性价比自动化建模</td></tr>
+        <tr><td>LM Studio</td><td>gemma/llama/qwen — 本地运行，数据不外传</td></tr>
+        <tr><td>Ollama</td><td>qwen/mistral — 本地运行，MLX 加速 (Apple Silicon)</td></tr>
+      </table>
+    `
+  },
+  // 7: AI 经验记录
+  {
+    html: `
+      <h2>6. AI 经验记录机制</h2>
+      <p>DuDu 内置 <strong>PPKSkillStore</strong> 经验积累与知识复用系统，每次建模自动记录成功模式、失败教训、参数策略和 SCM 错误模式。经验在后续建模中自动检索并注入 LLM prompt，形成<strong>"越用越聪明"</strong>的正反馈。</p>
+      <h3>四类经验</h3>
+      <div class="card-grid four">
+        <div class="card"><div class="icon"><span class="tag danger">Lesson</span></div><h4>PPKLesson — 教训</h4><p>11 个分类：NONMEM 错误、收敛、协方差、数据、结构、初始估计、边界、SCM 等。critical 级别每次注入 LLM。</p></div>
+        <div class="card"><div class="icon"><span class="tag success">Success</span></div><h4>PPKSuccessPattern — 成功</h4><p>记录成功的建模决策：场景 → 操作 → 量化结果 (如 OFV 下降量)。相似场景中作为正向示例检索。</p></div>
+        <div class="card"><div class="icon"><span class="tag accent">Insight</span></div><h4>PPKParameterInsight — 参数</h4><p>跨 run 积累：参数典型值、Omega 大小、常见协变量关系。按参数名去重更新，作为初始估计参考。</p></div>
+        <div class="card"><div class="icon"><span class="tag warning">Pattern</span></div><h4>SCMErrorPattern — SCM</h4><p>SCM 常见错误模式：正则匹配 → 诊断 → 修复建议，命中计数用于热度排序。</p></div>
+      </div>
+      <h3>检索与注入流程</h3>
+      <div class="flow">
+        <div class="flow-box">LLM 调用前</div><span class="flow-arrow">→</span>
+        <div class="flow-box">contextBlock(for:maxLessons:)</div><span class="flow-arrow">→</span>
+        <div class="flow-box">按标签过滤</div><span class="flow-arrow">→</span>
+        <div class="flow-box">按严重程度排序</div><span class="flow-arrow">→</span>
+        <div class="flow-box">注入 System Prompt</div>
+      </div>
+    `
+  },
+  // 8: 诊断脚本
+  {
+    cls: 'compact',
+    html: `
+      <h2>7. 诊断与分析脚本</h2>
+      <table class="info-table">
+        <tr><th>脚本</th><th>语言</th><th>功能</th><th>输出</th></tr>
+        <tr><td><code>gof_plot_script.R</code></td><td>R</td><td>GOF 六宫格：DV vs IPRED/PRED, CWRES vs TIME/PRED, |IWRES| vs IPRED, QQ-plot</td><td><code>GOF_mod{run}.jpg</code></td></tr>
+        <tr><td><code>vpc_plot_script.R</code></td><td>R</td><td>VPC 预测检验图 (含分层)</td><td><code>VPC_mod{run}.jpg</code></td></tr>
+        <tr><td><code>individual_plot_script.R</code></td><td>R</td><td>个体拟合图 (DV/IPRED/PRED vs TIME)</td><td><code>Individual_Plots_Run{run}.pdf</code></td></tr>
+        <tr><td><code>dose_normalized_ct_plot.R</code></td><td>R</td><td>剂量归一化 C-T 曲线 + Tlag + TMDD + ADA 检测</td><td><code>*_dose_norm_ct.png</code></td></tr>
+        <tr><td><code>pk parameters script.R</code></td><td>R</td><td>PK 参数汇总表 (THETA/OMEGA/SIGMA)</td><td><code>data_run{run}.csv</code>, Word</td></tr>
+        <tr><td><code>LST_script.R</code></td><td>R</td><td>NONMEM LST 文件深度解析</td><td>结构化参数报告</td></tr>
+        <tr><td><code>workbench_core.py</code></td><td>Python</td><td>核心任务引擎：项目创建、R 脚本调度、PsN 执行、参数审计</td><td>各种诊断输出</td></tr>
+        <tr><td><code>Auto_diagnostics.py</code></td><td>Python</td><td>全自动诊断管道：GOF → VPC → 个体图 → AI 审计</td><td>完整诊断报告</td></tr>
+        <tr><td><code>audit_tasks.py</code></td><td>Python</td><td>AI 审计任务 (GOF / VPC / 参数)</td><td><code>GOF_Expert_Audit_*.md</code></td></tr>
+        <tr><td><code>gof_audit_agent.py</code></td><td>Python</td><td>GOF 图 AI 解读 (Vision LLM)</td><td>GOF 专家审计报告</td></tr>
+        <tr><td><code>vpc_audit_agent.py</code></td><td>Python</td><td>VPC 图 AI 解读</td><td>VPC 专家审计报告</td></tr>
+        <tr><td><code>model_generator.py</code></td><td>Python</td><td>AI 驱动的 NONMEM 控制流生成器</td><td><code>run{xxx}.mod</code></td></tr>
+        <tr><td><code>autopmx_ga.py</code></td><td>Python</td><td>遗传算法参数优化 + 误差模型 RSE 检测</td><td>优化后初始估计</td></tr>
+        <tr><td><code>poppk_model_templates.py</code></td><td>Python</td><td>PopPK 模型模板库 (1/2/3 房室)</td><td>模板控制流</td></tr>
+      </table>
+    `
+  },
+  // 9: 规则与知识库
+  {
+    html: `
+      <h2>8. 规则与知识库</h2>
+      <table class="info-table">
+        <tr><th>文件</th><th>类型</th><th>描述</th></tr>
+        <tr><td><code>poppk_rules.json</code></td><td>JSON 规则库</td><td>PopPK 建模规则：模型结构约束、参数合理性、收敛判定、协变量评估标准</td></tr>
+        <tr><td><code>poppk_model_library.md</code></td><td>Markdown 知识库</td><td>模型类型库：1/2/3 房室、不同给药途径、残差模型选择指南</td></tr>
+        <tr><td><code>PopPK_Expert_Audit_Report.md</code></td><td>Markdown 审计</td><td>专家审计报告模板：评判标准、常见问题清单、验收门槛</td></tr>
+        <tr><td><code>NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md</code></td><td>Markdown 规则</td><td>NONMEM 规则知识：错误代码解析、修复指南、最佳实践</td></tr>
+      </table>
+      <h3>LLM Prompt 中的建模规则体系</h3>
+      <p>在每次 LLM 调用中，系统自动注入结构化的 PopPK 建模规则，包括：</p>
+      <ul>
+        <li><strong>结构模型</strong>：房室数选择、ADVAN/TRANS 组合、给药途径判断</li>
+        <li><strong>残差模型</strong>：组合→简化规则 (RSE > 100% 或边界 → 固定为 0 → 单组分)</li>
+        <li><strong>参数约束</strong>：CL/V 正约束、KA 上界、OMEGA 块结构建议</li>
+        <li><strong>收敛诊断</strong>：最小化状态、协方差步骤、边界警告、RSE 评估</li>
+        <li><strong>协变量策略</strong>：OFV 变化阈值 (3.84)、前向/后向选择规则</li>
+      </ul>
+    `
+  },
+  // 10: 已实现效果
+  {
+    cls: 'compact',
+    html: `
+      <h2>9. 已实现效果</h2>
+      <div class="card-grid two">
+        <div class="card"><div class="icon">✅</div><h4>一键自动建模</h4><p>CSV → AI 分析 → 写模型 → 运行 NONMEM → 诊断 → 修复，全流程无人值守</p></div>
+        <div class="card"><div class="icon">✅</div><h4>完整诊断可视化</h4><p>GOF 六宫格、VPC (含分层)、个体拟合图、PK 参数表，出版级质量</p></div>
+        <div class="card"><div class="icon">✅</div><h4>AI 图表解读</h4><p>右键 GOF/VPC → AI 分析，自动生成专家级审计报告 (Vision LLM)</p></div>
+        <div class="card"><div class="icon">✅</div><h4>SCM 协变量筛选</h4><p>PsN SCM 集成，AI 自动诊断 SCM 错误并提供修复方案</p></div>
+        <div class="card"><div class="icon">✅</div><h4>遗传算法优化</h4><p>PyDarwin GA 参数优化 + 误差模型 RSE 检测与自动简化</p></div>
+        <div class="card"><div class="icon">✅</div><h4>多 LLM 支持</h4><p>OpenAI / DeepSeek / LM Studio / Ollama，可离线本地运行</p></div>
+        <div class="card"><div class="icon">✅</div><h4>对话式建模</h4><p>"帮我加 WT 对 CL 的协变量" → AI 自动修改控制流并运行</p></div>
+        <div class="card"><div class="icon">✅</div><h4>经验知识积累</h4><p>自动记录成功/失败模式，跨项目复用，越用越聪明</p></div>
+        <div class="card"><div class="icon">✅</div><h4>模型比较</h4><p>自动对比两个 run 的 OFV、参数、诊断图差异</p></div>
+        <div class="card"><div class="icon">✅</div><h4>项目断点续建</h4><p>中断后重开，自动检测现有模型状态，从断点继续</p></div>
+      </div>
+      <h3>自动化建模 6 阶段流程</h3>
+      <pre>
+Phase 0: 数据分析 → C-T 曲线 + 滞后检测 + Dataset Profile
+Phase 1: 结构模型 → AI 写 run001.mod → 运行 → 诊断 → 修复 (最多 3 次)
+Phase 2: 协变量筛选 → 逐个评估 WT/SEX/AGE/STUDY → 前向/后向选择
+Phase 3: 最终评估 → 完整诊断 + AI 综合审计报告 → 模型交付</pre>
+    `
+  },
+  // 11: 技术亮点 & 路线图
+  {
+    html: `
+      <h2>10. 技术亮点 & 路线图</h2>
+      <div class="card-grid two">
+        <div class="card"><div class="icon">🏗</div><h4>零外部 Swift 依赖</h4><p>仅使用 Foundation、SwiftUI、AppKit，AI 通信/文件解析/进程管理全部自研</p></div>
+        <div class="card"><div class="icon">🔄</div><h4>Swift-Python-R 三层桥接</h4><p>Swift (UI + 编排) ↔ Python (任务桥接 + AI Agent) ↔ R (统计 + 绘图)</p></div>
+        <div class="card"><div class="icon">🎨</div><h4>macOS 原生设计</h4><p>SF Pro 字体、LiquidGlass 效果、系统模糊背景 — 完全融入 macOS 视觉体系</p></div>
+        <div class="card"><div class="icon">🧠</div><h4>可成长的 AI 经验系统</h4><p>PPKSkillStore — 专为 PopPK 优化的 RAG 系统</p></div>
+        <div class="card"><div class="icon">🔌</div><h4>LLM 热插拔</h4><p>统一 OpenAI-compatible API，切换提供商只需改 URL + Model ID</p></div>
+        <div class="card"><div class="icon">📱</div><h4>跨平台在途</h4><p>已有 Windows 版 (PySide6) 和 Web 版 (React + FastAPI) 代码基础</p></div>
+      </div>
+      <h3>当前开发路线</h3>
+      <table class="info-table">
+        <tr><th>优先级</th><th>任务</th><th>状态</th></tr>
+        <tr><td>🔴 高</td><td>GOF/VPC APFS 归档崩溃修复</td><td><span class="tag success">Done</span></td></tr>
+        <tr><td>🔴 高</td><td>C-T 脚本重写 (TMDD/ADA)</td><td><span class="tag success">Done</span></td></tr>
+        <tr><td>🔴 高</td><td>sdtab 文件名自动检测</td><td><span class="tag success">Done</span></td></tr>
+        <tr><td>🔴 高</td><td>project_config.json 自动生成</td><td><span class="tag success">Done</span></td></tr>
+        <tr><td>🔴 高</td><td>误差模型自动简化 (RSE > 100%)</td><td><span class="tag success">Done</span></td></tr>
+        <tr><td>🟡 中</td><td>诊断快捷键 Run 选择器</td><td><span class="tag success">Done</span></td></tr>
+        <tr><td>🟡 中</td><td>PPKSkillStore 经验持久化</td><td>计划中</td></tr>
+        <tr><td>🟢 低</td><td>Windows 跨平台版完善</td><td>基础就绪</td></tr>
+      </table>
+    `
+  }
+];
 
-<!-- ═══════════════ 3. 各板块实现 ═══════════════ -->
-<section>
-  <h2>3. 各板块实现方法</h2>
+// ── Render ──
+const container = document.getElementById('slidesContainer');
+const dotsContainer = document.getElementById('pageDots');
+const pageNumEl = document.getElementById('pageNum');
+let current = 0;
+const total = slides.length;
 
-  <h3>3.1 项目文件管理 (ProjectScanner.swift)</h3>
-  <table class="info-table">
-    <tr><th>功能</th><th>实现方式</th></tr>
-    <tr><td>文件分类</td><td><code>category(for:)</code> 按扩展名/命名规则分为 7 类：Models (.mod)、Data (.csv/.xlsx/SDTAB*)、NONMEM Outputs (.lst/.ext/.cov)、Figures (.jpg/.png/.pdf)、Reports (.md/.docx)、SCM、Scripts</td></tr>
-    <tr><td>Run ID 提取</td><td>正则匹配 <code>run(\d+).mod</code>、<code>GA(\d+).mod</code>、<code>run_(.+).mod</code> 等模式</td></tr>
-    <tr><td>参数估计解析</td><td><code>parameterEstimates(runID:)</code> 从 .ext 文件解析 THETA/OMEGA/SIGMA 参数表，支持带约束值 (±∞, 固定, SAME)</td></tr>
-    <tr><td>$DATA 路径检查</td><td><code>dataPathCheck(runID:)</code> 解析 .mod 中的 <code>$DATA</code> 行，验证数据文件是否存在且路径正确</td></tr>
-    <tr><td>PsN 命令生成</td><td><code>psnExecuteCommand(runID:)</code> 生成默认的 PsN execute 命令</td></tr>
-    <tr><td>项目创建</td><td><code>createProject()</code> 创建标准项目结构，包含 project_config.json、规则文件、诊断脚本</td></tr>
-  </table>
+function renderAll() {
+  container.innerHTML = '';
+  dotsContainer.innerHTML = '';
+  slides.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'slide' + (s.cls ? ' ' + s.cls : '');
+    div.innerHTML = s.html;
+    if (i === current) div.classList.add('active');
+    container.appendChild(div);
 
-  <h3>3.2 进程执行 (ProcessRunner.swift)</h3>
-  <table class="info-table">
-    <tr><th>功能</th><th>实现方式</th></tr>
-    <tr><td>异步执行</td><td>基于 Foundation <code>Process</code>，通过 <code>FileHandle.readabilityHandler</code> 实时读取 stdout/stderr</td></tr>
-    <tr><td>输出流式显示</td><td>逐行回调 <code>onOutput</code>，主线程异步追加到 Terminal 视图</td></tr>
-    <tr><td>并发控制</td><td><code>@MainActor</code> 保证 <code>isRunning</code> 状态线程安全，防止重复执行</td></tr>
-    <tr><td>环境变量注入</td><td>支持 NONMEM/PsN 所需的 <code>NM_HOME</code>、<code>PATH</code> 等环境变量</td></tr>
-    <tr><td>超时/中断</td><td>可中断运行中的进程 (SIGTERM → SIGKILL)</td></tr>
-  </table>
+    // TOC click handlers
+    div.querySelectorAll('.toc-item[data-slide]').forEach(item => {
+      item.addEventListener('click', () => goTo(parseInt(item.dataset.slide)));
+    });
 
-  <h3>3.3 AI 对话面板 (AIAssistantOverlay.swift)</h3>
-  <table class="info-table">
-    <tr><th>功能</th><th>实现方式</th></tr>
-    <tr><td>浮动面板</td><td>可拖拽 + 可调整大小的 SwiftUI View，玻璃模糊效果背景</td></tr>
-    <tr><td>消息气泡</td><td>用户消息 (右对齐/蓝色)、AI 消息 (左对齐/灰色)、系统消息 (居中/彩色) 三种样式</td></tr>
-    <tr><td>快速操作按钮</td><td>自动建模 / GOF / VPC / 个体图 / PK参数 / SCM / 模型比较 — 点击弹出 Run 选择器</td></tr>
-    <tr><td>智能操作检测</td><td>解析用户消息关键词，自动弹出"执行 GOF" / "提取参数" 等快捷按钮</td></tr>
-    <tr><td>Skill Chips</td><td>预设 prompt 模板：分析模型、修复模型、比较模型、协变量筛选、写新模型</td></tr>
-    <tr><td>Aurora 粒子效果</td><td>当 AI 思考时，浮动按钮周围显示极光粒子动画</td></tr>
-  </table>
+    // Page dot
+    const dot = document.createElement('div');
+    dot.className = 'page-dot' + (i === current ? ' active' : '');
+    dot.addEventListener('click', () => goTo(i));
+    dotsContainer.appendChild(dot);
+  });
+  updateNav();
+}
 
-  <h3>3.4 设置面板 (SettingsView.swift)</h3>
-  <table class="info-table">
-    <tr><th>标签页</th><th>内容</th></tr>
-    <tr><td>General</td><td>配色方案 (System/Light/Dark)、工作区路径、数据文件名、PSN 执行模板</td></tr>
-    <tr><td>LLM</td><td>Base URL、Model ID、API Key、Personality 选择 (Professional/Friendly/Minimal/Technical)</td></tr>
-    <tr><td>Vision</td><td>视觉模型配置 (用于图表解读)</td></tr>
-    <tr><td>NONMEM</td><td>NONMEM 安装路径、PsN 路径</td></tr>
-    <tr><td>Python / R</td><td>Python 3 解释器路径、Rscript 路径 (支持自动检测)</td></tr>
-    <tr><td>Rules</td><td>规则文件管理、PopPK Skill Store 用例浏览</td></tr>
-  </table>
-</section>
+function goTo(i) {
+  if (i < 0 || i >= total || i === current) return;
+  const prev = current;
+  current = i;
+  const allSlides = container.querySelectorAll('.slide');
+  const dir = i > prev ? 40 : -40;
 
-<!-- ═══════════════ 4. AI 的作用 ═══════════════ -->
-<section>
-  <h2>4. DuDu AI 的作用全景</h2>
+  // Outgoing
+  allSlides[prev].style.opacity = '0';
+  allSlides[prev].style.transform = `translateX(${-dir}px)`;
 
-  <h3>4.1 AI 代理在建模流程中的角色</h3>
-  <div class="flow">
-    <div class="flow-box">📂 数据读取</div><span class="flow-arrow">→</span>
-    <div class="flow-box">🧠 DuDu 分析</div><span class="flow-arrow">→</span>
-    <div class="flow-box">📝 写 runXXX.mod</div><span class="flow-arrow">→</span>
-    <div class="flow-box">▶️ 运行 NONMEM</div><span class="flow-arrow">→</span>
-    <div class="flow-box">🔍 AI 诊断</div><span class="flow-arrow">→</span>
-    <div class="flow-box">🔄 修复/优化</div>
-  </div>
+  // Incoming
+  allSlides[i].style.opacity = '1';
+  allSlides[i].style.transform = 'translateX(0)';
+  allSlides[i].classList.add('active');
+  allSlides[prev].classList.remove('active');
 
-  <table class="info-table">
-    <tr><th>AI 能力</th><th>描述</th><th>触发方式</th></tr>
-    <tr>
-      <td><span class="tag accent">自动建模</span></td>
-      <td>从数据集 Profile（给药途径、协变量、观测数）自动设计结构模型、残差模型，迭代优化直至收敛</td>
-      <td>点击 "自动建模" 按钮</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">模型提案</span></td>
-      <td>分析当前 run 的 LST/EXT 输出，给出 ACCEPT 或 REVISE 结论及具体修改建议</td>
-      <td>Skill Chip / 自然语言对话</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">错误修复</span></td>
-      <td>解析 NONMEM 错误信息 (FMSG/FREPL)，按 PopPK 规则库自动修正控制流语法/结构错误</td>
-      <td>自动化流程中自动触发</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">协变量筛选</span></td>
-      <td>评估 WT/SEX/AGE/STUDY 等协变量是否应加入模型，控制前向/后向选择策略</td>
-      <td>Phase 2 自动化 / SCM 流程</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">诊断图解读</span></td>
-      <td>分析 GOF/VPC 图片，识别模型偏差、预测区间覆盖、个体拟合质量</td>
-      <td>右键 GOF/VPC 图 → AI 解读</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">参数审计</span></td>
-      <td>审阅 NONMEM 参数估计（THETA 合理性、OMEGA 收缩率、SIGMA 大小），生成审计报告</td>
-      <td>自动化 / 右键 .ext 文件</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">C-T 分析</span></td>
-      <td>绘制剂量归一化血药浓度-时间曲线，自动检测吸收滞后 (Tlag)</td>
-      <td>自动化流程 Phase 0</td>
-    </tr>
-    <tr>
-      <td><span class="tag accent">知识检索</span></td>
-      <td>加载 PopPK 规则库、模型库模板、专家审计报告作为系统提示词注入 LLM</td>
-      <td>每次 LLM 调用自动附加</td>
-    </tr>
-  </table>
+  // Also set all other slides to inactive
+  allSlides.forEach((s, idx) => {
+    if (idx !== i && idx !== prev) {
+      s.classList.remove('active');
+      s.style.opacity = '0';
+      s.style.transform = idx < i ? 'translateX(-40px)' : 'translateX(40px)';
+    }
+  });
 
-  <h3>4.2 LLM 提供商支持</h3>
-  <table class="info-table">
-    <tr><th>提供商</th><th>典型配置</th><th>用途</th></tr>
-    <tr><td>OpenAI</td><td><code>https://api.openai.com/v1</code> · GPT-4o / GPT-4</td><td>高精度模型提案和诊断</td></tr>
-    <tr><td>DeepSeek</td><td><code>https://api.deepseek.com/v1</code> · deepseek-chat</td><td>性价比高的自动化建模</td></tr>
-    <tr><td>LM Studio</td><td><code>http://localhost:1234/v1</code> · gemma/llama/qwen</td><td>本地运行，数据不外传</td></tr>
-    <tr><td>Ollama</td><td><code>http://localhost:11434/v1</code> · qwen/mistral</td><td>本地运行，支持 MLX 加速 (Apple Silicon)</td></tr>
-  </table>
-</section>
+  updateNav();
+}
 
-<!-- ═══════════════ 5. AI 经验记录机制 ═══════════════ -->
-<section>
-  <h2>5. DuDu AI 经验记录机制（核心亮点）</h2>
+function updateNav() {
+  pageNumEl.textContent = `${current + 1} / ${total}`;
+  document.querySelectorAll('.page-dot').forEach((d, i) => {
+    d.classList.toggle('active', i === current);
+  });
+  document.getElementById('prevBtn').disabled = current === 0;
+  document.getElementById('nextBtn').disabled = current === total - 1;
+}
 
-  <h3>5.1 概述</h3>
-  <p>DuDu 内置了一套<strong>AI 经验积累与知识复用系统 (PPKSkillStore)</strong>，在每次建模过程中自动记录成功模式、失败教训、参数优化策略和 SCM 错误模式。这些经验在后续建模中被自动检索并注入 LLM prompt，形成<strong>"越用越聪明"</strong>的正反馈循环。</p>
+// ── Init ──
+renderAll();
 
-  <h3>5.2 记录的四类经验</h3>
-  <div class="card-grid">
-    <div class="card">
-      <div class="icon"><span class="tag danger">Lesson</span></div>
-      <h4>PPKLesson — 教训/问题记录</h4>
-      <p>记录建模过程中的问题及解决方案。包含 11 个分类：NONMEM 错误、收敛问题、协方差失败、数据问题、模型结构错误、初始估计问题、边界警告、SCM 错误、用户指导等。每个 Lesson 有严重程度 (critical/high/medium/low)，critical 级别的每次都会注入 LLM 上下文。</p>
-    </div>
-    <div class="card">
-      <div class="icon"><span class="tag success">Success</span></div>
-      <h4>PPKSuccessPattern — 成功模式</h4>
-      <p>记录成功的建模决策。包含场景描述 (context)、操作 (action)、量化结果 (result，如 OFV 下降量)。例如："添加 WT 对 CL 的协变量关系，OFV 下降 45.3"。这些模式在相似场景中会被检索作为正向示例。</p>
-    </div>
-    <div class="card">
-      <div class="icon"><span class="tag accent">Insight</span></div>
-      <h4>PPKParameterInsight — 参数洞察</h4>
-      <p>跨 run 积累的参数优化模式。记录每个参数 (CL, V2, KA 等) 的典型值、典型随机效应 (Omega) 大小、常见协变量关系。按参数名去重更新，在模型构建时作为初始估计参考。</p>
-    </div>
-    <div class="card">
-      <div class="icon"><span class="tag warning">Pattern</span></div>
-      <h4>SCMErrorPattern — SCM 错误模式</h4>
-      <p>识别并自动诊断 SCM 运行中的常见错误 (如 invalid column name、covariate not found、forward selection 卡住)。每个模式包含正则匹配规则 (pattern)、诊断说明 (diagnosis)、修复建议 (fix)，命中计数用于热度排序。</p>
-    </div>
-  </div>
+// ── Events ──
+document.getElementById('prevBtn').addEventListener('click', () => goTo(current - 1));
+document.getElementById('nextBtn').addEventListener('click', () => goTo(current + 1));
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+    e.preventDefault();
+    goTo(current + 1);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    goTo(current - 1);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    goTo(0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    goTo(total - 1);
+  }
+});
+</script>
 
-  <h3>5.3 经验采集时机</h3>
-  <table class="info-table">
-    <tr><th>触发场景</th><th>采集方式</th><th>记录内容</th></tr>
-    <tr>
-      <td><strong>💬 用户对话</strong></td>
-      <td><code>learnFromUserMessage()</code> — 检测消息中的建模关键词 (eta, covariate, OFV, 修复, 优化 等)</td>
-      <td>userGuidance Lesson + OFV Success + Covariate Lesson</td>
-    </tr>
-    <tr>
-      <td><strong>🏃 SCM 自动化</strong></td>
-      <td><code>prepareAndRunSCM()</code> — SCM 运行结束后的成功/失败分支</td>
-      <td>SCM Success / scmError Lesson / auto-diagnosed SCMErrorPattern</td>
-    </tr>
-    <tr>
-      <td><strong>🔄 Phase 2 协变量循环</strong></td>
-      <td>每次迭代评估 OFV 变化 & 参数合理性</td>
-      <td>Parameter Insight 更新 / Covariate Lesson</td>
-    </tr>
-    <tr>
-      <td><strong>🔧 AI 自动修复</strong></td>
-      <td>AI 修复模型后，记录修复前后的变化</td>
-      <td>Success Pattern (记录修复效果)</td>
-    </tr>
-  </table>
-
-  <h3>5.4 经验检索与注入</h3>
-  <div class="flow">
-    <div class="flow-box">LLM 调用前</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box"><code>contextBlock(for:maxLessons:)</code></div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">按标签过滤相关经验</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">按严重程度排序</div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-box">注入 LLM System Prompt</div>
-  </div>
-  <p>每次向 LLM 发送请求时，系统自动调用 <code>contextBlock(for: ["SCM", "convergence"], maxLessons: 4)</code> 检索最相关的经验，格式化为结构化文本附加到 prompt 中。例如：</p>
-  <pre>
-[Dudu PMx Skill Memory — verified solutions, DO NOT re-attempt]
-
-LESSONS:
-[critical][SCM] IF: column name mismatch THEN: verify $INPUT column order matches CSV headers
-[high][convergence] IF: minimization terminated THEN: try reducing initial estimates by 50%
-
-SUCCESS:
-• SCM completed successfully: 6 covariates tested, 2 included (WT→CL, AGE→V2)
-  OFV improved from 4521.3 to 4418.7 (Δ=-102.6)
-  </pre>
-
-  <h3>5.5 存储与持久化</h3>
-  <p><code>PPKSkillStore</code> 是单例 (Singleton)，在应用运行期间保存在内存中。经验数据通过 <code>PPKSkillData</code> 结构体管理，支持 JSON 序列化。当前的 Lessons/Successes/Insights 均可在 Settings → Rules 标签页查看。</p>
-</section>
-
-<!-- ═══════════════ 6. R/Python 脚本 ═══════════════ -->
-<section>
-  <h2>6. 诊断与分析脚本</h2>
-
-  <table class="info-table">
-    <tr><th>脚本</th><th>语言</th><th>功能</th><th>输出</th></tr>
-    <tr><td><code>gof_plot_script.R</code></td><td>R</td><td>GOF 六宫格诊断图 (DV vs IPRED, DV vs PRED, CWRES vs TIME, CWRES vs PRED, |IWRES| vs IPRED, CWRES QQ-plot)</td><td><code>GOF_mod{run}.jpg</code></td></tr>
-    <tr><td><code>vpc_plot_script.R</code></td><td>R</td><td>VPC 预测检验图 (含分层)，基于 PsN vpc 输出</td><td><code>VPC_mod{run}.jpg</code>, <code>VPC_Stratified_mod{run}.jpg</code></td></tr>
-    <tr><td><code>individual_plot_script.R</code></td><td>R</td><td>个体拟合图 (每个受试者的 DV/IPRED/PRED vs TIME)</td><td><code>Individual_Plots_Run{run}.pdf</code></td></tr>
-    <tr><td><code>dose_normalized_ct_plot.R</code></td><td>R</td><td>剂量归一化 C-T 曲线 + 吸收滞后检测</td><td><code>{prefix}_dose_norm_ct.png</code>, <code>{prefix}_analysis.txt</code></td></tr>
-    <tr><td><code>pk parameters script.R</code></td><td>R</td><td>PK 参数汇总表 (THETA/OMEGA/SIGMA 格式化输出)</td><td><code>data_run{run}.csv</code>, Word 文档</td></tr>
-    <tr><td><code>LST_script.R</code></td><td>R</td><td>NONMEM LST 文件深度解析</td><td>结构化参数报告</td></tr>
-    <tr><td><code>model_eval_mod41.R</code></td><td>R</td><td>模型评估脚本 (用于特定模型)</td><td>评估报告</td></tr>
-    <tr><td><code>autopmx_cli.py</code></td><td>Python</td><td>CLI 入口，将 Swift 任务派发到对应的 Python 方法</td><td>任务桥接</td></tr>
-    <tr><td><code>workbench_core.py</code></td><td>Python</td><td>核心任务引擎：项目创建、文件管理、R 脚本调度、PsN 执行、参数审计</td><td>各种诊断输出</td></tr>
-    <tr><td><code>Auto_diagnostics.py</code></td><td>Python</td><td>全自动诊断管道：串联 GOF → VPC → 个体图 → AI 审计</td><td>完整诊断报告</td></tr>
-    <tr><td><code>audit_tasks.py</code></td><td>Python</td><td>AI 审计任务 (GOF 审计、VPC 审计、参数审计)</td><td><code>GOF_Expert_Audit_*.md</code>, <code>VPC_Expert_Audit_*.md</code></td></tr>
-    <tr><td><code>gof_audit_agent.py</code></td><td>Python</td><td>GOF 图 AI 解读代理 (调用 Vision LLM 分析图表)</td><td>GOF 专家审计报告</td></tr>
-    <tr><td><code>vpc_audit_agent.py</code></td><td>Python</td><td>VPC 图 AI 解读代理</td><td>VPC 专家审计报告</td></tr>
-    <tr><td><code>model_generator.py</code></td><td>Python</td><td>AI 驱动的 NONMEM 控制流生成器</td><td><code>run{xxx}.mod</code></td></tr>
-    <tr><td><code>mod_validator.py</code></td><td>Python</td><td>NONMEM 控制流语法验证器</td><td>验证报告</td></tr>
-    <tr><td><code>pop_agent.py</code></td><td>Python</td><td>PopPK 建模代理 (完整建模流程编排)</td><td>建模日志</td></tr>
-    <tr><td><code>pydarwin_optimizer.py</code></td><td>Python</td><td>遗传算法 (GA) 参数优化器</td><td>优化后的初始估计</td></tr>
-    <tr><td><code>poppk_model_templates.py</code></td><td>Python</td><td>PopPK 模型模板库 (1/2/3 房室、口服、输注等)</td><td>模板控制流</td></tr>
-  </table>
-</section>
-
-<!-- ═══════════════ 7. 规则与知识库 ═══════════════ -->
-<section>
-  <h2>7. 规则与知识库</h2>
-
-  <table class="info-table">
-    <tr><th>文件</th><th>类型</th><th>描述</th></tr>
-    <tr><td><code>poppk_rules.json</code></td><td>JSON 规则库</td><td>PopPK 建模规则：模型结构约束、参数合理性检查、收敛判定标准、协变量评估标准</td></tr>
-    <tr><td><code>poppk_model_library.md</code></td><td>Markdown 知识库</td><td>PopPK 模型类型库：1/2/3 房室、不同给药途径、残差模型选择指南</td></tr>
-    <tr><td><code>PopPK_Expert_Audit_Report.md</code></td><td>Markdown 审计指南</td><td>PopPK 专家审计报告模板：评判标准、常见问题清单、验收门槛</td></tr>
-    <tr><td><code>NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md</code></td><td>Markdown 规则</td><td>NONMEM 规则知识审计文档：错误代码解析、修复指南、最佳实践</td></tr>
-  </table>
-</section>
-
-<!-- ═══════════════ 8. 已实现的效果 ═══════════════ -->
-<section>
-  <h2>8. 已实现的效果与能力</h2>
-
-  <h3>8.1 核心功能清单</h3>
-  <div class="card-grid">
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>一键自动建模</h4>
-      <p>从原始 CSV 数据集 → AI 自动分析 → 自动写模型 → 自动运行 NONMEM → 自动诊断 → 自动修复，全流程无人值守</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>完整的诊断可视化</h4>
-      <p>GOF 六宫格、VPC (含分层)、个体拟合图、PK 参数表，一键生成出版级图表</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>AI 图表解读</h4>
-      <p>右键 GOF/VPC 图 → AI 分析，自动生成专家级别审计报告 (支持 Vision LLM)</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>SCM 协变量筛选</h4>
-      <p>完整 PsN SCM 流程集成，AI 自动诊断 SCM 错误并提供修复方案</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>遗传算法优化</h4>
-      <p>基于 PyDarwin 的 GA 参数优化，自动搜索最佳初始估计值</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>多 LLM 支持</h4>
-      <p>支持 OpenAI / DeepSeek / LM Studio / Ollama，可离线本地运行，保护数据隐私</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>对话式建模</h4>
-      <p>自然语言与 DuDu 交流建模意图："帮我加个 WT 对 CL 的协变量" → AI 自动修改控制流并运行</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>经验知识积累</h4>
-      <p>每次建模自动记录成功/失败模式，跨项目复用经验，越用越聪明</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>模型比较</h4>
-      <p>自动对比两个 run 的 OFV 变化、参数变化、诊断图差异，给出统计建议</p>
-    </div>
-    <div class="card">
-      <div class="icon">✅</div>
-      <h4>项目重载</h4>
-      <p>即使中断后重新打开，自动检测现有模型状态，从断点继续建模</p>
-    </div>
-  </div>
-
-  <h3>8.2 自动化建模流程 (6 阶段)</h3>
-  <pre>
-Phase 0: 数据分析
-  ├── 读取 CSV → 分析给药途径、协变量、观测数
-  ├── C-T 曲线绘制 + 吸收滞后检测
-  └── 生成 Dataset Profile
-
-Phase 1: 结构模型
-  ├── AI 写 run001.mod (1 房室 + 相应残差模型)
-  ├── 运行 NONMEM
-  ├── 诊断 (GOF + VPC + 个体图 + AI 参数审计)
-  └── 若失败 → AI 修复 → 重试 (最多 3 次)
-
-Phase 2: 协变量筛选
-  ├── AI 逐个评估协变量 (WT, SEX, AGE, STUDY)
-  ├── 每次添加/移除 → 运行 → 检查 OFV 变化
-  └── 达到收敛 (OFV 不再显著下降) 或达到最大迭代
-
-Phase 3: 最终评估
-  ├── 完整诊断 (GOF, VPC, 个体图, 参数表)
-  ├── AI 生成综合审计报告
-  └── 模型交付
-  </pre>
-
-  <h3>8.3 关键技术指标</h3>
-  <table class="info-table">
-    <tr><th>指标</th><th>数值</th></tr>
-    <tr><td>Swift 源码行数</td><td>~8,500 行 (21 个 Swift 文件)</td></tr>
-    <tr><td>Python 脚本行数</td><td>~3,500 行 (15 个 Python 文件)</td></tr>
-    <tr><td>R 脚本行数</td><td>~800 行 (6 个 R 文件)</td></tr>
-    <tr><td>支持 LLM 提供商</td><td>OpenAI / DeepSeek / LM Studio / Ollama (兼容 OpenAI API 的任何服务)</td></tr>
-    <tr><td>自动建模最快完成</td><td>~15-30 分钟 (取决于 NONMEM 运行时间)</td></tr>
-    <tr><td>知识库容量</td><td>4 个规则文件 + AI 动态积累的经验库</td></tr>
-    <tr><td>外部依赖</td><td>0 (纯 Swift 标准库 + 系统框架)</td></tr>
-  </table>
-</section>
-
-<!-- ═══════════════ 9. 技术亮点 ═══════════════ -->
-<section>
-  <h2>9. 架构与技术亮点</h2>
-
-  <div class="card-grid">
-    <div class="card">
-      <div class="icon">🏗</div>
-      <h4>零外部 Swift 依赖</h4>
-      <p>整个 macOS 客户端仅使用 Foundation、SwiftUI、AppKit，无任何第三方 Swift 包。所有 AI 通信、文件解析、进程管理均为自研实现。</p>
-    </div>
-    <div class="card">
-      <div class="icon">🔄</div>
-      <h4>Swift-Python-R 三层桥接</h4>
-      <p>Swift (UI + 编排) ↔ Python (CLI 任务桥接 + AI Agent) ↔ R (统计计算 + 绘图)。通过 shell 进程通信，解耦但高效。</p>
-    </div>
-    <div class="card">
-      <div class="icon">🎨</div>
-      <h4>macOS 原生设计语言</h4>
-      <p>SF Pro 字体、液态玻璃效果 (LiquidGlass)、系统级模糊背景、圆润连续曲线、自然的悬停动画 — 完全融入 macOS 视觉体系。</p>
-    </div>
-    <div class="card">
-      <div class="icon">🧠</div>
-      <h4>可成长的 AI 经验系统</h4>
-      <p>PPKSkillStore 将每次建模的经验结构化存储，按标签和严重程度智能检索，类似 RAG (Retrieval-Augmented Generation) 但专为 PopPK 领域优化。</p>
-    </div>
-    <div class="card">
-      <div class="icon">🔌</div>
-      <h4>LLM 提供商热插拔</h4>
-      <p>统一 OpenAI-compatible API，切换提供商只需改 URL + Model ID，不依赖任何特定 SDK。</p>
-    </div>
-    <div class="card">
-      <div class="icon">📱</div>
-      <h4>跨平台在途</h4>
-      <p>已有 Windows 版 (PySide6) 和 Web 版 (React + FastAPI) 的代码基础，可根据需求继续开发。</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════ 10. 未来规划 ═══════════════ -->
-<section>
-  <h2>10. 当前开发路线</h2>
-
-  <table class="info-table">
-    <tr><th>优先级</th><th>任务</th><th>状态</th></tr>
-    <tr><td>🔴 高</td><td>修复 GOF/VPC 在 APFS 上的归档崩溃 bug</td><td><span class="tag success">Done</span></td></tr>
-    <tr><td>🔴 高</td><td>C-T 脚本 R 语法修复 + R 失败时的错误报告</td><td><span class="tag success">Done</span></td></tr>
-    <tr><td>🔴 高</td><td>sdtab 文件名自动检测 (从 MOD $TABLE FILE= 解析)</td><td><span class="tag success">Done</span></td></tr>
-    <tr><td>🔴 高</td><td>project_config.json 自动生成 (默认值回退)</td><td><span class="tag success">Done</span></td></tr>
-    <tr><td>🟡 中</td><td>GOF/VPC/个体图/PK参数快捷按钮添加 Run 选择器</td><td><span class="tag success">Done</span></td></tr>
-    <tr><td>🟡 中</td><td>PPKSkillStore 经验持久化 (JSON 文件存储)</td><td>计划中</td></tr>
-    <tr><td>🟢 低</td><td>Windows 跨平台版完善</td><td>基础代码就绪</td></tr>
-  </table>
-</section>
-
-<footer style="text-align:center; padding:40px 0 20px; color:var(--text-secondary); font-size:0.85em;">
-  <p>AutoPMX (DuDu PMx Workbench) · v1.1.0 Build 2 · © 2025-2026 Duxact Biotechnology Co., Ltd.</p>
-  <p style="margin-top:4px;">文档自动生成于 2026-07-24 · 基于 Swift 源码分析</p>
-</footer>
-
-</div>
 </body>
 </html>

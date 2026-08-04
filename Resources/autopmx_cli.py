@@ -88,6 +88,8 @@ def main() -> int:
             "psn-vpc",
             "bootstrap",
             "scm",
+            "eda",
+            "ct-curves",
             # New deterministic task types:
             "validate-model",
             "generate-model",
@@ -101,7 +103,12 @@ def main() -> int:
     parser.add_argument("--llm-url", default="http://localhost:1234/v1")
     parser.add_argument("--model", default="google/gemma-4-26b-a4b")
     parser.add_argument("--api-key", default="lm-studio")
+    parser.add_argument("--vision-url", default="", help="Independent multimodal model URL for GOF/VPC visual audits (defaults to --llm-url)")
+    parser.add_argument("--vision-model", default="", help="Independent multimodal model name for GOF/VPC visual audits (defaults to --model)")
+    parser.add_argument("--vision-api-key", default="", help="API key for the vision model (defaults to --api-key)")
     parser.add_argument("--rules", default="poppk_rules.json,NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md")
+    parser.add_argument("--psn-dir", default="", help="Directory containing PsN commands (vpc, bootstrap, scm, execute)")
+    parser.add_argument("--bootstrap-samples", type=int, default=0, help="Override bootstrap sample count")
     # validate / generate / autofix args
     parser.add_argument("--mod", help="Path to .mod file (for validate-model / autofix-model)")
     parser.add_argument("--project-dir", help="Project directory (for validate-model)")
@@ -113,7 +120,7 @@ def main() -> int:
     parser.add_argument("--source", help="Source .mod path (for generate-model transform)")
     parser.add_argument("--modifications", help="JSON modifications (for generate-model transform)")
     parser.add_argument("--output", help="Output path (for generate-model)")
-    parser.add_argument("--rscript", default="", help="Path to Rscript executable (ignored by most tasks)")
+    parser.add_argument("--rscript", default="Rscript", help="Path to Rscript executable")
     args = parser.parse_args()
 
     # Use explicit --project-dir when provided; fall back to cwd for backward compat
@@ -125,11 +132,23 @@ def main() -> int:
         llm_base_url=args.llm_url,
         llm_model_id=args.model,
         llm_api_key=args.api_key,
-        vision_base_url=args.llm_url,
-        vision_model_id=args.model,
-        vision_api_key=args.api_key,
+        vision_base_url=args.vision_url or args.llm_url,
+        vision_model_id=args.vision_model or args.model,
+        vision_api_key=args.vision_api_key or args.api_key,
         rules_file=args.rules,
+        psn_dir=args.psn_dir,
+        bootstrap_samples=args.bootstrap_samples,
+        rscript=args.rscript or "Rscript",
     )
+    # Only tasks that actually run visual audits need a vision model. For other tasks
+    # (validate-model / autofix-model / generate-model / plots ...) the vision model is
+    # irrelevant, so printing it here only confuses users ("why is a vision model involved?").
+    VISION_AUDIT_TASKS = {"gof-audit", "vpc-audit", "parameter-audit"}
+    if args.task in VISION_AUDIT_TASKS:
+        if args.vision_url or args.vision_model:
+            print(f"AutoPMX CLI: vision model = {settings.vision_model_id} @ {settings.vision_base_url} (independent)")
+        else:
+            print(f"AutoPMX CLI: vision model = {settings.vision_model_id} (reusing main model)")
     runner = TaskRunner(settings, print)
 
     if args.task == "parameter-audit":
@@ -154,6 +173,10 @@ def main() -> int:
         return runner.run_bootstrap()
     if args.task == "scm":
         return runner.run_scm()
+    if args.task == "eda":
+        return runner.run_eda(csv_file=args.csv)
+    if args.task == "ct-curves":
+        return runner.run_ct_curves(csv_file=args.csv)
 
     # New deterministic task types
     if args.task == "validate-model":

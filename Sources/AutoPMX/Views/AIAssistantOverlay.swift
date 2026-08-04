@@ -53,6 +53,12 @@ struct AIAssistantOverlay: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
+            // Liquid-glass notice card: model-only action requested but no .mod files exist
+            if store.noModelCardVisible {
+                NoModelNoticeCard()
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+            }
+
             if store.isAssistantPanelPresented {
                 AssistantPanel()
                     .frame(width: 420, height: 600)
@@ -60,12 +66,13 @@ struct AIAssistantOverlay: View {
                     .shadow(color: .black.opacity(0.12), radius: 20, y: 10)
             }
 
-            // Warning banner during auto modeling
-            if store.isAutoModeling {
+            // Warning banner during auto modeling / SCM / bootstrap
+            if store.isAutoModeling || store.isSCMRunning || store.isBootstrapRunning {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
-                    Text("自动建模中，请勿切换项目")
+                    Text(store.isSCMRunning ? L10n.scmBusySwitchWarning
+                        : (store.isBootstrapRunning ? L10n.bootstrapBusySwitchWarning : L10n.aiAutoModelingBusy))
                         .font(DuDuFont.captionSemibold(11))
                 }
                 .foregroundStyle(.orange)
@@ -75,20 +82,45 @@ struct AIAssistantOverlay: View {
                 .transition(.scale.combined(with: .opacity))
             }
 
+            // Compact progress popup when DuDu panel is hidden during auto modeling / SCM
+            if (store.isAutoModeling || store.isSCMRunning || store.isBootstrapRunning) && !store.isAssistantPanelPresented {
+                MiniProgressPopup(
+                    title: store.isSCMRunning ? L10n.scmPopupTitle
+                        : (store.isBootstrapRunning ? L10n.bootstrapPopupTitle : "DuDu Auto"),
+                    step: store.automationStep
+                )
+                    .onTapGesture { store.isAssistantPanelPresented = true }
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+            }
+
             Button {
-                withAnimation(.easeOut(duration: 0.15)) {
+                withAnimation(.easeOut(duration: 0.1)) {
                     store.isAssistantPanelPresented.toggle()
                 }
             } label: {
-                FloatingButton(isActive: store.isAutoModeling || store.isAssistantThinking || store.isAIThinking, showingDuDu: duDuThumb != nil)
+                FloatingButton(isActive: store.isAutoModeling || store.isSCMRunning || store.isBootstrapRunning || store.isAssistantThinking || store.isAIThinking, showingDuDu: duDuThumb != nil)
             }
         }
         .offset(x: settledOffset.width + dragOffset.width, y: settledOffset.height + dragOffset.height)
-        .gesture(DragGesture()
-            .onChanged { dragOffset = $0.translation }
-            .onEnded {
-                settledOffset.width += $0.translation.width
-                settledOffset.height += $0.translation.height
+        .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.7, blendDuration: 0), value: dragOffset)
+        .gesture(DragGesture(minimumDistance: 5, coordinateSpace: .global)
+            .onChanged { value in
+                let candidate = CGSize(
+                    width: settledOffset.width + value.translation.width,
+                    height: settledOffset.height + value.translation.height
+                )
+                let clamped = clampedDuDuOffset(candidate)
+                dragOffset = CGSize(
+                    width: clamped.width - settledOffset.width,
+                    height: clamped.height - settledOffset.height
+                )
+            }
+            .onEnded { value in
+                let candidate = CGSize(
+                    width: settledOffset.width + value.translation.width,
+                    height: settledOffset.height + value.translation.height
+                )
+                settledOffset = clampedDuDuOffset(candidate)
                 dragOffset = .zero
             }
         )
@@ -105,6 +137,30 @@ struct AIAssistantOverlay: View {
             if let u, let img = NSImage(contentsOf: u) { return img }
         }
         return nil
+    }
+
+    private func clampedDuDuOffset(_ candidate: CGSize) -> CGSize {
+        guard let frame = NSApp.keyWindow?.frame ?? NSApp.mainWindow?.frame else {
+            return candidate
+        }
+
+        let buttonSize: CGFloat = 56
+        let margin: CGFloat = 12
+        let padding: CGFloat = 24
+
+        // Offset 0 is the button's natural bottom-trailing position.
+        let originalX = frame.width - buttonSize - padding
+        let originalY = frame.height - buttonSize - padding
+
+        let minX = margin - originalX
+        let maxX = frame.width - buttonSize - margin - originalX
+        let minY = margin - originalY
+        let maxY = frame.height - buttonSize - margin - originalY
+
+        return CGSize(
+            width: min(max(candidate.width, minX), maxX),
+            height: min(max(candidate.height, minY), maxY)
+        )
     }
 }
 
@@ -214,8 +270,6 @@ struct FloatingButton: View {
                         colors: [mood.auraColor.opacity(0.35), mood.auraColor.opacity(0.15), .clear],
                         size: 48, lineWidth: 2, duration: 3, reverse: true
                     )
-                    AuroraParticles()
-                        .frame(width: 54, height: 54)
                 }
 
                 // Background circle
@@ -243,6 +297,16 @@ struct FloatingButton: View {
                     Image(systemName: "brain.head.profile")
                         .font(DuDuFont.icon(16))
                         .foregroundStyle(mood.auraColor)
+                }
+
+                // Personality badge: lets each chat style read differently at a glance.
+                if showingDuDu {
+                    Text(store.duDuPersonality.icon)
+                        .font(.system(size: 10))
+                        .frame(width: 16, height: 16)
+                        .background(Circle().fill(.ultraThinMaterial))
+                        .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                        .offset(x: 15, y: -15)
                 }
             }
         }
@@ -385,59 +449,118 @@ struct AuroraRing: View {
     }
 }
 
-// MARK: - Aurora Particles
+// MARK: - Context Usage Ring
 
-struct AuroraParticles: View {
-    @EnvironmentObject private var store: WorkbenchStore
+/// Small ring showing how much of the LLM context window is occupied by the
+/// currently loaded rule/knowledge context (and the latest request prompt).
+private struct ContextUsageRing: View {
+    let used: Int
+    let limit: Int
 
-    @State private var seedParticles: [(fraction: Double, offset: Double, speed: Double, driftAmp: Double, driftFreq: Double)] = []
-
-    private let maxSeeds = 10000
+    private var ratio: Double {
+        guard limit > 0 else { return 0 }
+        return min(1.0, Double(used) / Double(limit))
+    }
+    private var ringColor: Color {
+        ratio < 0.6 ? .green : (ratio < 0.85 ? .orange : .red)
+    }
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                guard store.particleEffectsEnabled, store.particleCount > 0 else { return }
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                let count = min(store.particleCount, seedParticles.count)
-                let baseRadius = size.width * 0.38
+        ZStack {
+            Circle()
+                .stroke(Color.secondary.opacity(0.3), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: ratio)
+                .stroke(ringColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.4), value: ratio)
+            Text("\(Int(ratio * 100))%")
+                .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 24, height: 24)
+    }
+}
 
-                for i in 0..<count {
-                    let p = seedParticles[i]
-                    // 3× faster orbit
-                    let angle = Angle.degrees(p.fraction * 360 + t * p.speed * 24)
-                    // Gentle radial drift for organic feel (3×)
-                    let drift = sin(t * p.driftFreq + p.offset * .pi * 2) * p.driftAmp
-                    let radius = baseRadius + drift * (baseRadius * 0.25)
-                    let x = size.width / 2 + cos(angle.radians) * radius
-                    let y = size.height / 2 + sin(angle.radians) * radius
-                    let brightness = 0.55 + 0.45 * sin(t * p.speed * 4.5 + p.offset * .pi * 2)
-                    let dotSize: CGFloat = 1.0 + 1.2 * sin(t * p.speed * 3.6 + p.offset * .pi)
-                    let dot = Path(ellipseIn: CGRect(x: x - dotSize/2, y: y - dotSize/2, width: dotSize, height: dotSize))
+/// Header badge: a ring plus a hover popover with full context-usage details.
+struct ContextUsageBadge: View {
+    @ObservedObject var store: WorkbenchStore
 
-                    // Blue gradient: hue fixed near blue, vary brightness
-                    let color = Color(
-                        hue: 0.57 + 0.06 * sin(t * 0.2 + p.fraction * .pi * 2),
-                        saturation: 0.65 + 0.35 * sin(t * 0.35 + p.offset * .pi),
-                        brightness: brightness
-                    )
-                    context.fill(dot, with: .color(color.opacity(0.75)))
-                    // Subtle glow
-                    let glow = Path(ellipseIn: CGRect(x: x - dotSize, y: y - dotSize, width: dotSize*2, height: dotSize*2))
-                    context.fill(glow, with: .color(color.opacity(0.08)))
-                }
+    @State private var show = false
+    @State private var closeTask: DispatchWorkItem?
+
+    init(store: WorkbenchStore) {
+        self.store = store
+    }
+
+    private var used: Int { max(store.lastTokenUsage.input, store.contextTokenEstimate) }
+    private var limit: Int { store.contextWindowLimitTokens }
+    private var ratio: Double { limit > 0 ? min(1.0, Double(used) / Double(limit)) : 0 }
+
+    private func keepOpen() { closeTask?.cancel(); show = true }
+    private func scheduleClose() {
+        closeTask?.cancel()
+        let task = DispatchWorkItem { show = false }
+        closeTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: task)
+    }
+
+    var body: some View {
+        ContextUsageRing(used: used, limit: limit)
+            .contentShape(Circle())
+            .onHover { inside in inside ? keepOpen() : scheduleClose() }
+            .popover(isPresented: $show, arrowEdge: .bottom) {
+                contextPopover
+            }
+    }
+
+    private var contextPopover: some View {
+        let mem = MemoryMonitor.shared
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.ctxUsagePanel).font(.headline)
+            row(L10n.ctxWindowLimit, "\(limit) tok")
+            row(L10n.ctxRuleContext, "\(store.contextTokenEstimate) tok")
+            row(L10n.ctxRequestPrompt, "\(store.lastTokenUsage.input) tok")
+            row(L10n.ctxOutput, "\(store.lastTokenUsage.output) tok")
+            Divider()
+            row(L10n.t("tokens.memUsed"), "\(mem.formatBytes(mem.snapshot.usedBytes)) (\(Int(mem.snapshot.usageRatio * 100))%)")
+            row(L10n.t("tokens.memLLM"), mem.llmProcessName.isEmpty
+                ? L10n.t("tokens.memLLMNone")
+                : "\(mem.llmProcessName) · \(mem.formatBytes(mem.llmProcessBytes))")
+            if mem.snapshot.usageRatio >= 0.8 {
+                Text(L10n.t("tokens.memWarning"))
+                    .font(.caption2).foregroundStyle(.red)
+            }
+            Divider()
+            row(L10n.ctxTotalInput, "\(store.totalInputTokens) tok")
+            row(L10n.ctxTotalOutput, "\(store.totalOutputTokens) tok")
+            let cached = store.totalCacheReadTokens
+            let written = store.totalCacheWriteTokens
+            let base = cached + written
+            row(L10n.ctxCacheRead, "\(cached) tok")
+            row(L10n.ctxCacheWrite, "\(written) tok")
+            if base > 0 {
+                row(L10n.ctxCacheHitRate, String(format: "%.0f%%", Double(cached) / Double(base) * 100))
+            }
+            Text(String(format: L10n.ctxWindowOccupied, Int(ratio * 100)))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ratio < 0.6 ? .green : (ratio < 0.85 ? .orange : .red))
+            if store.lastTokenUsage.input == 0 {
+                Text(L10n.ctxNoUsage)
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .onAppear {
-            seedParticles = (0..<maxSeeds).map { _ in
-                (
-                    fraction: Double.random(in: 0..<1),
-                    offset: Double.random(in: 0..<1),
-                    speed: Double.random(in: 0.9..<2.4),
-                    driftAmp: Double.random(in: 0.3..<1.0),
-                    driftFreq: Double.random(in: 0.45..<1.35)
-                )
-            }
+        .padding(12)
+        .frame(width: 240)
+        .onAppear { MemoryMonitor.shared.refresh() }
+        .onHover { inside in inside ? keepOpen() : scheduleClose() }
+    }
+
+    private func row(_ k: String, _ v: String) -> some View {
+        HStack {
+            Text(k).foregroundStyle(.secondary)
+            Spacer()
+            Text(v).font(.system(.body, design: .monospaced))
         }
     }
 }
@@ -453,16 +576,22 @@ struct AssistantPanel: View {
             headerView
             if !store.thinkingSteps.isEmpty { thinkingStepsView }
             messagesView
-            contextIndicator
-            quickActionsBar
             inputBarView
         }
         .background(
             GlassBackground()
         )
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .stroke(.white.opacity(0.15), lineWidth: 0.5))
+        // Simple, quiet border around the card
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 18, y: 6)
+        .onAppear {
+            // Self-heal stale "busy" state so quick actions / STOP are never stuck.
+            store.runner.recoverIfStuck()
+        }
         .sheet(isPresented: $store.isAutomationOptionsPresented) {
             AutomationOptionsSheetView().environmentObject(store)
         }
@@ -482,110 +611,208 @@ struct AssistantPanel: View {
                 .environmentObject(store)
                 .frame(width: 440, height: 380)
         }
+        .sheet(isPresented: $store.isCompDecisionPresented) {
+            CompDecisionView()
+                .environmentObject(store)
+                .frame(width: 480, height: 360)
+        }
     }
 
     // MARK: Header
     private var headerView: some View {
-        HStack(spacing: 8) {
-            if let logo = duDuThumb {
-                Image(nsImage: logo).resizable().scaledToFit()
-                    .frame(width: 22, height: 22).clipShape(Circle())
-            }
-            Text("DuDu PMx").font(DuDuFont.bodySemibold())
-            Spacer()
-            HStack(spacing: 6) {
-                if store.assistantMessages.count > 10 {
-                    Button {
-                        store.compressChatContext()
-                    } label: {
-                        Image(systemName: "compress")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Compress context (~\(store.estimatedTokenCount()/1000)K tokens)")
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if let logo = duDuThumb {
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 22, height: 22).clipShape(Circle())
                 }
-                if store.isAutoModeling || store.isAssistantThinking || store.isAIThinking {
-                    Button {
-                        if store.isAutoModeling {
-                            store.requestStopAutomation()
-                        } else {
-                            store.requestStopChat()
+                Text("DuDu PMx").font(DuDuFont.bodySemibold())
+                Spacer()
+                // Context-usage ring — hover to see details
+                ContextUsageBadge(store: store)
+                    .padding(.trailing, 4)
+                HStack(spacing: 6) {
+                    if store.assistantMessages.count > 10 {
+                        Button {
+                            store.compressChatContext()
+                        } label: {
+                            Image(systemName: "compress")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
                         }
-                    } label: {
-                        Label(L10n.aiStop, systemImage: "stop.fill")
-                            .font(DuDuFont.captionMedium())
-                            .padding(.horizontal, 10).frame(height: 22)
+                        .buttonStyle(.plain)
+                        .help("Compress chat context to save memory")
                     }
-                    .buttonStyle(.borderedProminent).tint(.red).controlSize(.small)
                 }
+                Button {
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        store.isAssistantPanelPresented = false
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Hide DuDu panel")
             }
-            Button { store.isAssistantPanelPresented = false } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 15, weight: .regular)).foregroundStyle(.tertiary) // SFSymbol
-            }.buttonStyle(.plain)
+            .padding(.horizontal, 14).padding(.vertical, 8)
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(GlassMaterial())
     }
 
     // MARK: Thinking Steps
     @State private var isThinkingCollapsed = true
+    @State private var isThinkingHovered = false
+    @State private var thinkingPulse = false
+
+    private var hasActiveThinkingSteps: Bool {
+        store.thinkingSteps.contains { $0.type == .thinking || $0.type == .working }
+    }
+
+    private var thinkingHeaderIcon: String {
+        if hasActiveThinkingSteps { return "sparkles" }
+        if !store.thinkingSteps.isEmpty,
+           store.thinkingSteps.allSatisfy({ $0.type == .done }) { return "checkmark.circle.fill" }
+        return "brain"
+    }
+
+    private var thinkingHeaderColor: Color {
+        if hasActiveThinkingSteps { return .blue }
+        if !store.thinkingSteps.isEmpty,
+           store.thinkingSteps.allSatisfy({ $0.type == .done }) { return .green }
+        return .secondary
+    }
 
     private var thinkingStepsView: some View {
-        VStack(spacing: 0) {
-            Button(action: { withAnimation { isThinkingCollapsed.toggle() } }) {
-                HStack(spacing: 4) {
-                    Image(systemName: isThinkingCollapsed ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary) // SFSymbol
-                    Text(L10n.aiReasoning).font(DuDuFont.caption()).foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(store.thinkingSteps.count) \(L10n.aiSteps)").font(DuDuFont.caption()).foregroundStyle(.tertiary)
+        VStack(spacing: 6) {
+            // ── Collapsed header: liquid-glass pill ──
+            Button(action: {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    isThinkingCollapsed.toggle()
                 }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: thinkingHeaderIcon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(thinkingHeaderColor)
+                        .opacity(hasActiveThinkingSteps && thinkingPulse ? 0.45 : 1.0)
+                        .animation(
+                            hasActiveThinkingSteps
+                                ? .easeInOut(duration: 0.75).repeatForever(autoreverses: true)
+                                : .default,
+                            value: thinkingPulse
+                        )
+                    Text(L10n.aiReasoning)
+                        .font(DuDuFont.captionSemibold(11))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 4)
+                    Text("\(store.thinkingSteps.count) \(L10n.aiSteps)")
+                        .font(DuDuFont.caption(10))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(.white.opacity(0.22), in: Capsule())
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isThinkingCollapsed ? -90 : 0))
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(isThinkingHovered ? 0.06 : 0.0))
+                )
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 14).padding(.vertical, 5)
+            .padding(.horizontal, 10)
+            .onHover { inside in
+                withAnimation(.easeOut(duration: 0.15)) { isThinkingHovered = inside }
+            }
+
+            // ── Expanded: glass step list ──
             if !isThinkingCollapsed {
-                Divider()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 1) {
+                    LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(store.thinkingSteps) { step in
-                            HStack(spacing: 4) {
-                                Circle().fill(step.type == .done ? Color.green.opacity(0.5) :
-                                    step.type == .error ? Color.red.opacity(0.5) : Color.blue.opacity(0.4))
-                                    .frame(width: 4, height: 4)
-                                Text(step.text).font(DuDuFont.caption())
-                                    .foregroundStyle(step.type == .done ? .secondary : .primary)
-                                if !step.detail.isEmpty {
-                                    Text(step.detail).font(DuDuFont.mono(9)).foregroundStyle(.tertiary).lineLimit(1)
+                            let isLive = hasActiveThinkingSteps && step.id == store.thinkingSteps.last?.id
+                            HStack(alignment: .top, spacing: 8) {
+                                ZStack {
+                                    Circle()
+                                        .fill(step.type.color.opacity(isLive ? 0.20 : 0.13))
+                                        .frame(width: 19, height: 19)
+                                    Image(systemName: step.type.symbol)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(step.type.color)
                                 }
+                                .padding(.top, 1)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(step.text)
+                                        .font(DuDuFont.caption())
+                                        .foregroundStyle(.primary)
+                                        .textSelection(.enabled)
+                                    if !step.detail.isEmpty {
+                                        Text(step.detail)
+                                            .font(DuDuFont.mono(9))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+
                                 Spacer(minLength: 0)
+
+                                if isLive {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .padding(.top, 2)
+                                }
                             }
-                            .padding(.horizontal, 14).padding(.vertical, 2)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(
+                                isLive
+                                    ? RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(step.type.color.opacity(0.08))
+                                    : nil
+                            )
                         }
-                    }.padding(.vertical, 3)
-                }.frame(maxHeight: 100)
+                    }
+                    .padding(6)
+                }
+                .scrollContentBackground(.hidden)
+                .frame(maxHeight: 150)
+                .padding(.horizontal, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .onAppear { thinkingPulse = true }
     }
 
     // MARK: Messages — iMessage style
     private var messagesView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 8) {
                     ForEach(store.assistantMessages) { msg in
                         iMessageBubble(message: msg)
                             .id(msg.id)
                     }
                     if store.isAssistantThinking || store.isAIThinking {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small).scaleEffect(0.6)
-                            Text("思考中...").font(DuDuFont.caption(11)).foregroundStyle(.tertiary)
-                        }.padding(.horizontal, 16).padding(.vertical, 6)
+                        HStack(alignment: .bottom, spacing: 8) {
+                            duDuAvatarView
+                            TypingIndicator()
+                                .padding(.horizontal, 14).padding(.vertical, 11)
+                                .background(assistantBubbleBackground)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12)
                     }
-                }.padding(.vertical, 8)
+                }
+                .padding(.vertical, 12)
             }
+            .scrollContentBackground(.hidden)
             .onChange(of: store.assistantMessages.count) { _ in
                 if let last = store.assistantMessages.last {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -594,21 +821,106 @@ struct AssistantPanel: View {
         }
     }
 
-    // iMessage-style bubble with Markdown rendering for assistant messages
+    // DuDu's circular avatar (reuses the app's DuDu image when available)
+    private var duDuAvatarView: some View {
+        Group {
+            if let img = duDuThumb {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(
+                        LinearGradient(colors: [Color(red: 0.45, green: 0.68, blue: 1.0),
+                                                Color(red: 0.70, green: 0.35, blue: 1.0)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    Image(systemName: "face.smiling.inverse")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .frame(width: 34, height: 34)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: 1.5))
+        .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+        .padding(.bottom, 1)
+    }
+
+    // Your avatar — a friendly person chip on the right side
+    private var userAvatarView: some View {
+        ZStack {
+            Circle().fill(
+                LinearGradient(colors: [Color.blue.opacity(0.9), Color.cyan.opacity(0.75)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            Image(systemName: "person.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 30, height: 30)
+        .overlay(Circle().strokeBorder(.white.opacity(0.7), lineWidth: 1))
+        .shadow(color: .blue.opacity(0.25), radius: 2, y: 1)
+    }
+
+    // DuDu's message bubble — light-gray liquid glass (iMessage style).
+    // Frosted material + a soft gray tint + a white top-edge highlight give it the
+    // "liquid glass" look while staying neutral; the user's own bubbles stay blue.
+    private var assistantBubbleBackground: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(nsColor: .textBackgroundColor).opacity(0.92))
+            .overlay(
+                LinearGradient(
+                    colors: [Color.gray.opacity(0.12), Color.gray.opacity(0.05)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.60), .white.opacity(0.10)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 1
+                    )
+            )
+            .overlay(
+                LinearGradient(colors: [.white.opacity(0.28), .clear],
+                               startPoint: .top, endPoint: .center)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.08), radius: 5, y: 1.5)
+    }
+
+    // Conversation-style bubble with avatars and Markdown rendering for DuDu's messages
     private func iMessageBubble(message: AssistantMessage) -> some View {
         let isUser = message.role == .user
-        return HStack(alignment: .bottom, spacing: 6) {
-            if isUser { Spacer(minLength: 50) }
+        return HStack(alignment: .bottom, spacing: 8) {
+            if isUser {
+                Spacer(minLength: 42)
+            } else {
+                duDuAvatarView
+            }
 
             if isUser {
+                // Your message — blue gradient bubble on the right
                 Text(message.text)
-                    .font(DuDuFont.body()).textSelection(.enabled).lineSpacing(3)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .font(DuDuFont.body())
+                    .textSelection(.enabled)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 13).padding(.vertical, 9)
                     .foregroundStyle(.white)
                     .background(
-                        Color.blue,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        LinearGradient(colors: [Color.blue.opacity(0.92), Color(red: 0.25, green: 0.55, blue: 1.0)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                     )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+                    )
+                    .shadow(color: .blue.opacity(0.22), radius: 4, y: 1)
                     .contextMenu {
                         Button(L10n.aiCopy) {
                             NSPasteboard.general.clearContents()
@@ -617,8 +929,10 @@ struct AssistantPanel: View {
                         Button(L10n.aiFillInput) { store.assistantInput = message.text }
                     }
                     .frame(maxWidth: 300, alignment: .trailing)
+                userAvatarView
             } else {
-                VStack(alignment: .trailing, spacing: 2) {
+                // DuDu's message — soft glass bubble on the left, avatar beside it
+                VStack(alignment: .leading, spacing: 3) {
                     MarkdownMessageView(text: message.text)
                         .contextMenu {
                             Button(L10n.aiCopy) {
@@ -627,39 +941,20 @@ struct AssistantPanel: View {
                             }
                             Button(L10n.aiFillInput) { store.assistantInput = message.text }
                         }
-                        .frame(maxWidth: 380, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(
-                            Color.green.opacity(0.10),
-                            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        )
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(assistantBubbleBackground)
+                        .frame(maxWidth: 360, alignment: .leading)
 
                     // Collapsible Source Citations
                     if !message.citations.isEmpty {
                         CitationSection(citations: message.citations)
-                            .padding(.horizontal, 18).padding(.bottom, 2)
-                    }
-
-                    // Copy button
-                    HStack(spacing: 2) {
-                        Spacer()
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(message.text, forType: .string)
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 10, weight: .regular)) // SFSymbol
-                                .foregroundStyle(.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 18)
-                        .help(L10n.aiCopyHint)
+                            .padding(.horizontal, 4)
                     }
 
                     // Action keyword chips
                     let actions = detectedActions(in: message.text)
                     if !actions.isEmpty {
-                        HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 6) {
                             ForEach(actions.indices, id: \.self) { idx in
                                 AnimatedActionChip(
                                     label: actions[idx].label,
@@ -669,15 +964,28 @@ struct AssistantPanel: View {
                                 )
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 4)
+                        .padding(.horizontal, 4)
+                    }
+
+                    // Copy button
+                    HStack(spacing: 2) {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(message.text, forType: .string)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 10, weight: .regular)) // SFSymbol
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 4)
+                        .help(L10n.aiCopyHint)
                     }
                 }
+                Spacer(minLength: 42)
             }
-
-            if !isUser { Spacer(minLength: 50) }
         }
-        .padding(.horizontal, 12).padding(.vertical, 1)
+        .padding(.horizontal, 12)
     }
 
     // MARK: Action Keywords Detection
@@ -781,10 +1089,42 @@ struct AssistantPanel: View {
         // SCM covariate screening
         if lower.contains("scm") || lower.contains("协变量筛选") || lower.contains("协变量模型") || lower.contains("covariate screening") {
             actions.append(DetectedAction(
-                label: "SCM 协变量筛选",
+                label: L10n.quickSCMCov,
                 icon: "square.grid.3x3.topleft.filled",
                 colors: [.orange, .red],
                 handler: { store.presentSCMDialog() }
+            ))
+        }
+
+        // ETA covariate screening
+        if lower.contains("eta 预筛选") || lower.contains("eta预筛选") ||
+            lower.contains("eta covariate") || lower.contains("eta screening") ||
+            lower.contains("eta 协变量") || lower.contains("eta协变量") {
+            actions.append(DetectedAction(
+                label: L10n.quickETAScreen,
+                icon: "chart.bar.doc.horizontal",
+                colors: [.teal, .blue],
+                handler: { store.runETACovariateScreening(for: store.currentRun) }
+            ))
+        }
+
+        // EDA Analysis
+        if lower.contains("eda") || lower.contains("数据特征分析") || lower.contains("数据探索") || lower.contains("exploratory data") || lower.contains("missing data") || lower.contains("缺失数据") || lower.contains("correlation heatmap") || lower.contains("相关矩阵") || lower.contains("sampling schedule") || lower.contains("采样计划") || lower.contains("spaghetti plot") || lower.contains("意大利面图") {
+            actions.append(DetectedAction(
+                label: L10n.detectEDA,
+                icon: "chart.bar",
+                colors: [.teal, .green],
+                handler: { store.runEDA() }
+            ))
+        }
+
+        // C-T Curves
+        if lower.contains("c-t curve") || lower.contains("ct curve") || lower.contains("浓度时间曲线") || lower.contains("concentration-time") || lower.contains("pk profile") || lower.contains("药时曲线") || lower.contains("dose-normalized") || lower.contains("剂量归一化") || lower.contains("个体浓度") || lower.contains("群体浓度") || lower.contains("ct图") || lower.contains("c-t图") || lower.contains("浓度曲线") || lower.contains("ct曲线") {
+            actions.append(DetectedAction(
+                label: L10n.detectCT,
+                icon: "chart.xyaxis.line",
+                colors: [.blue, .cyan],
+                handler: { store.runCTCurves() }
             ))
         }
 
@@ -795,143 +1135,58 @@ struct AssistantPanel: View {
         return actions
     }
 
-    // MARK: Context Indicator
-    private var contextIndicator: some View {
-        let tokens = store.isAutoModeling ? store.liveTokenCount : store.estimatedTokenCount()
-        let maxTokens = 131_072
-        let pct = Double(tokens) / Double(maxTokens)
-        let pctInt = min(Int(pct * 100), 100)
-
-        return HStack(spacing: 0) {
-            Spacer()
-            Button {
-                store.compressChatContext()
-            } label: {
-                HStack(spacing: 5) {
-                    ContextRing(pct: pct)
-                        .frame(width: 16, height: 16)
-                    Text("\(pctInt)%")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(pct > 0.7 ? Color.orange : pct > 0.5 ? Color.yellow : Color.secondary)
-                    Text("·")
-                        .font(.system(size: 9)).foregroundStyle(.quaternary)
-                    Text("\(tokens / 1000)K / \(maxTokens / 1000)K")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
-            .help("Context usage. Click to compress.")
-        }
-        .padding(.horizontal, 14).padding(.top, 2)
-    }
-
     // MARK: Input Bar
     @State private var showQuickActions: Bool = false
 
     // MARK: Run Picker for diagnostic shortcuts
     enum RunPickerAction: Identifiable {
-        case gof, vpc, individual, pkParams
+        case gof, vpc, individual, pkParams, bootstrap
         var id: Self { self }
     }
     @State private var showRunPicker: RunPickerAction? = nil
 
-    // MARK: Quick Actions Bar (above input)
-    private var quickActionsBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+    // MARK: Input Bar
+    private var inputBarView: some View {
+        VStack(spacing: 0) {
             HStack(spacing: 6) {
-                // ── Stop button: visible only when a process is running ──
-                if store.runner.isRunning || store.isSCMRunning {
+                Button {
+                    showQuickActions.toggle()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showQuickActions, arrowEdge: .bottom) {
+                    QuickActionsPopover(showRunPicker: $showRunPicker)
+                        .environmentObject(store)
+                }
+                .help(L10n.t("quick.title"))
+
+                if store.isAutoModeling || store.isAssistantThinking || store.isAIThinking || store.runner.isRunning || store.isSCMRunning {
                     Button {
-                        if store.isSCMRunning {
+                        if store.isAutoModeling {
+                            // Full stop: cancel the automation task AND terminate any running process.
+                            store.requestStopAutomation()
+                            store.requestStopChat()
+                        } else if store.isSCMRunning {
                             store.cancelSCM()
+                        } else if store.isAssistantThinking || store.isAIThinking {
+                            store.requestStopChat()
+                            store.runner.stopCurrentProcess()
                         } else {
                             store.runner.stopCurrentProcess()
                         }
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("停止")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(Color.red))
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
+                    .help(L10n.aiStop)
                 }
 
-                quickActionButton(label: "自动建模", icon: "wand.and.stars", colors: [.blue, .cyan]) {
-                    store.presentAutomationOptions()
-                }
-                .disabled(store.isAutoModeling || store.runner.isRunning)
-
-                quickActionButton(label: "GOF", icon: "chart.xyaxis.line", colors: [.teal, .blue]) {
-                    showRunPicker = .gof
-                }
-                .disabled(store.runner.isRunning)
-
-                quickActionButton(label: "VPC", icon: "chart.bar.doc.horizontal", colors: [.indigo, .cyan]) {
-                    showRunPicker = .vpc
-                }
-                .disabled(store.runner.isRunning)
-
-                quickActionButton(label: "个体图", icon: "person.2.wave.2", colors: [.mint, .green]) {
-                    showRunPicker = .individual
-                }
-                .disabled(store.runner.isRunning)
-
-                quickActionButton(label: "PK参数", icon: "tablecells", colors: [.orange, .yellow]) {
-                    showRunPicker = .pkParams
-                }
-                .disabled(store.runner.isRunning)
-
-                quickActionButton(label: "SCM", icon: "square.grid.3x3.topleft.filled", colors: [.orange, .red]) {
-                    store.presentSCMDialog()
-                }
-                .disabled(store.runner.isRunning)
-
-                quickActionButton(label: "模型比较", icon: "arrow.left.arrow.right", colors: [.purple, .indigo]) {
-                    store.presentModelCompare()
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-        }
-        .background(.regularMaterial)
-    }
-
-    private func quickActionButton(label: String, icon: String, colors: [Color], action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                Text(label)
-                    .font(DuDuFont.captionMedium(10))
-            }
-            .foregroundStyle(
-                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(
-                LinearGradient(
-                    colors: colors.map { $0.opacity(0.12) },
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: Capsule()
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: Input Bar
-    private var inputBarView: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 6) {
-                TextField("向 DuDu PMx 提问...", text: $store.assistantInput)
+                TextField(L10n.aiPlaceholder, text: $store.assistantInput)
                     .textFieldStyle(.plain)
                     .font(DuDuFont.body())
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -953,7 +1208,7 @@ struct AssistantPanel: View {
                     if !trimmed.isEmpty { store.sendAssistantMessage() }
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 26)) // emoji
+                        .font(.system(size: 26))
                         .foregroundStyle(
                             store.assistantInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty
                                 ? Color.gray.opacity(0.3) : Color.blue
@@ -963,7 +1218,6 @@ struct AssistantPanel: View {
                 .disabled(store.assistantInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.regularMaterial)
         }
     }
 }
@@ -973,6 +1227,7 @@ struct AssistantPanel: View {
 struct QuickActionsPopover: View {
     @EnvironmentObject private var store: WorkbenchStore
     @Environment(\.dismiss) private var dismiss
+    @Binding var showRunPicker: AssistantPanel.RunPickerAction?
 
     private struct QuickAction {
         let label: String
@@ -983,127 +1238,423 @@ struct QuickActionsPopover: View {
     }
 
     private var actions: [QuickAction] {
-        let run = store.currentRun
-        return [
+        var items = [
             QuickAction(
-                label: "自动建模",
+                label: L10n.quickAutoModeling,
                 icon: "wand.and.stars",
                 colors: [.blue, .cyan],
                 disabled: store.isAutoModeling,
                 handler: { store.presentAutomationOptions() }
             ),
             QuickAction(
-                label: "GOF 诊断图",
+                label: L10n.quickGOFPlots,
                 icon: "chart.xyaxis.line",
                 colors: [.teal, .blue],
-                disabled: run.isEmpty || store.runner.isRunning,
-                handler: { store.runGOF(for: run) }
+                disabled: store.runner.isRunning,
+                handler: {
+                    guard store.ensureModelFilesExist() else { return }
+                    showRunPicker = .gof
+                }
             ),
             QuickAction(
-                label: "VPC 预测检验",
+                label: L10n.quickVPCCheck,
                 icon: "chart.bar.doc.horizontal",
                 colors: [.indigo, .cyan],
-                disabled: run.isEmpty || store.runner.isRunning,
-                handler: { store.runVPCPlot(for: run) }
+                disabled: store.runner.isRunning,
+                handler: {
+                    guard store.ensureModelFilesExist() else { return }
+                    showRunPicker = .vpc
+                }
             ),
             QuickAction(
-                label: "个体 DV-TIME",
+                label: L10n.quickIndividualDV,
                 icon: "person.2.wave.2",
                 colors: [.mint, .green],
-                disabled: run.isEmpty || store.runner.isRunning,
-                handler: { store.runIndividualDVTime(for: run) }
+                disabled: store.runner.isRunning,
+                handler: {
+                    guard store.ensureModelFilesExist() else { return }
+                    showRunPicker = .individual
+                }
             ),
             QuickAction(
-                label: "PK 参数提取",
+                label: L10n.quickPKExtract,
                 icon: "tablecells",
                 colors: [.orange, .yellow],
-                disabled: run.isEmpty || store.runner.isRunning,
-                handler: { store.runPKParameterExtraction(for: run) }
+                disabled: store.runner.isRunning,
+                handler: {
+                    guard store.ensureModelFilesExist() else { return }
+                    showRunPicker = .pkParams
+                }
             ),
             QuickAction(
-                label: "SCM 协变量筛选",
+                label: "Final Model Analysis",
+                icon: "doc.text.magnifyingglass",
+                colors: [.blue, .green],
+                disabled: store.runner.isRunning,
+                handler: {
+                    guard store.ensureModelFilesExist() else { return }
+                    store.analyzeFinalModel(runID: store.currentRun)
+                }
+            ),
+            QuickAction(
+                label: L10n.quickETAScreen,
+                icon: "chart.bar.doc.horizontal",
+                colors: [.teal, .blue],
+                disabled: store.runner.isRunning,
+                handler: {
+                    guard store.ensureModelFilesExist() else { return }
+                    store.runETACovariateScreening(for: store.currentRun)
+                }
+            ),
+            QuickAction(
+                label: L10n.quickSCMCov,
                 icon: "square.grid.3x3.topleft.filled",
                 colors: [.orange, .red],
                 disabled: store.runner.isRunning,
                 handler: { store.presentSCMDialog() }
             ),
+            QuickAction(
+                label: L10n.ctxBootstrap,
+                icon: "repeat",
+                colors: [.green, .teal],
+                disabled: store.runner.isRunning,
+                handler: { store.presentBootstrapSheet() }
+            ),
+            QuickAction(
+                label: L10n.quickModelCompare,
+                icon: "arrow.left.arrow.right",
+                colors: [.purple, .indigo],
+                disabled: store.runner.isRunning,
+                handler: { store.presentModelCompare() }
+            ),
         ]
+        if store.runner.isRunning || store.isSCMRunning {
+            items.append(QuickAction(
+                label: L10n.aiStop,
+                icon: "stop.fill",
+                colors: [.red, .orange],
+                disabled: false,
+                handler: {
+                    if store.isAutoModeling {
+                        store.requestStopAutomation()
+                        store.requestStopChat()
+                    } else if store.isSCMRunning {
+                        store.cancelSCM()
+                    } else {
+                        store.runner.stopCurrentProcess()
+                    }
+                }
+            ))
+        }
+        return items
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("快捷功能")
-                .font(DuDuFont.captionSemibold(11))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.quickTitle)
+                    .font(DuDuFont.captionSemibold(11))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
 
-            Divider()
+                Divider()
 
-            ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
-                Button {
-                    dismiss()
-                    action.handler()
-                } label: {
-                    HStack(spacing: 8) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(LinearGradient(
-                                    colors: action.colors.map { $0.opacity(0.15) },
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ))
-                                .frame(width: 24, height: 24)
-                            Image(systemName: action.icon)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: action.colors,
+                ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                    Button {
+                        dismiss()
+                        action.handler()
+                    } label: {
+                        HStack(spacing: 8) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(LinearGradient(
+                                        colors: action.colors.map { $0.opacity(0.15) },
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
+                                    ))
+                                    .frame(width: 24, height: 24)
+                                Image(systemName: action.icon)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: action.colors,
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
+                            }
+                            Text(action.label)
+                                .font(DuDuFont.body(12))
+                                .foregroundStyle(action.disabled ? Color.secondary.opacity(0.7) : .primary)
+                            Spacer()
                         }
-                        Text(action.label)
-                            .font(DuDuFont.body(12))
-                            .foregroundStyle(action.disabled ? .tertiary : .primary)
-                        Spacer()
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .disabled(action.disabled)
                 }
-                .buttonStyle(.plain)
-                .disabled(action.disabled)
+            }
+            .frame(width: 190)
+            .padding(.bottom, 6)
+
+            if store.runner.isRunning {
+                HStack(spacing: 5) {
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 9))
+                    Text(L10n.quickBusyHint)
+                        .font(DuDuFont.caption(9))
+                        .lineLimit(2)
+                }
+                .foregroundStyle(.primary.opacity(0.86))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
             }
         }
-        .frame(width: 190)
-        .padding(.bottom, 6)
+        .frame(maxHeight: 380)
+        .onAppear {
+            // Self-heal: if the runner state says "busy" but no process actually exists,
+            // clear it so the quick actions don't stay gray.
+            store.runner.recoverIfStuck()
+        }
     }
 }
+
+// MARK: - Quick Sheet Glass Components
+
+struct QuickSheetCard<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.adaptiveSheetText)
+            content
+                .foregroundStyle(Color.adaptiveSheetText)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.blue.opacity(0.12), Color.primary.opacity(0.04)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.5
+                )
+        )
+        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+    }
+}
+
+struct BootstrapSampleButton: View {
+    let value: Int
+    let name: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Text("\(value)")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.adaptiveSheetText)
+                Text(name)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.adaptiveSheetText)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? AnyShapeStyle(LinearGradient(colors: [.green, .teal], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            : AnyShapeStyle(Color.primary.opacity(0.04))
+                    )
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? Color.white.opacity(0.2) : Color.primary.opacity(0.06), lineWidth: isSelected ? 1 : 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Bootstrap Setup Sheet
+
+struct BootstrapSetupSheet: View {
+    @EnvironmentObject private var store: WorkbenchStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedRunID = ""
+    @State private var selectedSamples = 500
+
+    private let sampleOptions: [(value: Int, name: String)] = [
+        (50, "Lite"),
+        (200, "Balanced"),
+        (500, "Medium"),
+        (1000, "High")
+    ]
+
+    private var availableRuns: [String] {
+        let base = store.availableRunIDs.isEmpty
+            ? ProjectScanner.discoverRuns(in: store.projectURL)
+            : store.availableRunIDs
+        return base
+            .filter { FileManager.default.fileExists(atPath: store.projectURL.appendingPathComponent("run\($0).mod").path) }
+            .sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }
+    }
+
+    var body: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(LinearGradient(colors: [.green, .teal], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "repeat")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.ctxBootstrap)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color.adaptiveSheetText)
+                    Text(L10n.bootstrapSamplesHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.adaptiveSheetText)
+                }
+                Spacer()
+            }
+
+            QuickSheetCard(title: L10n.pickerModel) {
+                Picker("", selection: $selectedRunID) {
+                    ForEach(availableRuns, id: \.self) { runID in
+                        Text("run\(runID)").tag(runID)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                if !selectedRunID.isEmpty && selectedRunID == store.currentRun {
+                    Text(L10n.pickerCurrent)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.blue)
+                }
+            }
+
+            QuickSheetCard(title: L10n.bootstrapSamplesTitle) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach(sampleOptions, id: \.value) { option in
+                        BootstrapSampleButton(
+                            value: option.value,
+                            name: option.name,
+                            isSelected: selectedSamples == option.value
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedSamples = option.value
+                            }
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button(L10n.cancel, role: .cancel) {
+                    store.cancelBootstrapSheet()
+                    dismiss()
+                }
+                    .buttonStyle(.bordered)
+                Button(L10n.bootstrapStart) {
+                    let runID = selectedRunID
+                    let samples = selectedSamples
+                    dismiss()
+                    DispatchQueue.main.async {
+                        store.runBootstrapWithAI(for: runID, samples: samples)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedRunID.isEmpty || store.runner.isRunning)
+            }
+        }
+        .padding(28)
+        .frame(width: 430)
+        .background(LiquidGlassBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .onAppear {
+            if selectedRunID.isEmpty {
+                selectedRunID = availableRuns.contains(store.bootstrapSheetRunID)
+                    ? store.bootstrapSheetRunID
+                    : (availableRuns.contains(store.currentRun) ? store.currentRun : (availableRuns.first ?? ""))
+            }
+        }
+    }
+}
+
 
 // MARK: - Automation Sheet
 
 struct AutomationOptionsSheetView: View {
     @EnvironmentObject private var store: WorkbenchStore
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("DuDu Auto — 自动建模").font(DuDuFont.title())
-            Picker("模式", selection: $store.automationStartMode) {
-                ForEach(AutomationStartMode.allCases) { mode in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(mode.title).font(DuDuFont.bodyMedium(12))
-                        Text(mode.detail).font(DuDuFont.caption()).foregroundStyle(.tertiary)
-                    }.tag(mode).padding(.vertical, 4)
+        VStack(spacing: 16) {
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
                 }
-            }.pickerStyle(.radioGroup)
-            if store.automationStartMode == .selectedRun {
-                Picker("父模型", selection: $store.automationStartRunID) {
-                    ForEach(store.automationAvailableRunIDs, id: \.self) { r in Text("run\(r)").tag(r) }
-                }.disabled(store.automationAvailableRunIDs.isEmpty)
+                Text(L10n.autoSheetTitle)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.adaptiveSheetText)
+                Spacer()
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("建模数据集").font(DuDuFont.captionSemibold())
-                Picker("数据集", selection: $store.automationDataFile) {
-                    Text("（不指定）").tag("")
+
+            QuickSheetCard(title: L10n.autoMode) {
+                Picker("", selection: $store.automationStartMode) {
+                    ForEach(AutomationStartMode.allCases) { mode in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(mode.title).font(DuDuFont.bodyMedium(12))
+                            Text(mode.detail).font(DuDuFont.caption()).foregroundStyle(Color.adaptiveSheetText)
+                        }.tag(mode).padding(.vertical, 4)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+            }
+
+            if store.automationStartMode == .selectedRun {
+                QuickSheetCard(title: L10n.autoParentModel) {
+                    Picker("", selection: $store.automationStartRunID) {
+                        ForEach(store.automationAvailableRunIDs, id: \.self) { r in Text("run\(r)").tag(r) }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(store.automationAvailableRunIDs.isEmpty)
+                }
+            }
+
+            QuickSheetCard(title: L10n.autoDatasetLabel) {
+                Picker("", selection: $store.automationDataFile) {
+                    Text(L10n.autoUnspecified).tag("")
                     ForEach(store.availableCSVFiles(), id: \.self) { csv in
                         Text(csv).tag(csv)
                     }
@@ -1111,70 +1662,140 @@ struct AutomationOptionsSheetView: View {
                 .pickerStyle(.menu)
                 .disabled(store.availableCSVFiles().count <= 1)
                 if store.availableCSVFiles().count <= 1 {
-                    Text("当前项目只有一个数据集：\(store.dataFile)").font(DuDuFont.caption()).foregroundStyle(.tertiary)
+                    Text(String(format: L10n.autoSingleDataset, store.dataFile))
+                        .font(DuDuFont.caption(11))
+                        .foregroundStyle(Color.adaptiveSheetText)
                 }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("建模指导（可选）").font(DuDuFont.captionSemibold())
-                TextEditor(text: $store.automationUserGuidance).font(DuDuFont.body(12)).frame(height: 80)
+
+            QuickSheetCard(title: "Dataset Units") {
+                HStack(spacing: 10) {
+                    unitPicker("Dose", $store.doseUnit, WorkbenchStore.doseUnitOptions, { store.saveAutomationUnitsToConfig() })
+                    unitPicker("AMT", $store.amtUnit, WorkbenchStore.doseUnitOptions, { store.saveAutomationUnitsToConfig() })
+                    unitPicker("Conc.", $store.concUnit, WorkbenchStore.concUnitOptions, { store.saveAutomationUnitsToConfig() })
+                    unitPicker("Time", $store.timeUnit, WorkbenchStore.timeUnitOptions, { store.saveAutomationUnitsToConfig() })
+                }
+            }
+
+            QuickSheetCard(title: L10n.autoGuidanceLabel) {
+                TextEditor(text: $store.automationUserGuidance)
+                    .font(DuDuFont.body(12))
+                    .frame(height: 76)
                     .scrollContentBackground(.hidden)
+                    .padding(6)
                     .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
             }
+
             HStack {
                 Spacer()
                 Button(L10n.cancel, role: .cancel) { store.isAutomationOptionsPresented = false }
+                    .buttonStyle(.bordered)
                 Button(L10n.start) { store.startAutomationFromOptions() }
-                    .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(store.automationStartMode == .selectedRun && store.automationStartRunID.isEmpty)
             }
-        }.padding(24).frame(width: 440)
+        }
+        .padding(24)
+        .frame(width: 480)
+        .background(LiquidGlassBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .onDisappear { store.handleSCMDialogDismissedIfNeeded() }
     }
 }
 
 // MARK: - Model Compare Sheet
 
+// MARK: - Unit picker helper
+
+fileprivate func unitPicker(_ label: String, _ selection: Binding<String>, _ options: [String], _ onChange: @escaping () -> Void) -> some View {
+    VStack(alignment: .leading, spacing: 1) {
+        Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(Color.adaptiveSheetText)
+        Picker("", selection: selection) {
+            ForEach(options, id: \.self) { opt in
+                Text(opt).tag(opt)
+            }
+        }
+        .pickerStyle(.menu)
+        .frame(minWidth: 78, idealWidth: 88, maxWidth: 110)
+        .fixedSize(horizontal: true, vertical: false)
+        .onChange(of: selection.wrappedValue) { _ in onChange() }
+    }
+}
+
 struct ModelCompareSheetView: View {
     @EnvironmentObject private var store: WorkbenchStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("模型比较").font(DuDuFont.title())
-            Text("选择两个已成功运行的模型进行比较审计。")
-                .font(DuDuFont.caption(11)).foregroundStyle(.secondary)
-
-            let runs = store.availableRunIDsForCompare()
-            if runs.count < 2 {
-                Text("至少需要两个已生成的模型才能进行比较。").font(DuDuFont.caption(11)).foregroundStyle(.orange)
+        VStack(spacing: 18) {
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(LinearGradient(colors: [.purple, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                Text(L10n.compareTitle)
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
             }
 
-            VStack(spacing: 12) {
-                HStack {
-                    Text("Run A").font(DuDuFont.captionMedium(11)).frame(width: 60, alignment: .leading)
-                    Picker("", selection: $store.compareRunA) {
-                        ForEach(runs, id: \.self) { r in Text("run\(r)").tag(r) }
-                    }.pickerStyle(.menu).labelsHidden()
-                    Circle().fill(store.isModelRunSuccessful(runID: store.compareRunA) ? Color.green : Color.orange)
-                        .frame(width: 6, height: 6)
+            QuickSheetCard(title: L10n.compareSubtitle) {
+                if store.availableRunIDsForCompare().count < 2 {
+                    Text(L10n.aiCompareNeedsTwo)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
                 }
-                HStack {
-                    Text("Run B").font(DuDuFont.captionMedium(11)).frame(width: 60, alignment: .leading)
-                    Picker("", selection: $store.compareRunB) {
-                        ForEach(runs, id: \.self) { r in Text("run\(r)").tag(r) }
-                    }.pickerStyle(.menu).labelsHidden()
-                    Circle().fill(store.isModelRunSuccessful(runID: store.compareRunB) ? Color.green : Color.orange)
-                        .frame(width: 6, height: 6)
+
+                VStack(spacing: 12) {
+                    compareRow(label: "Run A", selection: $store.compareRunA)
+                    compareRow(label: "Run B", selection: $store.compareRunB)
                 }
             }
 
             HStack {
                 Spacer()
                 Button(L10n.cancel, role: .cancel) { store.isCompareSheetPresented = false }
+                    .buttonStyle(.bordered)
                 Button(L10n.aiCompareStart) { store.runModelCompareAudit() }
                     .buttonStyle(.borderedProminent)
                     .disabled(store.compareRunA == store.compareRunB || store.runner.isRunning)
             }
         }
-        .padding(24).frame(width: 400)
+        .padding(24)
+        .frame(width: 420)
+        .background(LiquidGlassBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+
+    private func compareRow(label: String, selection: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 52, alignment: .leading)
+            Picker("", selection: selection) {
+                ForEach(store.availableRunIDsForCompare(), id: \.self) { r in
+                    Text("run\(r)").tag(r)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            Circle()
+                .fill(store.isModelRunSuccessful(runID: selection.wrappedValue) ? Color.green : Color.orange)
+                .frame(width: 7, height: 7)
+        }
+        .padding(10)
+        .background(.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -1203,12 +1824,24 @@ struct SCMSetupSheetView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("PsN SCM 协变量筛选").font(DuDuFont.title())
+        VStack(spacing: 16) {
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(LinearGradient(colors: [.orange, .red], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                Text(L10n.scmSheetTitle)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.adaptiveSheetText)
+                Spacer()
+            }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("基础模型").font(DuDuFont.captionSemibold())
-                Picker("模型文件", selection: $store.scmModelRunID) {
+            QuickSheetCard(title: L10n.scmBaseModel) {
+                Picker("", selection: $store.scmModelRunID) {
                     ForEach(store.availableModFiles(), id: \.self) { mod in
                         Text(mod).tag(mod.replacingOccurrences(of: "run", with: "").replacingOccurrences(of: ".mod", with: ""))
                     }
@@ -1216,9 +1849,8 @@ struct SCMSetupSheetView: View {
                 .pickerStyle(.menu)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("数据集").font(DuDuFont.captionSemibold())
-                Picker("数据集文件", selection: $store.scmDataFileName) {
+            QuickSheetCard(title: L10n.autoDataFileLabel) {
+                Picker("", selection: $store.scmDataFileName) {
                     ForEach(store.availableCSVFiles(), id: \.self) { csv in
                         Text(csv).tag(csv)
                     }
@@ -1226,62 +1858,112 @@ struct SCMSetupSheetView: View {
                 .pickerStyle(.menu)
             }
 
-            Divider()
-
-            // ── SCM Threshold Settings ──
-            VStack(alignment: .leading, spacing: 8) {
-                Text("假设检验阈值").font(DuDuFont.captionSemibold())
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Text("前向纳入 p").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 72, alignment: .leading)
-                        Picker("前向纳入", selection: $store.scmPForward) {
-                            ForEach(forwardOptions, id: \.self) { p in
-                                Text("p=\(p)  (ΔOFV>\(ofvMap[p] ?? "-"))").tag(p)
+            if store.etaScreeningRunID == store.scmModelRunID,
+               !store.etaScreeningRecommendation.isEmpty {
+                QuickSheetCard(title: L10n.scmEtaSuggestionTitle) {
+                    Text(store.etaScreeningRecommendation)
+                        .font(DuDuFont.caption(11))
+                    Text(L10n.scmEtaSuggestionHint)
+                        .font(DuDuFont.caption(10))
+                        .foregroundStyle(Color.adaptiveSheetText)
+                    HStack(spacing: 8) {
+                        if !store.etaScreeningRecommendedCovariates.isEmpty {
+                            Button(L10n.scmEtaApplySuggestion) {
+                                store.applyETAScreeningRecommendedCovariates()
                             }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
-                        .pickerStyle(.menu)
-                        .onChange(of: store.scmPForward) { _ in
-                            if backwardOutOfRange {
-                                store.scmPBackward = store.scmPForward
-                            }
+                        Button(L10n.scmEtaResetAll) {
+                            store.resetSCMCovariatesToAll()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            QuickSheetCard(title: L10n.scmCandidates) {
+                Toggle(L10n.scmCovWT, isOn: $store.scmIncludeWT)
+                Toggle(L10n.scmCovAGE, isOn: $store.scmIncludeAGE)
+                Toggle(L10n.scmCovSEX, isOn: $store.scmIncludeSEX)
+                Toggle(L10n.scmCovSTUDY, isOn: $store.scmIncludeSTUDY)
+                    Text(L10n.scmCovNote)
+                    .font(DuDuFont.caption(11)).foregroundStyle(Color.adaptiveSheetText)
+            }
+
+            QuickSheetCard(title: L10n.scmThreshold) {
+                HStack(spacing: 6) {
+                    Text(L10n.scmForwardP).font(.system(size: 11)).foregroundStyle(Color.adaptiveSheetText).frame(width: 72, alignment: .leading)
+                    Picker("", selection: $store.scmPForward) {
+                        ForEach(forwardOptions, id: \.self) { p in
+                            Text("p=\(p)  (ΔOFV>\(ofvMap[p] ?? "-"))").tag(p)
                         }
                     }
-                    HStack(spacing: 6) {
-                        Text("逆向剔除 p").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 72, alignment: .leading)
-                        Picker("逆向剔除", selection: $store.scmPBackward) {
-                            ForEach(backwardPickerOptions, id: \.self) { p in
-                                Text("p=\(p)  (ΔOFV>\(ofvMap[p] ?? "-"))").tag(p)
-                            }
+                    .pickerStyle(.menu)
+                    .onChange(of: store.scmPForward) { _ in
+                        if backwardOutOfRange {
+                            store.scmPBackward = store.scmPForward
                         }
-                        .pickerStyle(.menu)
                     }
+                }
+                HStack(spacing: 6) {
+                    Text(L10n.scmBackwardP).font(.system(size: 11)).foregroundStyle(Color.adaptiveSheetText).frame(width: 72, alignment: .leading)
+                    Picker("", selection: $store.scmPBackward) {
+                        ForEach(backwardPickerOptions, id: \.self) { p in
+                            Text("p=\(p)  (ΔOFV>\(ofvMap[p] ?? "-"))").tag(p)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
 
                 if backwardOutOfRange {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
-                        Text("逆向剔除 p 值不能大于前向纳入 p 值")
+                        Text(L10n.scmBackwardRange)
                             .font(.system(size: 10))
                     }
                     .foregroundColor(.orange)
                 }
             }
 
-            Text("AI 将根据选定的模型文件和数据集自动撰写 runCONCOV{模型序号}.scm，然后在 SCM_run{模型序号}/ 子目录中运行 PsN SCM。")
-                .font(DuDuFont.caption(11)).foregroundStyle(.secondary)
+            Text(L10n.scmRunNote)
+                .font(DuDuFont.caption(11)).foregroundStyle(Color.adaptiveSheetText)
 
             HStack {
                 Spacer()
-                Button(L10n.cancel, role: .cancel) { store.showSCMDialog = false }
-                Button("开始 SCM") { store.confirmSCMRun() }
+                Button {
+                    let runID = store.scmModelRunID
+                    store.showSCMDialog = false
+                    store.runETACovariateScreening(for: runID) {
+                        store.presentSCMDialog(runID: runID)
+                    }
+                } label: {
+                    Label(L10n.scmRunEtaScreen, systemImage: "chart.bar.doc.horizontal")
+                }
+                .buttonStyle(.bordered)
+                .help(L10n.scmRunEtaHint)
+                .disabled(store.scmModelRunID.isEmpty)
+                Button(L10n.cancel, role: .cancel) { store.cancelSCMDialog() }
+                    .buttonStyle(.bordered)
+                Button(L10n.autoStartSCM) { store.confirmSCMRun() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .disabled(store.scmModelRunID.isEmpty || store.scmDataFileName.isEmpty)
             }
         }
-        .padding(24).frame(width: 420)
+        .padding(24)
+        .frame(width: 440)
+        .background(LiquidGlassBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .onChange(of: store.scmModelRunID) { _ in
+            store.applyETAScreeningDefaultsIfAvailable(for: store.scmModelRunID)
+        }
     }
 }
 
@@ -1314,31 +1996,206 @@ struct GlassBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack {
-            // Base frosted glass
-            Rectangle()
+        // Plain, calm background — a soft gray card (dark gray in dark mode).
+        // No material, no gradients, so nothing can bleed through or create lines.
+        Rectangle()
+            .fill(
+                colorScheme == .dark
+                    ? Color(red: 0.13, green: 0.13, blue: 0.14)
+                    : Color(red: 0.93, green: 0.93, blue: 0.94)
+            )
+    }
+}
+
+// MARK: - Gradient Glow Border (DuDu PMx panel edge)
+
+/// A single lightweight gradient border around the AI panel.
+struct GradientGlowBorder: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(
+                AngularGradient(
+                    colors: [
+                        Color(red: 0.30, green: 0.55, blue: 0.95),
+                        Color(red: 0.55, green: 0.35, blue: 0.90),
+                        Color(red: 0.90, green: 0.40, blue: 0.60),
+                        Color(red: 0.30, green: 0.75, blue: 0.85),
+                        Color(red: 0.30, green: 0.55, blue: 0.95)
+                    ],
+                    center: .center
+                ),
+                lineWidth: 1.0
+            )
+            .opacity(0.32)
+    }
+}
+
+// MARK: - No Model Notice Card
+
+/// Liquid-glass card shown when a model-only action (GOF / VPC / individual DV-TIME / SCM ...)
+/// is triggered in a project that has no .mod files yet. Offers a one-tap path into
+/// DuDu Auto Modeling so the user can build a model first.
+struct NoModelNoticeCard: View {
+    @EnvironmentObject private var store: WorkbenchStore
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(colors: [.orange.opacity(0.25), .yellow.opacity(0.12)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: 30, height: 30)
+                Image(systemName: "doc.badge.plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.noModelCardTitle)
+                    .font(DuDuFont.bodySemibold(12))
+                Text(L10n.noModelCardBody)
+                    .font(DuDuFont.caption(10))
+                    .foregroundStyle(.primary.opacity(0.88))
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 4)
+
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { store.noModelCardVisible = false }
+                store.isAssistantPanelPresented = true
+                store.presentAutomationOptions()
+            } label: {
+                Text(L10n.noModelBuildCta)
+                    .font(DuDuFont.captionSemibold(10))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(
+                            LinearGradient(colors: [Color(red: 0.20, green: 0.50, blue: 1.0), Color.cyan.opacity(0.9)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                    )
+                    .shadow(color: .blue.opacity(0.3), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { store.noModelCardVisible = false }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(width: 330, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.ultraThinMaterial)
-
-            // Subtle gradient overlay for liquid depth
-            LinearGradient(
-                colors: colorScheme == .dark
-                    ? [.white.opacity(0.06), .white.opacity(0.02), .white.opacity(0.04)]
-                    : [.white.opacity(0.40), .white.opacity(0.15), .white.opacity(0.25)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            // Top highlight edge
-            LinearGradient(
-                colors: [.white.opacity(0.20), .clear],
-                startPoint: .top,
-                endPoint: .center
-            )
+                .overlay(
+                    LinearGradient(colors: [.orange.opacity(0.10), .clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                )
+                .overlay(
+                    LinearGradient(colors: [.white.opacity(0.22), .clear],
+                                   startPoint: .top, endPoint: .center)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
+        )
+        .onAppear {
+            // Auto-dismiss so the card never lingers
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                withAnimation(.easeOut(duration: 0.25)) { store.noModelCardVisible = false }
+            }
         }
     }
 }
 
 // MARK: - Markdown Message View (renders bold, inline code, tables, headings)
+
+// MARK: - Mini Progress Popup (shown when DuDu panel is hidden during auto modeling)
+
+/// A compact floating bubble that shows the current automation step when the
+/// DuDu PMx panel is dismissed. Tapping it reopens the full panel.
+struct MiniProgressPopup: View {
+    let title: String
+    let step: String
+    @State private var pulse = false
+
+    init(title: String = "DuDu Auto", step: String) {
+        self.title = title
+        self.step = step
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Pulsing active dot
+            Circle()
+                .fill(Color.cyan)
+                .frame(width: 8, height: 8)
+                .overlay(
+                    Circle()
+                        .stroke(Color.cyan, lineWidth: 2)
+                        .scaleEffect(pulse ? 1.8 : 1.0)
+                        .opacity(pulse ? 0.0 : 0.6)
+                )
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.adaptiveSheetText)
+                Text(step)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.adaptiveSheetText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: 200, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 0.5)
+        )
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+// MARK: - Typing Indicator
+
+/// Three gently bouncing dots shown while DuDu is thinking.
+private struct TypingIndicator: View {
+    @State private var animate = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.green.opacity(0.55))
+                    .frame(width: 6, height: 6)
+                    .offset(y: animate ? -3 : 2)
+                    .animation(.easeInOut(duration: 0.5).delay(Double(i) * 0.15).repeatForever(autoreverses: true),
+                               value: animate)
+            }
+        }
+        .onAppear { animate = true }
+    }
+}
 
 struct MarkdownMessageView: View {
     let text: String
@@ -1632,52 +2489,47 @@ struct AnimatedActionChip: View {
     let baseColors: [Color]
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            Button(action: action) {
-                HStack(spacing: 3) {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 8, weight: .semibold))
-                    Text(label)
-                        .font(DuDuFont.captionMedium())
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    baseColors[0].opacity(0.12 + 0.05 * sin(t * 1.4)),
-                                    baseColors[1].opacity(0.12 + 0.05 * cos(t * 1.2 + 0.6)),
-                                ]),
-                                startPoint: UnitPoint(x: 0.5 + 0.2 * sin(t * 0.6), y: 0),
-                                endPoint: UnitPoint(x: 0.5 + 0.2 * cos(t * 0.6), y: 1)
-                            )
-                        )
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    baseColors[0].opacity(0.2 + 0.1 * sin(t * 1.0)),
-                                    baseColors[1].opacity(0.2 + 0.1 * cos(t * 0.8)),
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.8
-                        )
-                )
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 8, weight: .semibold))
+                Text(label)
+                    .font(DuDuFont.captionMedium())
             }
-            .buttonStyle(.plain)
-            .help("\(L10n.aiClickToRun) \(label)")
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                baseColors[0].opacity(0.16),
+                                baseColors[1].opacity(0.16),
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                baseColors[0].opacity(0.30),
+                                baseColors[1].opacity(0.20),
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+            )
         }
+        .buttonStyle(.plain)
+        .help("\(L10n.aiClickToRun) \(label)")
     }
 }
 
@@ -1711,7 +2563,7 @@ struct CitationSection: View {
                                 .foregroundStyle(.blue.opacity(0.6))
                             Text(citations[i])
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                                 .lineLimit(3)
                         }
                     }
@@ -1726,12 +2578,55 @@ struct CitationSection: View {
 
 // MARK: - Base Model Confirmation
 
-struct BaseModelConfirmView: View {
+// MARK: - High-Compartment Decision View
+
+struct CompDecisionView: View {
     @EnvironmentObject private var store: WorkbenchStore
+    @ObservedObject private var lang = LanguageStore.shared
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("🏆 Phase 1 基础模型筛选完成")
+            Image(systemName: "questionmark.bubble")
+                .font(.system(size: 32))
+                .foregroundStyle(.orange)
+            Text(L10n.compDecisionTitle)
+                .font(.title2.weight(.semibold))
+            ScrollView {
+                Text(store.compDecisionInfo)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxHeight: 120)
+            HStack(spacing: 16) {
+                Button(L10n.compDecisionAcceptLower) {
+                    store.acceptLowerCompartment()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                Button(L10n.compDecisionAcceptCurrent) {
+                    store.acceptCurrentCompartment()
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+            }
+            .controlSize(.large)
+            Text(L10n.compDecisionDesc)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(28)
+        .onDisappear { store.handleBaseModelPromptDismissedIfNeeded() }
+    }
+}
+
+struct BaseModelConfirmView: View {
+    @EnvironmentObject private var store: WorkbenchStore
+    @ObservedObject private var lang = LanguageStore.shared
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text(L10n.phase1Complete)
                 .font(DuDuFont.title(18))
 
             ScrollView {
@@ -1744,47 +2639,33 @@ struct BaseModelConfirmView: View {
             }
             .frame(maxHeight: 200)
 
-            Text("是否以 run\(store.baseModelConfirmRunID) 作为最终基础模型，继续 Phase 2 协变量筛选？")
+            Text(String(format: L10n.phase1ConfirmMsg, store.baseModelConfirmRunID))
                 .font(DuDuFont.body(13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 12) {
-                Button("取消，稍后手动启动") {
-                    store.isBaseModelConfirmPresented = false
+                Button(L10n.phase1CancelLater) {
+                    store.cancelBaseModelConfirmation()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
 
-                Button("✅ 确认，开始协变量筛选") {
-                    store.confirmBaseModelAndStartPhase2()
+                Button(L10n.baseModelStartSCM) {
+                    store.presentSCMDialogAfterBaseModel()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(.blue)
+
+                Button(L10n.baseModelSkipSCM) {
+                    store.confirmBaseModelAndStartPhase2(skipSCM: true)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
         }
         .padding(28)
-    }
-}
-
-// MARK: - Context Ring
-
-struct ContextRing: View {
-    let pct: Double  // 0.0–1.0
-
-    var body: some View {
-        let clamped = min(max(pct, 0), 1)
-        let color: Color = clamped > 0.7 ? .orange : clamped > 0.5 ? .yellow : .green
-        return ZStack {
-            Circle()
-                .stroke(.quaternary, lineWidth: 2)
-            Circle()
-                .trim(from: 0, to: clamped)
-                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.5), value: clamped)
-        }
     }
 }
 
@@ -1794,9 +2675,23 @@ struct RunPickerSheet: View {
     let action: AssistantPanel.RunPickerAction
     @EnvironmentObject private var store: WorkbenchStore
     @Environment(\.dismiss) private var dismiss
+    @State private var bootstrapRunID = ""
+    @State private var bootstrapSamples = 500
+
+    private let sampleOptions: [(value: Int, name: String)] = [
+        (50, "Lite"),
+        (200, "Balanced"),
+        (500, "Medium"),
+        (1000, "High")
+    ]
 
     private var availableRuns: [String] {
-        ProjectScanner.discoverRuns(in: store.projectURL)
+        // Use cached run IDs from the store (updated by refreshWorkspace) instead of
+        // re-scanning the directory on every body evaluation.
+        let base = store.availableRunIDs.isEmpty
+            ? ProjectScanner.discoverRuns(in: store.projectURL)
+            : store.availableRunIDs
+        return base
             .filter { runID in
                 FileManager.default.fileExists(atPath: store.projectURL.appendingPathComponent("run\(runID).mod").path)
             }
@@ -1805,10 +2700,11 @@ struct RunPickerSheet: View {
 
     private var actionLabel: String {
         switch action {
-        case .gof:        return "GOF 诊断图"
-        case .vpc:        return "VPC 预测检验"
-        case .individual: return "个体拟合图"
-        case .pkParams:   return "PK 参数提取"
+        case .gof:        return L10n.quickGOFPlots
+        case .vpc:        return L10n.quickVPCCheck
+        case .individual: return L10n.pickIndividual
+        case .pkParams:   return L10n.quickPKExtract
+        case .bootstrap:  return L10n.ctxBootstrap
         }
     }
 
@@ -1818,66 +2714,146 @@ struct RunPickerSheet: View {
         case .vpc:        return "chart.bar.doc.horizontal"
         case .individual: return "person.2.wave.2"
         case .pkParams:   return "tablecells"
+        case .bootstrap:  return "repeat"
         }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Image(systemName: actionIcon)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.blue)
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: actionIcon)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                }
                 Text(actionLabel)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.adaptiveSheetText)
                 Spacer()
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
+            .padding(.horizontal, 20).padding(.vertical, 16)
 
             Divider()
 
-            if availableRuns.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "tray")
-                        .font(.system(size: 28)).foregroundStyle(.tertiary)
-                    Text("当前项目没有模型")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                .frame(maxHeight: .infinity)
-            } else {
-                List(availableRuns, id: \.self) { runID in
-                    Button {
-                        dismiss()
-                        DispatchQueue.main.async {
-                            execute(for: runID)
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("run\(runID)")
-                                .font(.system(size: 13, weight: runID == store.currentRun ? .semibold : .regular, design: .monospaced))
-                                .foregroundStyle(runID == store.currentRun ? Color.blue : .primary)
-                            Spacer()
-                            if runID == store.currentRun {
-                                Text("当前")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(.blue)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Capsule().fill(.blue.opacity(0.12)))
-                            }
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 12)
-                        .contentShape(Rectangle())
+            if action == .bootstrap {
+                bootstrapBody
+            } else if availableRuns.isEmpty {
+                QuickSheetCard(title: L10n.pickerModel) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 30)).foregroundStyle(Color.adaptiveSheetText)
+                        Text(L10n.pickerNoModels)
+                            .font(.system(size: 12)).foregroundStyle(Color.adaptiveSheetText)
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 22)
                 }
-                .listStyle(.plain)
+                .padding(16)
+            } else {
+                QuickSheetCard(title: L10n.pickerModel) {
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(availableRuns, id: \.self) { runID in
+                                Button {
+                                    dismiss()
+                                    DispatchQueue.main.async {
+                                        execute(for: runID)
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text("run\(runID)")
+                                            .font(.system(size: 13, weight: runID == store.currentRun ? .semibold : .regular, design: .monospaced))
+                                            .foregroundStyle(Color.adaptiveSheetText)
+                                        Spacer()
+                                        if runID == store.currentRun {
+                                            Text(L10n.pickerCurrent)
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundStyle(.blue)
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(Capsule().fill(.blue.opacity(0.12)))
+                                        }
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(Color.adaptiveSheetText)
+                                    }
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 12)
+                                    .background(.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 280)
+                }
+                .padding(16)
             }
         }
-        .frame(minWidth: 240, minHeight: 240)
+        .frame(minWidth: 330, minHeight: action == .bootstrap ? 420 : 380)
+        .background(LiquidGlassBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .onAppear {
+            if bootstrapRunID.isEmpty {
+                bootstrapRunID = availableRuns.contains(store.currentRun) ? store.currentRun : (availableRuns.first ?? "")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bootstrapBody: some View {
+        VStack(spacing: 16) {
+            QuickSheetCard(title: L10n.pickerModel) {
+                Picker("", selection: $bootstrapRunID) {
+                    ForEach(availableRuns, id: \.self) { runID in
+                        Text("run\(runID)").tag(runID)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
+            QuickSheetCard(title: L10n.bootstrapSamplesTitle) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach(sampleOptions, id: \.value) { option in
+                        BootstrapSampleButton(
+                            value: option.value,
+                            name: option.name,
+                            isSelected: bootstrapSamples == option.value
+                        ) {
+                            bootstrapSamples = option.value
+                        }
+                    }
+                }
+            }
+
+            Text(L10n.bootstrapSamplesHint)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.adaptiveSheetText)
+
+            HStack {
+                Spacer()
+                Button(L10n.cancel, role: .cancel) { dismiss() }
+                Button(L10n.bootstrapStart) {
+                    let runID = bootstrapRunID
+                    let samples = bootstrapSamples
+                    dismiss()
+                    DispatchQueue.main.async {
+                        store.runBootstrapWithAI(for: runID, samples: samples)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(bootstrapRunID.isEmpty || store.runner.isRunning)
+            }
+        }
+        .padding(16)
     }
 
     private func execute(for runID: String) {
@@ -1887,7 +2863,7 @@ struct RunPickerSheet: View {
         case .vpc:        store.runVPCPlot(for: runID)
         case .individual: store.runIndividualDVTime(for: runID)
         case .pkParams:   store.runPKParameterExtraction(for: runID)
+        case .bootstrap:  break
         }
     }
 }
-

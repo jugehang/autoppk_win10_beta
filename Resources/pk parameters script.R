@@ -29,14 +29,27 @@ table_caption <- paste0("Final model parameters (Run ", mod_index, ")")
 ext <- extload(ext_file)
 
 #-------------------------------------------------------
-# Unified format, set decimal places (2 digits after decimal point)
+# Unified format, keep 3 significant digits
 #-------------------------------------------------------
+fmt_sig <- function(x){
+  vals <- suppressWarnings(as.numeric(x))
+  is_missing <- is.na(vals) | x == "-"
+  out <- prettyNum(
+    signif(vals, 3),
+    big.mark = "",
+    scientific = FALSE,
+    preserve.width = "none",
+    drop0trailing = TRUE
+  )
+  out[is_missing] <- "-"
+  return(out)}
+
 fmt_tbl <- function(df){
   df %>%
     mutate(
-      Estimate = ifelse(is.na(Estimate) | Estimate=="-", "-", sprintf("%.2f", as.numeric(Estimate))),
-      SE       = ifelse(is.na(SE) | SE=="-", "-", sprintf("%.2f", as.numeric(SE))),
-      RSE      = ifelse(is.na(RSE) | RSE=="-", "-", sprintf("%.2f", as.numeric(RSE)))) %>%
+      Estimate = fmt_sig(Estimate),
+      SE       = fmt_sig(SE),
+      RSE      = fmt_sig(RSE)) %>%
     mutate(across(c(Estimate, SE, RSE), as.character))}
 
 #-------------------------------------------------------
@@ -99,8 +112,8 @@ make_param_table_from_ext_mod <- function(ext, mod_file){
     SE        = as.numeric(ext$theta.sd)) %>%
     mutate(
       RSE = ifelse(SE > 1e9 | is.na(SE), NA, SE/Estimate*100),
-      RSE = ifelse(is.na(RSE), "-", sprintf("%.1f", RSE)),
-      Estimate = signif(Estimate, 4),
+      RSE = ifelse(is.na(RSE), "-", signif(RSE, 3)),
+      Estimate = signif(Estimate, 3),
       SE = ifelse(SE > 1e9 | is.na(SE), "-", signif(SE, 3))) %>%
     left_join(map %>% filter(Type=="THETA"), by = c("Type","Parameter")) %>%
     mutate(Label = ifelse(is.na(Label), Parameter, Label))
@@ -122,9 +135,9 @@ make_param_table_from_ext_mod <- function(ext, mod_file){
       SE  = ifelse(SE > 1e9 | is.na(SE), NA, SE),
       RSE = ifelse(SE > 1e9 | is.na(SE), NA, RSE),
       Estimate = ifelse(is.nan(Estimate) | is.infinite(Estimate), NA, Estimate),
-      Estimate = ifelse(is.na(Estimate), "-", signif(Estimate, 4)),
+      Estimate = ifelse(is.na(Estimate), "-", signif(Estimate, 3)),
       SE       = ifelse(is.na(SE), "-", signif(SE, 3)),
-      RSE      = ifelse(is.na(RSE), "-", sprintf("%.1f", RSE))
+      RSE      = ifelse(is.na(RSE), "-", signif(RSE, 3))
     ) %>%
     left_join(map %>% filter(Type=="OMEGA") %>% select(Parameter, Label), by = "Parameter") %>%
     mutate(Label = ifelse(is.na(Label), Parameter, Label)) %>%
@@ -141,8 +154,8 @@ make_param_table_from_ext_mod <- function(ext, mod_file){
       SE        = as.numeric(sigma_se)) %>%
       mutate(
         RSE = ifelse(SE > 1e9 | is.na(SE), NA, SE/Estimate*100),
-        RSE = ifelse(is.na(RSE), "-", sprintf("%.1f", RSE)),
-        Estimate = signif(Estimate, 4),
+        RSE = ifelse(is.na(RSE), "-", signif(RSE, 3)),
+        Estimate = signif(Estimate, 3),
         SE = ifelse(SE > 1e9 | is.na(SE), "-", signif(SE, 3))
       ) %>%
       left_join(map %>% filter(Type=="SIGMA"), by = c("Type","Parameter")) %>%
@@ -156,9 +169,8 @@ make_param_table_from_ext_mod <- function(ext, mod_file){
   theta_fixed_tbl <- theta_tbl %>%
     mutate(
       NewType = case_when(
-        str_detect(Label, "Proportional|Additive|error") ~ "Residual Error",
-        str_detect(Label, "CL|V|KA|Tlag|F|Ka") ~ "PK Parameter",
-        TRUE ~ "THETA")) %>%
+        str_detect(Label, "Prop|Add|Residual|Error|RE") ~ "Residual Error",
+        TRUE ~ "PK Parameter")) %>%
     select(Type = NewType, Label, Estimate, SE, RSE)
 
   final_tbl <- bind_rows(

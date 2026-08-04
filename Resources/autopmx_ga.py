@@ -263,32 +263,59 @@ def extract_minimization_successful(lst_path):
 
 
 def extract_covariance_successful(lst_path):
-    """Check if covariance step was successful."""
+    """Check if covariance step was successful.
+
+    Composite criteria (same as Swift runCovarianceOK):
+    1. No abort/fail/R-matrix-PD signal in lst
+    2. No boundary warning
+    3. .cov file exists and non-empty
+    4. ELAPSED COVARIANCE or COVARIANCE STEP SUCCESSFUL present in lst
+
+    We do NOT require the literal string "COVARIANCE STEP SUCCESSFUL" — under FOCE/I
+    (and in some batch outputs) NONMEM omits that exact line even when the step
+    completed fine. "ELAPSED COVARIANCE" or "COVARIANCE STEP SUCCESSFUL" are both
+    valid signals that the covariance step ran to completion.
+    """
     if not os.path.exists(lst_path):
         return False
-    text = read_file(lst_path).upper()
-    return "COVARIANCE STEP ABORTED" not in text and "STANDARD ERROR OF ESTIMATE" in text
+    text = read_file(lst_path)
+    upper = text.upper()
+
+    # Hard failures
+    if ("COVARIANCE STEP ABORTED" in upper
+            or "COVARIANCE STEP FAILED" in upper
+            or "R MATRIX IS NOT POSITIVE DEFINITE" in upper):
+        return False
+
+    # Boundary indicates unstable estimates → covariance not trustworthy
+    if "PARAMETER IS NEAR ITS BOUNDARY" in upper:
+        return False
+
+    # .cov file must exist and be non-empty
+    cov_path = os.path.join(os.path.dirname(lst_path),
+                            os.path.basename(lst_path).replace(".lst", ".cov"))
+    if not os.path.exists(cov_path) or os.path.getsize(cov_path) == 0:
+        return False
+
+    # Covariance step must have actually run
+    return ("ELAPSED COVARIANCE" in upper
+            or "COVARIANCE STEP SUCCESSFUL" in upper)
 
 
 def extract_rse_warnings(lst_path, max_rse=50.0):
     """Check if any parameter has RSE > max_rse.
 
-    Returns (has_high_rse, max_rse_found).
+    Returns (has_high_rse, max_rse_found, error_model_rse_info).
+    error_model_rse_info: dict with keys 'prop_err_rse', 'add_err_rse', 'prop_err_boundary', 'add_err_boundary'
     """
     if not os.path.exists(lst_path):
-        return (False, 0.0)
+        return (False, 0.0, {})
 
     text = read_file(lst_path)
-    # Find RSE% values in the .lst output
-    # Pattern: parameter table with RSE% column
-    # Typical format in .lst: "THETA 1  0.0122   2.34E-03  19.2"
-    # We look for percentage values > max_rse
 
-    # Try to find the parameter estimate table
+    # Find RSE% values in the .lst output
     max_found = 0.0
-    # Pattern for RSE% which typically appears after parameter estimates
     rse_pattern = re.compile(r'(\d{1,3}\.\d{1,2})\s*%?')
-    # More specific: look for lines with RSE% header
     in_rse_section = False
 
     for line in text.splitlines():
@@ -303,7 +330,163 @@ def extract_rse_warnings(lst_path, max_rse=50.0):
                     max_found = val
 
     has_high = max_found > max_rse
-    return (has_high, max_found)
+
+    # --- Extract error-model-specific RSE info ---
+    error_model_info = _extract_error_model_rse_from_lst(text)
+
+    return (has_high, max_found, error_model_info)
+
+
+def _extract_error_model_rse_from_lst(lst_text):
+    """Parse .lst to find RSE% for Prop.err (proportional) and Add.err (additive) THETAs.
+
+    In NONMEM combined error model:
+      W = SQRT(THETA(n)**2*IPRED**2 + THETA(n+1)**2)
+      THETA(n)   = Prop.RE (sd)  → proportional error SD
+      THETA(n+1) = Add.RE (sd)   → additive error SD
+
+    We look for THETA labels containing 'Prop' or 'Add' (case-insensitive)
+    and extract their RSE% from the parameter estimate table.
+
+    Returns dict: {
+        'prop_err_rse': float or None,
+        'add_err_rse': float or None,
+        'prop_err_boundary': bool,
+        'add_err_boundary': bool,
+        'prop_err_estimate': float or None,
+        'add_err_estimate': float or None,
+    }
+    """
+    info = {
+        'prop_err_rse': None,
+        'add_err_rse': None,
+        'prop_err_boundary': False,
+        'add_err_boundary': False,
+        'prop_err_estimate': None,
+        'add_err_estimate': None,
+    }
+
+    # Strategy 1: Parse the NONMEM .lst parameter estimate table
+    # Format typically:
+    # THETA - VECTOR OF FIXED EFFECTS
+    # THETA 1  0.1500   2.34E-03  1.56    Prop.RE (sd)
+    # THETA 2  0.5000   0.1500     30.0    Add.RE (sd)
+    #
+    # Or from the final parameter estimate section:
+    # THETA 1  1.56E-01  2.34E-03  1.50E+00  1.56E-01  0.0000E+00  1.00E+05
+
+    # Try to find the THETA section with labels
+    theta_section_pattern = re.compile(
+        r'THETA\s+(\d+)\s+([\d\.E\+\-]+)\s+([\d\.E\+\-]+)\s+([\d\.E\+\-]+)',
+        re.IGNORECASE
+    )
+
+    # Also look for lines with Prop/Add labels nearby
+    lines = lst_text.splitlines()
+    for i, line in enumerate(lines):
+        line_upper = line.upper()
+
+        # Check if this line or nearby lines mention Prop/Add
+        is_prop = 'PROP' in line_upper or 'PROPORTIONAL' in line_upper
+        is_add = 'ADD' in line_upper or 'ADDITIVE' in line_upper
+
+        if is_prop or is_add:
+            m = theta_section_pattern.search(line)
+            if m:
+                theta_num = int(m.group(1))
+                estimate = float(m.group(2))
+                try:
+                    rse_val = float(m.group(4))
+                except (ValueError, IndexError):
+                    rse_val = None
+
+                if is_prop:
+                    info['prop_err_rse'] = rse_val
+                    info['prop_err_estimate'] = estimate
+                    info['prop_err_boundary'] = (estimate <= 1e-6)
+                elif is_add:
+                    info['add_err_rse'] = rse_val
+                    info['add_err_estimate'] = estimate
+                    info['add_err_boundary'] = (estimate <= 1e-6)
+
+    # Strategy 2: If labels not found, try to parse from the parameter estimate CSV if available
+    # (fallback: look for the last two THETAs in a combined error model)
+    # In a combined model with n PK THETAs, THETA(n-1) = Prop.err, THETA(n) = Add.err
+    # We'll skip this for now as it's heuristic and could be wrong without labels.
+
+    # Strategy 3: Try reading from _params.csv if it exists
+    lst_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else '.'
+    # Actually, let's check for the params CSV near the lst file
+    # This is a fallback; primary source is the .lst labels
+
+    return info
+
+
+def should_simplify_error_model(error_model_info, rse_threshold=100.0):
+    """Determine whether and how to simplify the combined error model.
+
+    Args:
+        error_model_info: dict from _extract_error_model_rse_from_lst()
+        rse_threshold: RSE% above which a component should be fixed to 0 (default 100%)
+
+    Returns:
+        dict with:
+            'should_simplify': bool
+            'action': 'fix_prop_to_zero' | 'fix_add_to_zero' | None
+            'reason': str explaining the recommendation
+    """
+    prop_rse = error_model_info.get('prop_err_rse')
+    add_rse = error_model_info.get('add_err_rse')
+    prop_boundary = error_model_info.get('prop_err_boundary', False)
+    add_boundary = error_model_info.get('add_err_boundary', False)
+    prop_est = error_model_info.get('prop_err_estimate')
+    add_est = error_model_info.get('add_err_estimate')
+
+    prop_unsupported = (
+        (prop_rse is not None and prop_rse > rse_threshold) or
+        prop_boundary or
+        (prop_est is not None and prop_est <= 1e-6)
+    )
+    add_unsupported = (
+        (add_rse is not None and add_rse > rse_threshold) or
+        add_boundary or
+        (add_est is not None and add_est <= 1e-6)
+    )
+
+    if prop_unsupported and add_unsupported:
+        # Both bad — prefer proportional-only (more common in PK)
+        return {
+            'should_simplify': True,
+            'action': 'fix_add_to_zero',
+            'reason': (
+                f'Both Prop.err (RSE={prop_rse}%) and Add.err (RSE={add_rse}%) '
+                f'are poorly estimated. Prefer proportional-only model.'
+            ),
+        }
+    elif add_unsupported:
+        return {
+            'should_simplify': True,
+            'action': 'fix_add_to_zero',
+            'reason': (
+                f'Add.err RSE={add_rse}% > {rse_threshold}% or at boundary. '
+                f'Fix Add.err=0 → proportional-only error model.'
+            ),
+        }
+    elif prop_unsupported:
+        return {
+            'should_simplify': True,
+            'action': 'fix_prop_to_zero',
+            'reason': (
+                f'Prop.err RSE={prop_rse}% > {rse_threshold}% or at boundary. '
+                f'Fix Prop.err=0 → additive-only error model.'
+            ),
+        }
+    else:
+        return {
+            'should_simplify': False,
+            'action': None,
+            'reason': 'Both error components are adequately estimated.',
+        }
 
 
 def extract_boundary_warnings(lst_path):
@@ -768,7 +951,7 @@ def build_mod_from_structure(template_mod, structural_genes, theta_values):
     input_block = _extract_block(template_mod, "INPUT") or ""
     data_block = _extract_block(template_mod, "DATA") or ""
     estim_block = _extract_block(template_mod, "EST") or "$EST METHOD=1 INTER MAXEVAL=9999 NOABORT SIG=3 PRINT=10"
-    cov_block = _extract_block(template_mod, "COV") or "$COVARIANCE UNCONDITIONAL"
+    cov_block = _extract_block(template_mod, "COVAR") or "$COVARIANCE PRINT=E MATRIX=S"
 
     # Build model description
     desc = f"GA-optimized {'oral' if is_oral else 'IV'} {num_compartments}-comp {error_model} error"
@@ -784,7 +967,7 @@ def build_mod_from_structure(template_mod, structural_genes, theta_values):
     pk_names = " ".join(params)
     table_block = f"""$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=SDTAB{ga_run} FORMAT=s1PE14.7
 $TABLE ID {pk_names} {eta_terms} NOPRINT NOAPPEND ONEHEADER FILE=PATAB{ga_run}
-$TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE=000{ga_run}.ETA
+$TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE={ga_run}.ETA
 $TABLE ID WT SEX STUDY NOPRINT NOAPPEND ONEHEADER FILE=CATAB{ga_run}
 $TABLE ID AGE NOPRINT NOAPPEND ONEHEADER FILE=COTAB{ga_run}"""
 
@@ -954,7 +1137,7 @@ def make_structural_fitness(mod_template, structural_specs, continuous_specs,
         success = extract_minimization_successful(lst_path)
         cov_ok = extract_covariance_successful(lst_path)
         boundary = extract_boundary_warnings(lst_path)
-        has_high_rse, max_rse = extract_rse_warnings(lst_path)
+        has_high_rse, max_rse, error_model_info = extract_rse_warnings(lst_path)
 
         # Clean up
         cleanup_nonmem_outputs(project_dir, run_tag)
@@ -993,6 +1176,20 @@ def make_structural_fitness(mod_template, structural_specs, continuous_specs,
             fitness -= 50
         if has_high_rse:
             fitness -= 100
+
+        # Error model simplification penalty:
+        # If combined error model is used but one component is poorly estimated,
+        # penalize it to encourage trying simpler error models in GA search
+        if error_model == "comb" and error_model_info:
+            simplify = should_simplify_error_model(error_model_info, rse_threshold=100.0)
+            if simplify['should_simplify']:
+                # Penalty proportional to how bad the RSE is
+                prop_rse = error_model_info.get('prop_err_rse', 0) or 0
+                add_rse = error_model_info.get('add_err_rse', 0) or 0
+                max_err_rse = max(prop_rse, add_rse)
+                # Scale penalty: mild at 100%, severe at 200%+
+                penalty = min(150, (max_err_rse - 100) * 1.5)
+                fitness -= penalty
 
         return fitness
 

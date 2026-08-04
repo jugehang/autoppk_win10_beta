@@ -16,7 +16,7 @@ struct DetailView: View {
                         .font(.system(size: 14, weight: .semibold))
                     Text(store.selectedAsset?.relativePath ?? "Workspace")
                         .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer()
@@ -227,7 +227,7 @@ private struct ArtifactOpenPreview: View {
                 .background(.quaternary.opacity(0.15), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             VStack(spacing: 4) {
                 Text(asset.title).font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                Text(asset.relativePath).font(.system(size: 12)).foregroundStyle(.tertiary).lineLimit(2)
+                Text(asset.relativePath).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
             }.frame(maxWidth: 500)
             HStack(spacing: 10) {
                 Button { store.openAsset(asset) } label: {
@@ -240,7 +240,7 @@ private struct ArtifactOpenPreview: View {
                         .font(.system(size: 12, weight: .medium))
                 }.controlSize(.small)
             }
-            Text(helpText).font(.system(size: 11)).foregroundStyle(.tertiary)
+            Text(helpText).font(.system(size: 11)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 480)
             Spacer()
         }
@@ -261,7 +261,7 @@ private struct ArtifactOpenPreview: View {
     private var helpText: String {
         asset.url.pathExtension.lowercased() == "docx"
             ? "DOCX reports open with your system default app."
-            : "This file is indexed by AutoPMX and can be opened with the default macOS application."
+            : "This file is indexed by AutoPMx and can be opened with the default macOS application."
     }
 }
 
@@ -290,7 +290,7 @@ private struct CSVTablePreview: View {
                             HStack(spacing: 0) {
                                 Text("\(ri + 1)")
                                     .font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(.secondary)
                                     .frame(width: 42, alignment: .trailing)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 4)
@@ -335,10 +335,10 @@ private struct CSVTablePreview: View {
                     HStack {
                         Image(systemName: "info.circle")
                             .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                         Text("\(parsed.rows.count - 200) more rows hidden")
                             .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 10)
                     .padding(.horizontal, 12)
@@ -371,7 +371,7 @@ private struct CSVTablePreview: View {
                     .foregroundStyle(.secondary)
                 Text("\(parsed.rows.count.formatted()) rows x \(parsed.headers.count) cols")
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             Text(asset.title)

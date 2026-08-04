@@ -48,10 +48,15 @@ def _load_rules(root: Path, rules_file: str) -> str:
     return "\n\n---\n\n".join(sections)
 
 
-def _openai_client(base_url: str, api_key: str = "lm-studio"):
+def _openai_client(base_url: str, api_key: str = "lm-studio", timeout_sec: int = 180):
     from openai import OpenAI
+    from httpx import Timeout
 
-    return OpenAI(base_url=base_url, api_key=api_key or "lm-studio")
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key or "lm-studio",
+        timeout=Timeout(timeout_sec, connect=15.0),
+    )
 
 
 def _read_lst_source_truth(root: Path, run_id: str, role_label: str) -> Dict[str, str]:
@@ -87,7 +92,7 @@ def _run_r_parameter_script(settings: WorkbenchSettings, run_id: str, output_dir
     if not (root / script).exists():
         log(f"Missing R parameter script: {script}")
         return ""
-    code = stream_subprocess(["Rscript", script, run_id], root, log)
+    code = stream_subprocess([settings.rscript, script, run_id], root, log)
     if code != 0:
         return ""
     csv_name = root / f"data_run{run_id}.csv"
@@ -233,7 +238,7 @@ def _run_visual_audit(settings: WorkbenchSettings, log, kind: str) -> int:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{_encode_image(previous)}"}})
 
     try:
-        log(f"Sending {kind.upper()} visual audit request to LLM...")
+        log(f"Sending {kind.upper()} visual audit → model={settings.vision_model_id} @ {settings.vision_base_url}")
         response = _openai_client(settings.vision_base_url, settings.vision_api_key).chat.completions.create(
             model=settings.vision_model_id,
             messages=[{"role": "user", "content": content}],

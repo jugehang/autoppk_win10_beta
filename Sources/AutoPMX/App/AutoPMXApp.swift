@@ -14,6 +14,7 @@ struct AutoPMXApp: App {
                 .onAppear {
                     NSApp.activate(ignoringOtherApps: true)
                 }
+                .background(WindowCapture())
         }
         .commands {
             // File menu additions
@@ -44,16 +45,14 @@ struct AutoPMXApp: App {
 
             // Help menu
             CommandGroup(replacing: .help) {
-                Button("AutoPMX Help") {
-                    if let helpURL = BundledResource.url(forResource: "Help", withExtension: "html") {
-                        NSWorkspace.shared.open(helpURL)
-                    }
+                Button("AutoPMx Help") {
+                    store.openHelpWindow()
                 }
             }
 
             // App menu (About)
             CommandGroup(replacing: .appInfo) {
-                Button("About AutoPMX") {
+                Button("About AutoPMx") {
                     AboutWindowController.show()
                 }
             }
@@ -66,10 +65,56 @@ struct AutoPMXApp: App {
     }
 }
 
+/// Stores a weak reference to the main window so the menu bar controller
+/// can bring it back after the user has closed it (we intercept close → hide).
+@MainActor
+final class MainWindowKeeper {
+    static let shared = MainWindowKeeper()
+    weak var window: NSWindow?
+    // NSWindow.delegate is weak; hold the interceptor strongly so closing still works.
+    var closeInterceptor: WindowCloserInterceptor?
+}
+
+/// The status bar entry has been removed, so closing the last window should quit.
+final class WindowCloserInterceptor: NSObject, NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        true
+    }
+}
+
+/// SwiftUI background view that captures the platform NSWindow on appear,
+/// keeps a reference for the menu bar, and installs the close interceptor.
+struct WindowCapture: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { capture(view) }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private func capture(_ anchor: NSView) {
+        guard let window = anchor.window else { return }
+        MainWindowKeeper.shared.window = window
+        // Only install the interceptor once.
+        if !(window.delegate is WindowCloserInterceptor) {
+            let interceptor = WindowCloserInterceptor()
+            MainWindowKeeper.shared.closeInterceptor = interceptor
+            window.delegate = interceptor
+            window.isReleasedWhenClosed = false
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if !DEBUG
+        AppHardening.guardStartup()
+        #endif
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 }
 
@@ -91,7 +136,7 @@ final class AboutWindowController: NSObject {
             backing: .buffered,
             defer: false
         )
-        aboutWindow.title = "About AutoPMX"
+        aboutWindow.title = "About AutoPMx"
         aboutWindow.titlebarAppearsTransparent = true
         aboutWindow.titleVisibility = .hidden
         aboutWindow.isMovableByWindowBackground = true
@@ -136,7 +181,7 @@ struct AboutView: View {
 
             Spacer().frame(height: 16)
 
-            Text("AutoPMX")
+            Text("AutoPMx")
                 .font(.system(size: 24, weight: .bold, design: .rounded))
             Text("DuDu PMx Workbench")
                 .font(.system(size: 13))
@@ -144,7 +189,7 @@ struct AboutView: View {
 
             Spacer().frame(height: 8)
 
-            Text("Version 1.1.0 (Build 2)")
+            Text("Version 1.1.0 (Build 3)")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
 

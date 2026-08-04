@@ -198,8 +198,14 @@ def check_theta_omega_count(lines: list, text: str) -> List[ValidationIssue]:
     theta_sections = _all_section_texts(text, "$THETA")
     theta_count = 0
     for sec in theta_sections:
-        for line in sec.splitlines():
+        sec_lines = sec.splitlines()
+        for i, line in enumerate(sec_lines):
             stripped = line.strip()
+            if i == 0 and stripped.upper().startswith("$THETA"):
+                rest = stripped[6:].strip()
+                if rest and re.search(r"\d", rest):
+                    theta_count += 1
+                continue
             if not stripped or stripped.startswith(";") or stripped.upper().startswith("$THETA"):
                 continue
             theta_count += 1
@@ -378,10 +384,12 @@ def check_table_files(text: str, run_id: str) -> List[ValidationIssue]:
         file_match = re.search(r"FILE\s*=\s*(\S+)", table_block, re.IGNORECASE)
         if file_match:
             fname = file_match.group(1)
-            # Common expected patterns: sdtab{run}, patab{run}, 000{run}.ETA, catab{run}, cotab{run}
+            # Common expected patterns: sdtab{run}, patab{run}, 000{run}.ETA,
+            # run{run}.ETA, catab{run}, cotab{run}
             expected_extensions = {
                 "SDTAB": "", "PATAB": "", "CATAB": "", "COTAB": "",
                 "000": ".ETA",
+                "RUN": ".ETA",
             }
             upper_fname = fname.upper()
             found_run = None
@@ -462,7 +470,7 @@ def check_common_typos(text: str) -> List[ValidationIssue]:
     seen_labels = set()
     for lbl, s, _ in _section_boundaries(text):
         line_num = _line_number(text, s)
-        if lbl in ("$PROBLEM", "$TABLE"):
+        if lbl in ("$PROBLEM", "$TABLE", "$THETA", "$OMEGA"):
             continue
         if lbl in seen_labels:
             issues.append(ValidationIssue(

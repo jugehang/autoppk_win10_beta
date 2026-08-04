@@ -52,7 +52,7 @@ def _tables(run: str, pk_params: list[str], eta_terms: str) -> str:
     param_tokens = " ".join(pk_params) if pk_params else "CL V"
     return f"""$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=SDTAB{run} FORMAT=s1PE14.7
 $TABLE ID {param_tokens} {eta_terms} NOPRINT NOAPPEND ONEHEADER FILE=PATAB{run}
-$TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE=000{run}.ETA
+$TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE=run{run}.ETA
 $TABLE ID WT SEX STUDY NOPRINT NOAPPEND ONEHEADER FILE=CATAB{run}
 $TABLE ID AGE NOPRINT NOAPPEND ONEHEADER FILE=COTAB{run}"""
 
@@ -86,7 +86,7 @@ def normalize_input_columns(input_columns: Optional[Iterable[str]] = None) -> li
 
 
 COMMON_ESTIMATION = """$EST METHOD=1 INTER MAXEVAL=9999 NOABORT SIG=3 PRINT=10
-$COV UNCONDITIONAL"""
+$COVARIANCE PRINT=E MATRIX=S"""
 
 
 TEMPLATES: Dict[str, TemplateSpec] = {

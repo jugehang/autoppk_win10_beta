@@ -33,7 +33,7 @@ struct ContentView: View {
                         .frame(minWidth: 320, idealWidth: 360, maxWidth: 440)
                 }
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(LiquidGlassBackdrop())
 
             AIAssistantOverlay()
                 .padding(24)
@@ -45,8 +45,12 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: store.showDemoGuide)
+        .id(lang.language.rawValue)
         .sheet(isPresented: $store.showSCMDialog) {
             SCMSetupSheetView().environmentObject(store)
+        }
+        .sheet(isPresented: $store.isBootstrapSheetPresented) {
+            BootstrapSetupSheet().environmentObject(store)
         }
         .alert("Move File to Trash?", isPresented: $store.isDeleteConfirmationPresented) {
             Button("Cancel", role: .cancel) { store.cancelDelete() }
@@ -54,8 +58,16 @@ struct ContentView: View {
         } message: {
             Text(store.deleteConfirmationText)
         }
-        .environment(\.particleEffectsEnabled, store.particleEffectsEnabled)
-        .environment(\.particleCount, store.particleCount)
+        .alert("Delete Project?", isPresented: $store.isDeleteProjectConfirmed) {
+            Button("Cancel", role: .cancel) { store.pendingDeleteProject = nil }
+            Button("Move to Trash", role: .destructive) { store.confirmDeleteProject() }
+        } message: {
+            if let url = store.pendingDeleteProject {
+                Text("Move \"\(url.lastPathComponent)\" to Trash? This will remove all models, data, and diagnostics in this project.")
+            } else {
+                Text("Move this project to Trash?")
+            }
+        }
     }
 }
 
@@ -66,6 +78,8 @@ struct WorkbenchToolbar: View {
     @State private var projectName = "Run_Project"
     @State private var showingProjectSheet = false
     @State private var projectCreationMode: ProjectCreationMode = .fromRun
+    @State private var projectParentDir: URL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        ?? URL(fileURLWithPath: NSHomeDirectory())
     var body: some View {
         HStack(spacing: 6) {
             ToolbarBrand()
@@ -150,10 +164,8 @@ struct WorkbenchToolbar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(
-            Color(nsColor: .windowBackgroundColor)
-                .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
-        )
+        .background(.ultraThinMaterial)
+        .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
         .overlay(Divider().opacity(0.6), alignment: .bottom)
         .sheet(isPresented: $showingProjectSheet) {
             VStack(alignment: .leading, spacing: 16) {
@@ -173,10 +185,35 @@ struct WorkbenchToolbar: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Project Name")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                     TextField("", text: $projectName)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 13))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Location")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(projectParentDir.path)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Button("Choose...") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseFiles = false
+                            panel.canChooseDirectories = true
+                            panel.canCreateDirectories = true
+                            panel.message = "Choose parent folder for the new project"
+                            if panel.runModal() == .OK, let url = panel.url {
+                                projectParentDir = url
+                            }
+                        }
+                        .font(.system(size: 10))
+                        .controlSize(.small)
+                    }
                 }
 
                 HStack {
@@ -185,9 +222,9 @@ struct WorkbenchToolbar: View {
                         .controlSize(.large)
                     Button("Create") {
                         if projectCreationMode == .blank {
-                            store.createBlankProject(name: projectName)
+                            store.createBlankProject(name: projectName, parentDirectory: projectParentDir)
                         } else {
-                            store.createProjectFromCurrentRun(name: projectName)
+                            store.createProjectFromCurrentRun(name: projectName, parentDirectory: projectParentDir)
                         }
                         showingProjectSheet = false
                     }
@@ -198,7 +235,7 @@ struct WorkbenchToolbar: View {
                 }
             }
             .padding(28)
-            .frame(width: 460)
+            .frame(width: 500)
         }
     }
 
@@ -228,7 +265,7 @@ struct WorkbenchToolbar: View {
 
     private func openProjectPanel() {
         let panel = NSOpenPanel()
-        panel.title = "Open AutoPMX Project"
+        panel.title = "Open AutoPMx Project"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -275,16 +312,15 @@ struct ToolbarBrand: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
-                    Text("AutoPMX")
-                        .font(.system(size: 14, weight: .bold))
+                    TechBrandTitle()
                     Circle()
-                        .fill(store.isAutoModeling ? .cyan : .green)
+                        .fill(store.isAutoModeling || store.isSCMRunning ? .cyan : .green)
                         .frame(width: 5, height: 5)
-                        .shadow(color: (store.isAutoModeling ? Color.cyan : Color.green).opacity(0.4), radius: 2)
+                        .shadow(color: (store.isAutoModeling || store.isSCMRunning ? Color.cyan : Color.green).opacity(0.4), radius: 2)
                 }
                 Text("DuDu PMx Workbench")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             .lineLimit(1)
         }
@@ -306,35 +342,95 @@ struct ToolbarBrand: View {
     }
 }
 
+// MARK: - Tech Brand Title
+
+/// Static monochrome brand mark, kept lightweight during long model runs.
+struct TechBrandTitle: View {
+    var body: some View {
+        Text("AutoPMx")
+            .font(.system(size: 14, weight: .bold, design: .rounded))
+            .foregroundStyle(.primary)
+            .fixedSize()
+    }
+}
+
 // MARK: - Location Badge
 
 struct ProjectLocationBadge: View {
     @EnvironmentObject private var store: WorkbenchStore
+    @State private var showCopied = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "folder.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(.blue.opacity(0.7))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(store.projectURL.lastPathComponent)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
-                Text(store.projectURL.path)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+        Menu {
+            // Recent projects (excluding current)
+            let others = store.recentProjectURLs.filter { $0 != store.projectURL }
+            if !others.isEmpty {
+                Section("Recent Projects") {
+                    ForEach(others, id: \.self) { url in
+                        Button {
+                            store.openProject(url: url)
+                        } label: {
+                            Text(url.lastPathComponent)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                Divider()
             }
+            // Actions
+            Button {
+                let path = store.projectURL.path
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+                showCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    showCopied = false
+                }
+            } label: {
+                Label(showCopied ? "Copied!" : "Copy Path", systemImage: showCopied ? "checkmark" : "doc.on.doc")
+            }
+            Button {
+                NSWorkspace.shared.selectFile(store.projectURL.path, inFileViewerRootedAtPath: "")
+            } label: {
+                Label("Reveal in Finder", systemImage: "arrow.up.right.square")
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.pendingDeleteProject = store.projectURL
+                store.isDeleteProjectConfirmed = true
+            } label: {
+                Label("Delete Project", systemImage: "trash")
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.blue.opacity(0.7))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(store.projectURL.lastPathComponent)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    Text(store.projectURL.path)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .frame(maxWidth: 260, alignment: .leading)
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(.primary.opacity(0.06), lineWidth: 0.5)
+            )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .frame(maxWidth: 260, alignment: .leading)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(.primary.opacity(0.06), lineWidth: 0.5)
-        )
-        .help(store.projectURL.path)
+        .menuStyle(.borderlessButton)
+        .help("Recent projects & actions")
     }
 }
 
@@ -354,9 +450,9 @@ enum ProjectCreationMode {
     var message: String {
         switch self {
         case .blank:
-            return "AutoPMX will create a clean data-only project with NM_dat_new.csv, rules, and diagnostic scripts, but no run*.mod files. DuDu PMx can write run001.mod from scratch afterward."
+            return "AutoPMx will create a clean data-only project with rules and diagnostic scripts, but no run*.mod files. Please import your own dataset (e.g., NM_dat.csv) afterward. DuDu PMx can write run001.mod from scratch once data is in place."
         case .fromRun:
-            return "AutoPMX will copy the selected model, outputs, data file, project config, and rules into a new project folder."
+            return "AutoPMx will copy the selected model, outputs, data file, project config, and rules into a new project folder."
         }
     }
 }
@@ -393,7 +489,7 @@ struct ClaudeCodePanel: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 15))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
@@ -413,33 +509,33 @@ struct ClaudeCodePanel: View {
                                     Image(systemName: "lightbulb.fill")
                                         .font(.system(size: 12))
                                         .foregroundStyle(.yellow)
-                                    Text("提示")
+                                    Text(L10n.claudeHintTitle)
                                         .font(.system(size: 13, weight: .semibold))
                                 }
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("在下方输入框键入提示词，按 Enter 或点击 Send 发送给 Claude Code 处理。")
+                                    Text(L10n.claudeHintText1)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
                                         .lineSpacing(4)
-                                    Text("Claude Code 将在当前项目目录下运行，可以读取模型文件、修改控制流、分析诊断结果。")
+                                    Text(L10n.claudeHintText2)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
                                         .lineSpacing(4)
                                 }
 
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text("示例")
+                                    Text(L10n.claudeExampleTitle)
                                         .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(.tertiary)
-                                    Text("  \"分析 run001.lst 的错误并修复 run001.mod\"")
+                                        .foregroundStyle(.secondary)
+                                    Text(L10n.claudeExample1)
                                         .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.tertiary)
-                                    Text("  \"为 run002 添加 WT covariate on CL\"")
+                                        .foregroundStyle(.secondary)
+                                    Text(L10n.claudeExample2)
                                         .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.tertiary)
-                                    Text("  \"比较 run001 和 run002 的参数估计\"")
+                                        .foregroundStyle(.secondary)
+                                    Text(L10n.claudeExample3)
                                         .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                             .padding(16)
@@ -517,19 +613,19 @@ struct ClaudeCodePanel: View {
                 // Skill chips
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        skillChip("📐 分析模型") {
+                        skillChip(L10n.claudeSkillAnalyze) {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n当前模型: run\(store.currentRun).mod\n数据: \(store.dataFile)\n\n请分析 run\(store.currentRun).mod 和对应的 LST/EXT 输出，评估模型是否满足 PopPK 规则库的判定标准，给出 ACCEPT 或 REVISE 的结论。"
                         }
-                        skillChip("🔧 修复模型") {
+                        skillChip(L10n.claudeSkillFix) {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n当前模型: run\(store.currentRun).mod\n\n请检查 run\(store.currentRun).lst 中的错误信息，根据 PopPK 规则库修复控制流。注意：这是 IV 给药数据，不要切换成口服模型。只修复编译/运行错误，不要添加额外的模型复杂度。"
                         }
-                        skillChip("📊 比较模型") {
+                        skillChip(L10n.claudeSkillCompare) {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n\n请比较 run\(store.previousRun).mod 和 run\(store.currentRun).mod 的 NONMEM 输出，根据 PopPK 规则库判断当前模型相比前一个模型是否有改进。列出 OFV 变化、参数估计变化、诊断图改进情况。"
                         }
-                        skillChip("🧬 协变量筛选") {
+                        skillChip(L10n.claudeSkillCovariate) {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n当前模型: run\(store.currentRun).mod\n数据: \(store.dataFile)\n\n请根据 PopPK 规则库评估是否可以添加协变量（WT, SEX, AGE, STUDY）到当前模型。只在结构模型和残差模型稳定后才考虑协变量。不要一次性添加多个协变量。"
                         }
-                        skillChip("📝 写新模型") {
+                        skillChip(L10n.claudeSkillNewModel) {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n数据: \(store.dataFile)\n\n请根据 PopPK 模型库模板创建一个新的 runXXX.mod 控制流。数据集是 IV Infusion 给药途径，从1房室模型开始。$INPUT 必须严格按照 CSV 表头顺序。$TABLE 的参数必须和 $PK 定义的参数完全一致。"
                         }
                     }

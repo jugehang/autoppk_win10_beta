@@ -154,6 +154,27 @@ def extract_run_id(text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def ensure_eta_table(sections: SectionMap, run_id: str) -> SectionMap:
+    """Make sure every generated/fixed model exports EBE values to run{id}.ETA."""
+    table_sec = sections.get("$TABLE", "")
+    if not table_sec:
+        return sections
+    eta_count = find_eta_count(rebuild_mod(sections))
+    if eta_count <= 0:
+        return sections
+
+    eta_terms = " ".join(f"ETA{i}" for i in range(1, eta_count + 1))
+    eta_table = f"$TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE=run{run_id}.ETA"
+    kept = []
+    for line in table_sec.splitlines():
+        if re.search(r"\$TABLE.*ETA\d+.*FIRSTONLY", line, re.IGNORECASE):
+            continue
+        kept.append(line)
+    kept.append(eta_table)
+    sections["$TABLE"] = "\n".join(kept)
+    return sections
+
+
 # ---------------------------------------------------------------------------
 # Action implementations
 # ---------------------------------------------------------------------------
@@ -172,7 +193,7 @@ def action_bump_run(sections: SectionMap, params: Dict[str, Any]) -> SectionMap:
         )
         # Replace FILE=SDTAB{old} → SDTAB{new}, etc.
         sections[label] = re.sub(
-            rf"(FILE\s*=\s*)(SDTAB|PATAB|CATAB|COTAB|000){old_run}",
+            rf"(FILE\s*=\s*)((?:SDTAB|PATAB|CATAB|COTAB|000)|run){old_run}",
             lambda m: f"{m.group(1)}{m.group(2)}{new_run}",
             sections[label],
             flags=re.IGNORECASE,
@@ -208,8 +229,8 @@ def action_fix_table_ids(sections: SectionMap, params: Dict[str, Any]) -> Sectio
         if label.startswith("$TABLE") or label == "$TABLE":
             sec = sections[label]
             sec = re.sub(
-                r"(FILE\s*=\s*)(SDTAB|PATAB|CATAB|COTAB|000)\d+",
-                rf"\1\2{target}",
+                r"(FILE\s*=\s*)((?:SDTAB|PATAB|CATAB|COTAB|000)|run)\d+",
+                lambda m: f"{m.group(1)}{m.group(2)}{target}",
                 sec,
                 flags=re.IGNORECASE,
             )
@@ -513,6 +534,10 @@ def apply_modifications(
             print(f"[model_generator] Unknown action: {mod.action}", file=sys.stderr)
             continue
         sections = fn(sections, mod.params)
+
+    run_id = extract_run_id(rebuild_mod(sections))
+    if run_id:
+        sections = ensure_eta_table(sections, run_id)
 
     # Normalize section order
     result = rebuild_mod(sections)

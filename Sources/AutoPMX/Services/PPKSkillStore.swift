@@ -91,6 +91,9 @@ final class PPKSkillStore: ObservableObject {
     @Published var successCount: Int = 0
     @Published var insightCount: Int = 0
 
+    /// Directory of the project whose skills are currently loaded. Enables auto-persist on every change.
+    private var lastDirectory: URL?
+
     private let maxLessons = 200
     private let maxSuccesses = 100
     private let maxInsights = 100
@@ -99,28 +102,77 @@ final class PPKSkillStore: ObservableObject {
     // MARK: - Persistence
 
     func load(from directoryURL: URL) {
-        let url = skillFileURL(directory: directoryURL)
-        guard let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(PPKSkillData.self, from: data) else {
-            skillData = PPKSkillData()
-            updateCounts()
-            return
+        lastDirectory = directoryURL
+        let globalURL = skillFileURL(directory: directoryURL)
+        // Prefer the GLOBAL shared store so generic lessons learned in ANY project are reused everywhere.
+        if let data = try? Data(contentsOf: globalURL),
+           let decoded = try? JSONDecoder().decode(PPKSkillData.self, from: data) {
+            skillData = decoded
         }
-        skillData = decoded
+        // Migration: if no global store exists yet but a legacy per-project file is present,
+        // fold it into the global store so previously accumulated experience is not lost.
+        else {
+            let legacyURL = directoryURL.appendingPathComponent(".autopmx_ppk_skill.json")
+            if let data = try? Data(contentsOf: legacyURL),
+               let decoded = try? JSONDecoder().decode(PPKSkillData.self, from: data) {
+                skillData = decoded
+                save(to: directoryURL)  // re-persists into the global location
+            } else {
+                skillData = PPKSkillData()
+            }
+        }
+        // Always merge per-project parameter insights on top of global data.
+        // Parameter values/ω are project-specific (different drugs, units, populations)
+        // and MUST NOT pollute the global store. They are read from a per-project file.
+        let localURL = localInsightURL(directory: directoryURL)
+        if let data = try? Data(contentsOf: localURL),
+           let local = try? JSONDecoder().decode(PPKSkillData.self, from: data),
+           !local.insights.isEmpty {
+            var existing = skillData.insights
+            for ins in local.insights {
+                if let idx = existing.firstIndex(where: { $0.parameter == ins.parameter }) {
+                    existing[idx] = ins
+                } else {
+                    existing.append(ins)
+                }
+            }
+            skillData.insights = existing
+        }
         updateCounts()
     }
 
     func save(to directoryURL: URL) {
+        lastDirectory = directoryURL
         let url = skillFileURL(directory: directoryURL)
         skillData.lastUpdated = Date()
         trimIfNeeded()
         updateCounts()
-        guard let data = try? JSONEncoder().encode(skillData) else { return }
-        try? data.write(to: url, options: .atomic)
+        // Write global store WITHOUT parameter insights — those are project-specific
+        // (different drugs, units, populations) and MUST stay per-project.
+        var globalData = skillData
+        globalData.insights = []
+        guard let globalBytes = try? JSONEncoder().encode(globalData) else { return }
+        try? globalBytes.write(to: url, options: .atomic)
+        // Write per-project parameter insights separately.
+        saveLocalInsights(directory: directoryURL)
     }
 
+    /// Skill store location. Intentionally GLOBAL (not per-project): the experience worth
+    /// remembering is GENERIC modeling discipline (IIV fixing, initial-estimate continuity,
+    /// S+C before selection, etc.) that should apply across ALL projects — not project-specific
+    /// data quirks. Stored in Application Support so every project/run benefits automatically.
     private func skillFileURL(directory: URL) -> URL {
-        directory.appendingPathComponent(".autopmx_ppk_skill.json")
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("AutoPMX", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("ppk_skill_global.json")
+    }
+
+    /// Per-project parameter insights file — parameter values/ω are project-specific
+    /// (different drugs, units, populations) and MUST NOT be shared globally.
+    private func localInsightURL(directory: URL) -> URL {
+        return directory.appendingPathComponent(".autopmx_ppk_insights.json")
     }
 
     private func trimIfNeeded() {
@@ -141,6 +193,67 @@ final class PPKSkillStore: ObservableObject {
         insightCount = skillData.insights.count
     }
 
+    /// Reset all learned skills (in-memory). Caller is responsible for saving.
+    func clearAll() {
+        skillData = PPKSkillData()
+        updateCounts()
+    }
+
+    /// Persist only the parameter-insights portion to a project-local file.
+    /// Separated from the global store so parameter values from one project
+    /// (different drug, unit, population) never pollute another project's context.
+    private func saveLocalInsights(directory: URL) {
+        var local = PPKSkillData()
+        local.insights = skillData.insights
+        local.lastUpdated = Date()
+        guard let data = try? JSONEncoder().encode(local) else { return }
+        try? data.write(to: localInsightURL(directory: directory), options: .atomic)
+    }
+
+    /// Persist to the last loaded/saved project directory, if any.
+    private func persistIfPossible() {
+        guard let dir = lastDirectory else { return }
+        save(to: dir)
+    }
+
+    /// Save to the currently-loaded project directory (no-op if none loaded yet).
+    /// Safe to call before switching projects so unsaved in-memory skills survive.
+    func saveCurrent() {
+        persistIfPossible()
+    }
+
+    /// Export the full skill set to a JSON file (for sharing with others).
+    func exportSkills(to url: URL) throws {
+        let data = try JSONEncoder().encode(skillData)
+        try data.write(to: url, options: .atomic)
+    }
+
+    /// Import skills from a JSON file. When `merge` is true, entries are unioned by id
+    /// (incoming overrides same-id existing). When false, the current set is replaced.
+    /// Persists to the loaded project directory if one is set.
+    func importSkills(from url: URL, merge: Bool = true) throws {
+        let data = try Data(contentsOf: url)
+        let incoming = try JSONDecoder().decode(PPKSkillData.self, from: data)
+        if merge {
+            skillData.lessons = mergeById(skillData.lessons, incoming.lessons)
+            skillData.successes = mergeById(skillData.successes, incoming.successes)
+            skillData.insights = mergeById(skillData.insights, incoming.insights)
+            skillData.scmErrorPatterns = mergeById(skillData.scmErrorPatterns, incoming.scmErrorPatterns)
+        } else {
+            skillData = incoming
+        }
+        skillData.lastUpdated = Date()
+        trimIfNeeded()
+        updateCounts()
+        persistIfPossible()
+    }
+
+    private func mergeById<T: Identifiable>(_ current: [T], _ incoming: [T]) -> [T] where T.ID == String {
+        var map: [String: T] = [:]
+        for item in current + incoming { map[item.id] = item }
+        return Array(map.values)
+    }
+
     // MARK: - Add Lessons
 
     func addLesson(
@@ -152,6 +265,11 @@ final class PPKSkillStore: ObservableObject {
         severity: LessonSeverity = .medium,
         tags: [String] = []
     ) {
+        // De-duplicate identical lessons (same category + problem + title)
+        if skillData.lessons.contains(where: { $0.category == category && $0.problem == problem && $0.title == title }) {
+            return
+        }
+        objectWillChange.send()
         let lesson = PPKLesson(
             timestamp: Date(),
             category: category,
@@ -163,6 +281,8 @@ final class PPKSkillStore: ObservableObject {
             tags: tags
         )
         skillData.lessons.append(lesson)
+        updateCounts()
+        persistIfPossible()
     }
 
     func addSuccess(
@@ -183,6 +303,8 @@ final class PPKSkillStore: ObservableObject {
             tags: tags
         )
         skillData.successes.append(pattern)
+        updateCounts()
+        persistIfPossible()
     }
 
     func addParameterInsight(
@@ -214,6 +336,9 @@ final class PPKSkillStore: ObservableObject {
                 note: note
             ))
         }
+        updateCounts()
+        guard let dir = lastDirectory else { return }
+        saveLocalInsights(directory: dir)
     }
 
     func addSCMErrorPattern(
@@ -235,6 +360,8 @@ final class PPKSkillStore: ObservableObject {
                 occurrenceCount: 1
             ))
         }
+        updateCounts()
+        persistIfPossible()
     }
 
     // MARK: - Context Injection (what gets fed to LLM prompts)

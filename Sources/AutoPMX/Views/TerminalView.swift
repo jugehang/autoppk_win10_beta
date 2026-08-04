@@ -35,7 +35,7 @@ struct TerminalView: View {
                         Text("Clear")
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5, style: .continuous))

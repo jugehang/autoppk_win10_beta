@@ -62,6 +62,9 @@ class WorkbenchSettings:
     vision_model_id: str = "google/gemma-4-26b-a4b"
     vision_api_key: str = "lm-studio"
     rules_file: str = "poppk_rules.json,NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md"
+    psn_dir: str = ""
+    bootstrap_samples: int = 0
+    rscript: str = "Rscript"
     nonmem_template: str = ""
     psn_execute_template: str = "execute {model} -model_dir_name"
     data_file: str = "NM_dat_new.csv"
@@ -302,12 +305,20 @@ def load_project_config(project_dir: Path) -> Dict:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
-def psn_vpc_command(project_dir: Path, run_id: str) -> List[str]:
+def _psn_command(name: str, psn_dir: str) -> str:
+    if psn_dir:
+        configured = Path(psn_dir) / name
+        if configured.exists():
+            return str(configured)
+    return shutil.which(name) or f"/usr/local/bin/{name}"
+
+
+def psn_vpc_command(project_dir: Path, run_id: str, psn_dir: str = "") -> List[str]:
     cfg = load_project_config(project_dir)
     psn_cfg = cfg.get("psn_settings", {})
     samples = psn_cfg.get("vpc_samples", 500)
     stratify_var = psn_cfg.get("vpc_stratify") or psn_cfg.get("stratify_var") or "STUDY"
-    command = shutil.which("vpc") or "/usr/local/bin/vpc"
+    command = _psn_command("vpc", psn_dir)
     return [
         command,
         f"run{run_id}.mod",
@@ -320,11 +331,11 @@ def psn_vpc_command(project_dir: Path, run_id: str) -> List[str]:
     ]
 
 
-def psn_bootstrap_command(project_dir: Path, run_id: str) -> List[str]:
+def psn_bootstrap_command(project_dir: Path, run_id: str, psn_dir: str = "", samples: int = 0) -> List[str]:
     cfg = load_project_config(project_dir)
     psn_cfg = cfg.get("psn_settings", {})
-    samples = psn_cfg.get("bootstrap_samples", 200)
-    command = shutil.which("bootstrap") or "/usr/local/bin/bootstrap"
+    samples = samples or psn_cfg.get("bootstrap_samples", 200)
+    command = _psn_command("bootstrap", psn_dir)
     return [
         command,
         f"run{run_id}.mod",
@@ -333,9 +344,9 @@ def psn_bootstrap_command(project_dir: Path, run_id: str) -> List[str]:
     ]
 
 
-def psn_scm_command(project_dir: Path, run_id: str, log: LogFn) -> List[str]:
+def psn_scm_command(project_dir: Path, run_id: str, log: LogFn, psn_dir: str = "") -> List[str]:
     root = Path(project_dir)
-    command = shutil.which("scm") or "/usr/local/bin/scm"
+    command = _psn_command("scm", psn_dir)
     config_path = root / f"scm_run_{run_id}.conf"
     if not config_path.exists():
         config_path.write_text(default_scm_config(run_id), encoding="utf-8")
@@ -565,7 +576,7 @@ class TaskRunner:
         archive = archive_existing_paths(self.root, [self.root / f"vpc_dir_{self.settings.curr_run}"], "psn")
         if archive:
             self.log(f"Archived previous VPC directory to: {archive.name}")
-        command = psn_vpc_command(self.root, self.settings.curr_run)
+        command = psn_vpc_command(self.root, self.settings.curr_run, self.settings.psn_dir)
         if not shutil.which(command[0]) and not Path(command[0]).exists():
             self.log(f"PsN vpc command not found: {command[0]}")
             return 127
@@ -682,7 +693,7 @@ class TaskRunner:
             self.log(f"Skip {label}: missing {script}")
             return 2
         # Pass detected sdtab filename for scripts that need it (gof, individual plots)
-        rscript_args = ["Rscript", str(script_path), run]
+        rscript_args = [self.settings.rscript, str(script_path), run]
         if script in ("gof_plot_script.R", "individual_plot_script.R"):
             sdtab_name = self._find_sdtab_file(run)
             rscript_args.append(sdtab_name)
@@ -705,13 +716,13 @@ class TaskRunner:
         if not script_path.exists():
             self.log("Skip PK parameter extraction: missing pk parameters script.R")
             return 2
-        return stream_subprocess(["Rscript", str(script_path), run], self.root, self.log)
+        return stream_subprocess([self.settings.rscript, str(script_path), run], self.root, self.log)
 
     def run_bootstrap(self) -> int:
         archive = archive_existing_paths(self.root, [self.root / f"bootstrap_dir_{self.settings.curr_run}"], "bootstrap")
         if archive:
             self.log(f"Archived previous bootstrap directory to: {archive.name}")
-        command = psn_bootstrap_command(self.root, self.settings.curr_run)
+        command = psn_bootstrap_command(self.root, self.settings.curr_run, self.settings.psn_dir, self.settings.bootstrap_samples)
         if not shutil.which(command[0]) and not Path(command[0]).exists():
             self.log(f"PsN bootstrap command not found: {command[0]}")
             return 127
@@ -721,7 +732,7 @@ class TaskRunner:
         archive = archive_existing_paths(self.root, [self.root / f"scm_dir_{self.settings.curr_run}"], "scm")
         if archive:
             self.log(f"Archived previous SCM directory to: {archive.name}")
-        command = psn_scm_command(self.root, self.settings.curr_run, self.log)
+        command = psn_scm_command(self.root, self.settings.curr_run, self.log, self.settings.psn_dir)
         if not shutil.which(command[0]) and not Path(command[0]).exists():
             self.log(f"PsN scm command not found: {command[0]}")
             return 127
@@ -741,6 +752,47 @@ class TaskRunner:
         from audit_tasks import run_vpc_audit
 
         return run_vpc_audit(self.settings, self.log)
+
+    def run_eda(self, csv_file: str = "") -> int:
+        """Run EDA (Exploratory Data Analysis) on a dataset."""
+        data_file = csv_file if csv_file else self.settings.data_file
+        # csv_file may be an absolute path; handle both cases
+        if Path(data_file).is_absolute():
+            data_path = Path(data_file)
+        else:
+            data_path = self.root / data_file
+        if not data_path.exists():
+            self.log(f"EDA: dataset not found: {data_path}")
+            return 2
+        out_prefix = f"EDA_{data_path.stem}"
+        script_path = self.script_path("eda_analysis.R")
+        if not script_path.exists():
+            self.log(f"Skip EDA: missing eda_analysis.R")
+            return 2
+        return stream_subprocess(
+            [self.settings.rscript, str(script_path), str(data_path), out_prefix],
+            self.root, self.log
+        )
+
+    def run_ct_curves(self, csv_file: str = "") -> int:
+        """Run concentration-time curve plots on a dataset."""
+        data_file = csv_file if csv_file else self.settings.data_file
+        if Path(data_file).is_absolute():
+            data_path = Path(data_file)
+        else:
+            data_path = self.root / data_file
+        if not data_path.exists():
+            self.log(f"C-T curves: dataset not found: {data_path}")
+            return 2
+        out_prefix = f"CT_{data_path.stem}"
+        script_path = self.script_path("ct_curves_plot.R")
+        if not script_path.exists():
+            self.log(f"Skip C-T curves: missing ct_curves_plot.R")
+            return 2
+        return stream_subprocess(
+            [self.settings.rscript, str(script_path), str(data_path), out_prefix],
+            self.root, self.log
+        )
 
 
 class BackgroundJob:

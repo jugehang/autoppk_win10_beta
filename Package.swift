@@ -12,7 +12,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AutoPMX",
-            path: "Sources/AutoPMX"
+            path: "Sources/AutoPMX",
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )

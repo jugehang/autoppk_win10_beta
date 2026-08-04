@@ -20,7 +20,7 @@ struct DemoGuideView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("AutoPMX Demo")
+                    Text("AutoPMx Demo")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                     Text("AI 辅助 PPK 建模实战演示")
                         .font(.system(size: 10))
@@ -36,7 +36,7 @@ struct DemoGuideView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 15))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }

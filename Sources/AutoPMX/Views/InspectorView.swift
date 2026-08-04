@@ -29,7 +29,7 @@ struct InspectorView: View {
 
                     HStack(spacing: 4) {
                         InspectorPill("Suggest") {
-                            store.commandText = ProjectScanner.psnExecuteCommand(runID: store.currentRun)
+                            store.commandText = store.psnRunCommand(runID: store.currentRun)
                             store.refreshChecks()
                         }
 
@@ -61,99 +61,9 @@ struct InspectorView: View {
                 }
 
                 InspectorSection("Parameter Estimates") {
-                    ParameterEstimatesTable(runID: store.parameterRunID, rows: store.parameterRows)
-
-                    Divider().opacity(0.5).padding(.vertical, 4)
-
-                    // GA Optimize button
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 4) {
-                            InspectorPill("🧬 GA Optimize") {
-                                store.runGAOptimization()
-                            }
-                            .disabled(store.isRunningGA)
-                            if store.isRunningGA {
-                                ProgressView().controlSize(.small).scaleEffect(0.6)
-                            }
-                            Spacer()
-                        }
-                        Text(store.gaStatus.isEmpty
-                             ? "Use genetic algorithm to find better THETA initial estimates."
-                             : store.gaStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(store.gaStatus.contains("✅") ? .green : .secondary)
-                            .lineLimit(2)
-                        if let result = store.gaResultText {
-                            Text(result)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(6)
-                                .padding(6)
-                                .background(.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 4))
-                        }
-                    }
-
-                    Divider().opacity(0.5).padding(.vertical, 4)
-
-                    // GA Structural Search button
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 4) {
-                            InspectorPill("🧬 GA Structure") {
-                                store.runGAStructuralOptimization()
-                            }
-                            .disabled(store.isRunningStructuralGA)
-                            if store.isRunningStructuralGA {
-                                ProgressView().controlSize(.small).scaleEffect(0.6)
-                            }
-                            Spacer()
-                        }
-                        Text(store.structuralGAStatus.isEmpty
-                             ? "Search model structure (compartments, error model, IIV, covariates) + optimize THETA."
-                             : store.structuralGAStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(store.structuralGAStatus.contains("✅") ? .green : .secondary)
-                            .lineLimit(2)
-                        if let result = store.structuralGAResultText {
-                            Text(result)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(6)
-                                .padding(6)
-                                .background(.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 4))
-                        }
-                    }
+                    ParameterEstimatesTable(runID: store.parameterRunID, rows: store.parameterRows, covarianceOK: store.covarianceOK)
                 }
 
-                InspectorSection("LLM Provider") {
-                    VStack(spacing: 6) {
-                        if let provider = store.activeProvider {
-                            HStack(spacing: 6) {
-                                Image(systemName: provider.symbolName)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                Text(provider.name)
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text("·")
-                                    .foregroundStyle(.tertiary)
-                                Text(provider.model.isEmpty ? "No model" : provider.model)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        HStack(spacing: 4) {
-                            InspectorPill("Test Connection") { store.testLLMConnection() }
-                                .disabled(store.isTestingLLM)
-                            if store.isTestingLLM {
-                                ProgressView().controlSize(.small).scaleEffect(0.6)
-                            }
-                        }
-                        Text(store.llmStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
-                    }
-                }
             }
             .padding(12)
         }
@@ -239,6 +149,7 @@ struct CheckRow: View {
 struct ParameterEstimatesTable: View {
     let runID: String
     let rows: [ParameterEstimateRow]
+    let covarianceOK: Bool
 
     private var hasAnyShrinkage: Bool {
         rows.contains { row in
@@ -253,6 +164,11 @@ struct ParameterEstimatesTable: View {
                 Text("run\(runID)")
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
+                if !covarianceOK && !rows.isEmpty {
+                    Text("⚠️ Covariance failed — RSE unreliable")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                }
                 Text(rows.isEmpty ? "No estimates" : "\(rows.count) parameters")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -271,7 +187,7 @@ struct ParameterEstimatesTable: View {
                     ParameterHeader(showShrinkage: hasAnyShrinkage)
                     Divider().opacity(0.5)
                     ForEach(rows) { row in
-                        ParameterRow(row: row, showShrinkageColumn: hasAnyShrinkage)
+                        ParameterRow(row: row, showShrinkageColumn: hasAnyShrinkage, covarianceOK: covarianceOK)
                         if row.id != rows.last?.id {
                             Divider().opacity(0.3)
                         }
@@ -309,6 +225,7 @@ struct ParameterHeader: View {
 struct ParameterRow: View {
     let row: ParameterEstimateRow
     let showShrinkageColumn: Bool
+    let covarianceOK: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -322,8 +239,9 @@ struct ParameterRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(row.estimateText).frame(width: 52, alignment: .trailing)
-            Text(row.rseText).frame(width: 38, alignment: .trailing)
-                .foregroundStyle(rseColor)
+            // When covariance failed, RSE from R-matrix fallback is unreliable — show "NA"
+            Text(covarianceOK ? row.rseText : "NA").frame(width: 38, alignment: .trailing)
+                .foregroundStyle(covarianceOK ? rseColor : .secondary)
             // Always show Shrinkage column if header shows it — use "NA" for non-residual rows
             if showShrinkageColumn {
                 Text(row.group == "Residual" ? row.shrinkageText : "NA")
@@ -338,8 +256,11 @@ struct ParameterRow: View {
 
     private var rseColor: Color {
         guard let rse = row.rsePercent else { return .secondary }
+        // IIV uses a higher threshold: only flag at >= 50% (fixing consideration threshold).
+        // Non-IIV parameters keep the stricter >= 30% warning.
+        let isIIV = row.group == "IIV"
         if rse >= 50 { return .red }
-        if rse >= 30 { return .orange }
+        if !isIIV && rse >= 30 { return .orange }
         return .secondary
     }
 }
@@ -356,10 +277,10 @@ struct InspectorSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
                 Rectangle()
-                    .fill(Color.blue.opacity(0.5))
+                    .fill(Color.blue.opacity(0.55))
                     .frame(width: 3, height: 12)
                     .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
                 Text(title.uppercased())
@@ -367,9 +288,22 @@ struct InspectorSection<Content: View>: View {
                     .tracking(0.5)
                     .foregroundStyle(.secondary)
             }
-            .padding(.bottom, 1)
             content
         }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.blue.opacity(0.12), Color.primary.opacity(0.04)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.5
+                )
+        )
+        .shadow(color: .black.opacity(0.04), radius: 5, y: 1)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

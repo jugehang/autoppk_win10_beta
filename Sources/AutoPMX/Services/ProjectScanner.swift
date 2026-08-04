@@ -13,24 +13,30 @@ struct ProjectScanner {
     }
 
     static func defaultWorkspaceURL() -> URL {
-        let bundleURL = Bundle.main.bundleURL
-        let inferred = bundleURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("PopPK_Agent")
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
 
-        if FileManager.default.fileExists(atPath: inferred.path) {
-            return inferred
+        // Running from source or an extracted workspace: keep the existing root.
+        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
+        if looksLikeWorkspaceRoot(cwd) {
+            return cwd
         }
 
-        let desktopCandidate = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Desktop/AutoPMX_Test/PopPK_Agent")
-        if FileManager.default.fileExists(atPath: desktopCandidate.path) {
+        // Legacy development/test workspace on the Desktop.
+        let desktopCandidate = home.appendingPathComponent("Desktop/AutoPMX_Test/PopPK_Agent")
+        if fm.fileExists(atPath: desktopCandidate.path) {
             return desktopCandidate
         }
 
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        // Installed-app default: a writable per-user Documents location. Other Macs
+        // should never fall back to cwd, which can be "/" or an unwritable location.
+        return home.appendingPathComponent("Documents/AutoPMX")
+    }
+
+    private static func looksLikeWorkspaceRoot(_ url: URL) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: url.appendingPathComponent("AutoPMX_Projects").path)
+            || fm.fileExists(atPath: url.appendingPathComponent("PopPK_Agent").path)
     }
 
     static func ensureDemoProject(workspaceURL: URL) -> URL {
@@ -94,7 +100,29 @@ struct ProjectScanner {
                 || name.hasPrefix("runconcov") || name.hasSuffix(".scm")
         }
 
-        let allFiles = rootFiles + subdirArtifacts + scmArtifacts
+        // Include the app-generated Reports/ folder so final PopPK reports appear immediately.
+        let reportsDir = projectURL.appendingPathComponent("Reports")
+        let reportArtifacts = ((try? FileManager.default.contentsOfDirectory(
+            at: reportsDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []).filter { url in
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            return values?.isDirectory != true
+        }
+
+        // Include the app-generated Figures/ folder so ETA/SCM/diagnostic plots appear immediately.
+        let figuresDir = projectURL.appendingPathComponent("Figures")
+        let figureArtifacts = ((try? FileManager.default.contentsOfDirectory(
+            at: figuresDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []).filter { url in
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            return values?.isDirectory != true
+        }
+
+        let allFiles = rootFiles + subdirArtifacts + scmArtifacts + reportArtifacts + figureArtifacts
         var seenPaths = Set<String>()
 
         for url in allFiles {
@@ -172,6 +200,10 @@ struct ProjectScanner {
                 )
             }
             if row.group == "IIV", let s = etaShrinkages[row.name.uppercased()] ?? etaShrinkages["ETA" + row.name.dropFirst("ETA".count)] {
+                // If the parameter is FIXED, SE is nil (set by parseExt), skip shrinkage too
+                if row.standardError == nil {
+                    return row
+                }
                 return ParameterEstimateRow(
                     group: row.group, name: row.name,
                     estimate: row.estimate, standardError: row.standardError,
@@ -297,7 +329,36 @@ struct ProjectScanner {
         "execute run\(runID).mod -model_dir_name"
     }
 
-    static func ruleContext(projectURL: URL, workspaceURL: URL, sourcesText: String) -> RuleContext {
+    /// Filter poppk_rules.json rules by modeling phase, returning only
+    /// rules whose "phase" matches (or "both" matches any phase).
+    /// - Parameter phase: "phase1" for base model building, "phase2" for covariate screening, nil for all rules.
+    static func filterRulesByPhase(_ text: String, phase: String?) -> String {
+        guard let phase = phase,
+              let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let lib = json["rule_library"] as? [String: Any],
+              let namespaces = lib["namespaces"] as? [String: Any] else { return text }
+        var filtered = lib
+        filtered["namespaces"] = namespaces.compactMapValues { rules -> [[String: Any]]? in
+            guard let ruleList = rules as? [[String: Any]] else { return nil }
+            let matched = ruleList.filter { r in
+                (r["phase"] as? String) == phase || (r["phase"] as? String) == "both"
+            }
+            return matched.isEmpty ? nil : matched
+        }
+        var outLib = lib
+        outLib["namespaces"] = filtered["namespaces"]
+        if let data2 = try? JSONSerialization.data(withJSONObject: ["rule_library": outLib], options: [.prettyPrinted]),
+           let filteredText = String(data: data2, encoding: .utf8) {
+            return filteredText
+        }
+        return text
+    }
+
+    static func ruleContext(projectURL: URL, workspaceURL: URL, sourcesText: String, knowledgeBaseURL: URL? = nil, phase: String? = nil) -> RuleContext {
+        // Default the knowledge base to the inferred PopPK_Agent location so rule
+        // sources are found even when no explicit path is supplied by the caller.
+        let effectiveKB = knowledgeBaseURL ?? defaultWorkspaceURL()
         let sources = splitRuleSources(sourcesText)
         let requested = sources.isEmpty ? defaultLLMRuleSources : sources
         var loaded = [String]()
@@ -306,13 +367,13 @@ struct ProjectScanner {
         var seenPaths = Set<String>()
 
         for source in requested {
-            let candidates = ruleSourceCandidates(source: source, projectURL: projectURL, workspaceURL: workspaceURL)
+            let candidates = ruleSourceCandidates(source: source, projectURL: projectURL, workspaceURL: workspaceURL, knowledgeBaseURL: effectiveKB)
             guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
                 missing.append(source)
                 continue
             }
 
-            guard isRuleSourceAllowed(url, projectURL: projectURL, workspaceURL: workspaceURL) else {
+            guard isRuleSourceAllowed(url, projectURL: projectURL, workspaceURL: workspaceURL, knowledgeBaseURL: effectiveKB) else {
                 missing.append("\(source) (outside AutoPMX workspace)")
                 continue
             }
@@ -326,7 +387,11 @@ struct ProjectScanner {
             }
 
             loaded.append(url.lastPathComponent)
-            let clipped = text.count > 80_000 ? String(text.prefix(80_000)) + "\n[AutoPMX clipped long rule source]" : text
+            var clipped = text.count > 80_000 ? String(text.prefix(80_000)) + "\n[AutoPMX clipped long rule source]" : text
+            // Phase filter for poppk_rules.json — only include relevant rules
+            if url.lastPathComponent == "poppk_rules.json", let phase {
+                clipped = filterRulesByPhase(clipped, phase: phase)
+            }
             sections.append("""
             ### AutoPMX Rule Source: \(url.lastPathComponent)
             Path: \(path)
@@ -345,12 +410,12 @@ struct ProjectScanner {
         return RuleContext(text: sections.joined(separator: "\n\n---\n\n"), loadedSources: loaded, missingSources: missing)
     }
 
-    static func createProjectFromRun(workspaceURL: URL, sourceURL: URL, name: String, runID: String, dataFile: String) throws -> URL {
-        let projectURL = try createBlankProject(workspaceURL: workspaceURL, name: name)
+    static func createProjectFromRun(workspaceURL: URL, sourceURL: URL, name: String, runID: String, dataFile: String, parentDirectory: URL? = nil) throws -> URL {
+        let projectURL = try createBlankProject(workspaceURL: workspaceURL, name: name, parentDirectory: parentDirectory)
 
         let names = [
             "run\(runID).mod", "run\(runID).lst", "run\(runID).ext", "run\(runID).cov",
-            dataFile, "project_config.json", "poppk_rules.json"
+            dataFile, "project_config.json"
         ]
         for fileName in names {
             let source = sourceURL.appendingPathComponent(fileName)
@@ -366,27 +431,56 @@ struct ProjectScanner {
         return projectURL
     }
 
-    static func createAutomationDemoProject(workspaceURL: URL, sourceURL: URL) throws -> URL {
+    static func createAutomationDemoProject(workspaceURL: URL, sourceURL: URL, dataFileName: String) throws -> URL {
         let stamp = DateFormatter.automationStamp.string(from: Date())
         let projectURL = try createBlankProject(workspaceURL: workspaceURL, name: "AutoModel_NMData_\(stamp)")
-        try copyModelingInputs(to: projectURL, sourceURL: sourceURL)
         try removeModelArtifacts(in: projectURL)
+
+        // Copy the user's actual dataset into the project (not a hardcoded demo file)
+        let copied = try copyDataFile(dataFileName, to: projectURL, sourceURL: sourceURL)
+
         let automationMetadata = """
         {
           "kind": "AutoPMX automated model-building project",
-          "data_file": "NM_dat_new.csv",
+          "data_file": "\(dataFileName)",
           "created_at": "\(stamp)",
           "start_run": "001"
         }
         """
         try automationMetadata.write(to: projectURL.appendingPathComponent(".autopmx_automation.json"), atomically: true, encoding: .utf8)
+
+        if !copied {
+            // Write a placeholder message so the user knows to import their dataset
+            let readme = "AutoPMX automated modeling project — created \(stamp)\n\nPlease place your modeling dataset as \(dataFileName) in this directory before starting the run."
+            try readme.write(to: projectURL.appendingPathComponent("README.txt"), atomically: true, encoding: .utf8)
+        }
+
+        // Update project_config.json with the actual data file name
+        updateProjectConfig(projectURL: projectURL, dataFileName: dataFileName)
+
         return projectURL
     }
 
+    /// Insert or update the `data_file` field in the project's project_config.json.
+    private static func updateProjectConfig(projectURL: URL, dataFileName: String) {
+        let configURL = projectURL.appendingPathComponent("project_config.json")
+        guard let data = try? Data(contentsOf: configURL),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        var config = raw
+        config["data_file"] = dataFileName
+        if let updated = try? JSONSerialization.data(withJSONObject: config, options: .prettyPrinted) {
+            try? updated.write(to: configURL)
+        }
+    }
+
     static func pythonExecutable(projectURL: URL, workspaceURL: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser
         let candidates = [
             projectURL.appendingPathComponent(".venv/bin/python").path,
             workspaceURL.appendingPathComponent(".venv/bin/python").path,
+            home.appendingPathComponent("miniconda3/bin/python3").path,
+            home.appendingPathComponent("anaconda3/bin/python3").path,
+            home.appendingPathComponent("mambaforge/bin/python3").path,
             "/opt/homebrew/bin/python3",
             "/usr/local/bin/python3",
             "/usr/bin/python3"
@@ -394,12 +488,13 @@ struct ProjectScanner {
         return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? "python3"
     }
 
-    static func createBlankProject(workspaceURL: URL, name: String) throws -> URL {
+    static func createBlankProject(workspaceURL: URL, name: String, parentDirectory: URL? = nil) throws -> URL {
         let safeName = name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: #"[^A-Za-z0-9_.-]+"#, with: "_", options: .regularExpression)
         let projectName = safeName.isEmpty ? "AutoPMX_Project" : safeName
-        let projectURL = workspaceURL.appendingPathComponent("AutoPMX_Projects").appendingPathComponent(projectName)
+        let baseDir = parentDirectory ?? workspaceURL.appendingPathComponent("AutoPMX_Projects")
+        let projectURL = baseDir.appendingPathComponent(projectName)
         try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
 
         let configURL = projectURL.appendingPathComponent("project_config.json")
@@ -408,8 +503,12 @@ struct ProjectScanner {
             {
               "project_name": "\(projectName)",
               "units": {
-                "time": "Time (h)",
-                "conc": "Concentration"
+                "dose": "mg",
+                "amt": "mg",
+                "conc": "µg/mL",
+                "time": "h",
+                "lloq_value": "",
+                "lloq_unit": "µg/mL"
               },
               "grouping": {
                 "factor": "STUDY",
@@ -427,7 +526,7 @@ struct ProjectScanner {
 
         let metadata = #"{"name":"\#(projectName)","kind":"AutoPMX native project"}"#
         try metadata.write(to: projectURL.appendingPathComponent(".autopmx_project.json"), atomically: true, encoding: .utf8)
-        try? copyModelingInputs(to: projectURL, sourceURL: workspaceURL)
+        try? copyKnowledgeBase(to: projectURL, sourceURL: workspaceURL)
         return projectURL
     }
 
@@ -450,7 +549,8 @@ struct ProjectScanner {
         if ["csv", "xlsx"].contains(ext) ||
            upper.hasPrefix("SDTAB") || upper.hasPrefix("PATAB") ||
            upper.hasPrefix("CATAB") || upper.hasPrefix("COTAB") ||
-           upper.hasPrefix("000") { return .data }
+           upper.hasPrefix("000") ||
+           (ext == "eta" && upper.hasPrefix("RUN")) { return .data }
         if ["jpg", "jpeg", "png", "pdf"].contains(ext) { return .figures }
         if ["md", "docx"].contains(ext) { return .reports }
         return nil
@@ -463,25 +563,26 @@ struct ProjectScanner {
             .filter { !$0.isEmpty }
     }
 
-    private static func ruleSourceCandidates(source: String, projectURL: URL, workspaceURL: URL) -> [URL] {
+    private static func ruleSourceCandidates(source: String, projectURL: URL, workspaceURL: URL, knowledgeBaseURL: URL? = nil) -> [URL] {
+        // User-uploaded rule: an explicit absolute path the user chose. Respect it as-is.
         if source.hasPrefix("/") {
             return [URL(fileURLWithPath: source)]
         }
-        var candidates: [URL] = [
-            projectURL.appendingPathComponent(source),
-            workspaceURL.appendingPathComponent(source)
-        ]
-        // Also search in app bundle Resources for built-in rule files
+        // Built-in rule (e.g. "poppk_rules.json"): resolve ONLY from the app's bundled
+        // Resources. It must NOT be picked up from any project / workspace / knowledge-base
+        // path — those files are not rules we authored and belong in the user's workspace.
         if let bundleURL = Bundle.main.resourceURL?.appendingPathComponent(source) {
-            candidates.append(bundleURL)
+            return [bundleURL]
         }
-        return candidates
+        return []
     }
 
-    private static func isRuleSourceAllowed(_ url: URL, projectURL: URL, workspaceURL: URL) -> Bool {
-        if isInside(url, root: projectURL) || isInside(url, root: workspaceURL) { return true }
-        // Allow rule files bundled in the app's Resources
+    private static func isRuleSourceAllowed(_ url: URL, projectURL: URL, workspaceURL: URL, knowledgeBaseURL: URL? = nil) -> Bool {
+        // Built-in rules bundled with the app are always allowed.
         if let bundleRes = Bundle.main.resourceURL, isInside(url, root: bundleRes) { return true }
+        // User-uploaded rules are explicit absolute paths the user chose — allowed.
+        if url.path.hasPrefix("/") { return true }
+        // Project / workspace / knowledge-base paths are NOT allowed as rule sources.
         return false
     }
 
@@ -577,20 +678,52 @@ struct ProjectScanner {
         return String(text[captureRange])
     }
 
-    private static func copyModelingInputs(to projectURL: URL, sourceURL: URL) throws {
+    /// Resolve a demo seed file: prefer the user's workspace copy, but fall back
+    /// to the bundled DemoSeed folder so the demo works on a fresh install where
+    /// the workspace has not been populated yet.
+    private static func resolveDemoSource(_ fileName: String, workspace: URL) -> URL? {
+        let ws = workspace.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: ws.path) { return ws }
+        if let res = Bundle.main.resourceURL?
+            .appendingPathComponent("DemoSeed")
+            .appendingPathComponent(fileName),
+           FileManager.default.fileExists(atPath: res.path) {
+            return res
+        }
+        return nil
+    }
+
+    /// Copy knowledge-base files (rules, model library) into a project.
+    /// Note: poppk_rules.json is NOT copied — it is always resolved from the app bundle
+    /// at runtime via ruleSourceCandidates(). Copying it to every project is unnecessary.
+    /// Does NOT copy dataset files — the caller is responsible for providing the dataset separately.
+    private static func copyKnowledgeBase(to projectURL: URL, sourceURL: URL) throws {
         let fileNames = [
-            "NM_dat_new.csv", "project_config.json", "poppk_rules.json"
+            "project_config.json"
         ]
         for fileName in fileNames {
-            let src = sourceURL.appendingPathComponent(fileName)
+            guard let src = resolveDemoSource(fileName, workspace: sourceURL) else { continue }
             let dst = projectURL.appendingPathComponent(fileName)
-            if FileManager.default.fileExists(atPath: src.path) {
-                if FileManager.default.fileExists(atPath: dst.path) {
-                    try FileManager.default.removeItem(at: dst)
-                }
-                try FileManager.default.copyItem(at: src, to: dst)
+            if FileManager.default.fileExists(atPath: dst.path) {
+                try FileManager.default.removeItem(at: dst)
             }
+            try FileManager.default.copyItem(at: src, to: dst)
         }
+    }
+
+    /// Copy the user's modeling dataset into the project.
+    /// Looks for the file at sourceURL first; falls back to DemoSeed only for demo cases.
+    private static func copyDataFile(_ dataFileName: String, to projectURL: URL, sourceURL: URL) throws -> Bool {
+        let srcFile = sourceURL.appendingPathComponent(dataFileName)
+        if FileManager.default.fileExists(atPath: srcFile.path) {
+            let dst = projectURL.appendingPathComponent(dataFileName)
+            if FileManager.default.fileExists(atPath: dst.path) {
+                try FileManager.default.removeItem(at: dst)
+            }
+            try FileManager.default.copyItem(at: srcFile, to: dst)
+            return true
+        }
+        return false
     }
 
     private static func removeModelArtifacts(in projectURL: URL) throws {
@@ -602,7 +735,7 @@ struct ProjectScanner {
             let lower = name.lowercased()
             let isRunArtifact = lower.range(of: #"^run\d+\.(mod|lst|ext|cov|coi|cor|phi)$"#, options: .regularExpression) != nil
             let isNonmemTable = lower.range(of: #"^(sdtab|patab|catab|cotab)\d+$"#, options: .regularExpression) != nil
-                || lower.range(of: #"^\d+\.eta$"#, options: .regularExpression) != nil
+                || lower.range(of: #"^(?:\d+|run\d+)\.eta$"#, options: .regularExpression) != nil
             let isRunDirectory = isDirectory && (
                 lower.range(of: #"^nonmem_run_\d+$"#, options: .regularExpression) != nil
                     || lower.range(of: #"^vpc_dir_\d+$"#, options: .regularExpression) != nil
@@ -619,25 +752,25 @@ struct ProjectScanner {
         let fileNames = [
             "run38.mod", "run38.lst", "run38.ext", "run38.cov",
             "run41.mod", "run41.lst", "run41.ext", "run41.cov",
-            "NM_dat_new.csv", "project_config.json", "poppk_rules.json"
+            "NM_dat_new.csv", "project_config.json"
         ]
         for fileName in fileNames {
-            let src = sourceURL.appendingPathComponent(fileName)
+            guard let src = resolveDemoSource(fileName, workspace: sourceURL) else { continue }
             let dst = demoURL.appendingPathComponent(fileName)
-            if FileManager.default.fileExists(atPath: src.path), !FileManager.default.fileExists(atPath: dst.path) {
+            if !FileManager.default.fileExists(atPath: dst.path) {
                 try FileManager.default.copyItem(at: src, to: dst)
             }
         }
         let run31URL = demoURL.appendingPathComponent("run31.mod")
         if !FileManager.default.fileExists(atPath: run31URL.path) {
-            let sourceRun38 = sourceURL.appendingPathComponent("run38.mod")
-            let base = (try? String(contentsOf: sourceRun38, encoding: .utf8)) ?? defaultRun31ControlStream()
+            let sourceRun38 = resolveDemoSource("run38.mod", workspace: sourceURL)
+            let base = (try? String(contentsOf: sourceRun38 ?? URL(fileURLWithPath: "/dev/null"), encoding: .utf8)) ?? defaultRun31ControlStream()
             let run31 = base
                 .replacingOccurrences(of: "Based on: run33", with: "Based on: Demo baseline")
                 .replacingOccurrences(of: "Description: PK Basic model QC FIX_add", with: "Description: Demo starting model for AI automation")
                 .replacingOccurrences(of: #"FILE=SDTAB\d+"#, with: "FILE=SDTAB31", options: .regularExpression)
                 .replacingOccurrences(of: #"FILE=PATAB\d+"#, with: "FILE=PATAB31", options: .regularExpression)
-                .replacingOccurrences(of: #"FILE=000\d+\.ETA"#, with: "FILE=00031.ETA", options: .regularExpression)
+                .replacingOccurrences(of: #"FILE=(?:000|run)\d+\.ETA"#, with: "FILE=run31.ETA", options: .regularExpression)
                 .replacingOccurrences(of: #"FILE=CATAB\d+"#, with: "FILE=CATAB31", options: .regularExpression)
                 .replacingOccurrences(of: #"FILE=COTAB\d+"#, with: "FILE=COTAB31", options: .regularExpression)
                 .replacingOccurrences(of: #"\$DATA\s+\S+"#, with: "$DATA NM_dat_new.csv", options: .regularExpression)
@@ -688,6 +821,7 @@ struct ProjectScanner {
         $COV
         $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=SDTAB31 FORMAT=s1PE14.7
         $TABLE ID CL V1 Q V2 ETA1 ETA2 ETA3 ETA4 NOPRINT NOAPPEND ONEHEADER FILE=PATAB31
+        $TABLE ID ETA1 ETA2 ETA3 ETA4 FIRSTONLY NOAPPEND NOPRINT FILE=run31.ETA
         """
     }
 }
