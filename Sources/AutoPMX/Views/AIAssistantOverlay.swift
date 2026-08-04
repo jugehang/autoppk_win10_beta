@@ -2669,6 +2669,48 @@ struct BaseModelConfirmView: View {
     }
 }
 
+struct SCMFinalModelConfirmView: View {
+    @EnvironmentObject private var store: WorkbenchStore
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(.green)
+            Text(L10n.scmFinalConfirmTitle)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(Color.adaptiveSheetText)
+            Text(String(format: L10n.scmFinalConfirmBody, store.scmFinalModelRunID))
+                .font(.system(size: 13))
+                .foregroundStyle(Color.adaptiveSheetText)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 12) {
+                Button(L10n.scmFinalConfirmLater, role: .cancel) {
+                    store.cancelSCMFinalModelAnalysis()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
+                Button(L10n.scmFinalConfirmContinue) {
+                    store.confirmSCMFinalModelAnalysis()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.green)
+            }
+        }
+        .padding(28)
+        .frame(width: 460)
+        .background(LiquidGlassBackdrop())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+}
+
 // MARK: - Run Picker Sheet for Diagnostic Shortcuts
 
 struct RunPickerSheet: View {

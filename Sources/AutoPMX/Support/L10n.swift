@@ -315,6 +315,10 @@ enum L10n {
     static var scmEtaSuggestionHint: String { t("scm.etaSuggestionHint") }
     static var scmEtaApplySuggestion: String { t("scm.etaApplySuggestion") }
     static var scmEtaResetAll: String { t("scm.etaResetAll") }
+    static var scmFinalConfirmTitle: String { t("scm.finalConfirmTitle") }
+    static var scmFinalConfirmBody: String { t("scm.finalConfirmBody") }
+    static var scmFinalConfirmContinue: String { t("scm.finalConfirmContinue") }
+    static var scmFinalConfirmLater: String { t("scm.finalConfirmLater") }
     static var ctxUsagePanel: String { t("ctx.usagePanel") }
     static var ctxWindowLimit: String { t("ctx.windowLimit") }
     static var ctxRuleContext: String { t("ctx.ruleContext") }
@@ -1002,6 +1006,10 @@ enum L10n {
         "scm.etaSuggestionHint": [.zhCN: "下方协变量已按建议预选；你可以调整后再开始 SCM。", .en: "Covariates below are preselected from the ETA screening; adjust them before starting SCM."],
         "scm.etaApplySuggestion": [.zhCN: "采用建议", .en: "Use Suggestion"],
         "scm.etaResetAll": [.zhCN: "改回全部考察", .en: "Examine All"],
+        "scm.finalConfirmTitle": [.zhCN: "SCM Replication 完成", .en: "SCM Replication Complete"],
+        "scm.finalConfirmBody": [.zhCN: "是否以 run%@ 作为最终模型，继续执行验证、Bootstrap 和最终报告输出？", .en: "Use run%@ as the final model and continue with validation, Bootstrap, and final report output?"],
+        "scm.finalConfirmContinue": [.zhCN: "继续验证并生成报告", .en: "Continue Validation & Report"],
+        "scm.finalConfirmLater": [.zhCN: "暂不继续", .en: "Not Now"],
         "ctx.usagePanel": [.zhCN: "上下文使用情况", .en: "Context Usage"],
         "ctx.windowLimit": [.zhCN: "上下文窗口上限", .en: "Context Window Limit"],
         "ctx.ruleContext": [.zhCN: "规则/知识上下文", .en: "Rules/Knowledge Context"],

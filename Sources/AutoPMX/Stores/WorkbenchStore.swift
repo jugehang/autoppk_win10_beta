@@ -455,6 +455,9 @@ final class WorkbenchStore: ObservableObject {
     @Published var etaScreeningOptionalCovariates: [String] = []
     @Published var etaScreeningSummary = ""
     @Published var isSCMRunning = false
+    @Published var showSCMFinalModelConfirm = false
+    @Published var scmFinalModelRunID = ""
+    @Published var scmFinalModelPreviousRun = ""
     /// True while a bootstrap resampling + AI interpretation job is in flight (used to
     /// keep the floating progress popup alive when the chat panel is hidden).
     @Published var isBootstrapRunning = false
@@ -6767,10 +6770,18 @@ final class WorkbenchStore: ObservableObject {
                 // ── DuDu replicates SCM's forward inclusion / backward elimination in the
                 // project path (writing its own mods, running them), then compares its final
                 // model with SCM's final_backward.mod. ──
-                _ = await verifySCMByReplication(baseRun: runID, dataFile: resolvedData)
+                let finalRun = await verifySCMByReplication(baseRun: runID, dataFile: resolvedData)
                 isSCMRunning = false
                 duDuMood = .happy
-                automationStep = "Idle"
+                if let finalRun, !finalRun.isEmpty {
+                    automationStep = "SCM replication complete — awaiting final validation choice"
+                    scmFinalModelRunID = finalRun
+                    scmFinalModelPreviousRun = runID
+                    showSCMFinalModelConfirm = true
+                    assistantMessages.append(AssistantMessage(role: .system, text: "SCM replication 已完成。是否以 run\(finalRun) 作为最终模型，继续验证并输出报告？"))
+                } else {
+                    automationStep = "Idle"
+                }
                 refreshWorkspace()
                 finalizeBenchmarkAfterSCM(success: true, cancelled: false)
             } else {
@@ -6843,6 +6854,24 @@ final class WorkbenchStore: ObservableObject {
         runner.append("SCM: user requested cancellation.")
         isSCMRunning = false
         duDuMood = .happy
+    }
+
+    func confirmSCMFinalModelAnalysis() {
+        let runID = scmFinalModelRunID
+        let previousRun = scmFinalModelPreviousRun
+        showSCMFinalModelConfirm = false
+        guard !runID.isEmpty else { return }
+        runner.append("SCM replication complete. Starting final model validation and report output for run\(runID).")
+        assistantMessages.append(AssistantMessage(role: .system, text: "🚀 正在以 run\(runID) 作为最终模型，继续执行验证、Bootstrap 和报告输出。"))
+        startFinalModelPackage(for: runID, previousRun: previousRun)
+    }
+
+    func cancelSCMFinalModelAnalysis() {
+        showSCMFinalModelConfirm = false
+        scmFinalModelRunID = ""
+        scmFinalModelPreviousRun = ""
+        runner.append("SCM replication finished; final model validation skipped.")
+        assistantMessages.append(AssistantMessage(role: .system, text: "SCM replication 已完成。未继续最终模型验证和报告输出。"))
     }
 
     func confirmSCMRun() {

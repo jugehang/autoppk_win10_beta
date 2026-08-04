@@ -52,6 +52,9 @@ struct ContentView: View {
         .sheet(isPresented: $store.isBootstrapSheetPresented) {
             BootstrapSetupSheet().environmentObject(store)
         }
+        .sheet(isPresented: $store.showSCMFinalModelConfirm) {
+            SCMFinalModelConfirmView().environmentObject(store)
+        }
         .alert("Move File to Trash?", isPresented: $store.isDeleteConfirmationPresented) {
             Button("Cancel", role: .cancel) { store.cancelDelete() }
             Button("Move to Trash", role: .destructive) { store.confirmDeletePendingAsset() }
