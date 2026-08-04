@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK = os.path.join(ROOT, ".build/dmginst")
-DMG = os.path.join(ROOT, "DuPMx_1.1_1.1.dmg")
+DMG = os.path.join(ROOT, "DuPMx_1.0_1.2.dmg")
 PASSWORD = "zbdd666"
 APP = "AutoPMX"
 
@@ -191,7 +191,7 @@ print(f"""
 ============================================
 
 How to install:
-  1. Double-click DuPMx_1.1_1.1.dmg
+  1. Double-click DuPMx_1.0_1.2.dmg
   2. Enter password: zbdd666
   3. Drag AutoPMX.app \u2192 Applications
   4. If macOS says "damaged", open Terminal and run:

@@ -16,13 +16,13 @@ APP_NAME="AutoPMX"
 PASSWORD="zbdd666"
 
 # --- Installer package naming -------------------------------------------------
-# Format: <PKG_PREFIX>_<APP_VERSION>_<BETA_TAG>.dmg  e.g. DuPMx_1.1_1.1.dmg
-# - APP_VERSION : R&D version, set once (default 1.1). Change rarely.
+# Format: <PKG_PREFIX>_<APP_VERSION>_<BETA_TAG>.dmg  e.g. DuPMx_1.0_1.2.dmg
+# - APP_VERSION : R&D version, set once (default 1.0). Change rarely.
 # - BETA_TAG    : internal-test codename, change per beta build (e.g. 0.8).
 #   → For a new internal test you normally ONLY edit BETA_TAG below.
 PKG_PREFIX="DuPMx"
-APP_VERSION="1.1"
-BETA_TAG="1.1"
+APP_VERSION="1.0"
+BETA_TAG="1.2"
 DMG_NAME="${PKG_PREFIX}_${APP_VERSION}_${BETA_TAG}"
 
 WORK="$ROOT/.build/dmginst"
