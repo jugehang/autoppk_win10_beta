@@ -551,7 +551,9 @@ struct ProjectScanner {
            upper.hasPrefix("CATAB") || upper.hasPrefix("COTAB") ||
            upper.hasPrefix("000") ||
            (ext == "eta" && upper.hasPrefix("RUN")) { return .data }
-        if ["jpg", "jpeg", "png", "pdf"].contains(ext) { return .figures }
+        if lowerPath.contains("/reports/"), ["md", "docx", "pdf"].contains(ext) { return .reports }
+        if ["jpg", "jpeg", "png"].contains(ext) { return .figures }
+        if ext == "pdf" { return .figures }
         if ["md", "docx"].contains(ext) { return .reports }
         return nil
     }

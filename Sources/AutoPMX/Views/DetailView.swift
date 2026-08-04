@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Quartz
+import WebKit
 
 // MARK: - Detail View
 
@@ -21,6 +22,9 @@ struct DetailView: View {
                 }
                 Spacer()
                 if let asset = store.selectedAsset {
+                    if asset.url.pathExtension.lowercased() == "md" {
+                        detailActionButton("PDF", "doc.richtext") { store.exportMarkdownAsPDF(asset) }
+                    }
                     detailActionButton("Open", "arrow.up.forward.app") { store.openAsset(asset) }
                     detailActionButton("Reveal", "finder") { NSWorkspace.shared.activateFileViewerSelecting([asset.url]) }
                     Menu {
@@ -61,6 +65,9 @@ struct DetailView: View {
             let ext = asset.url.pathExtension.lowercased()
             if ext == "csv" {
                 CSVTablePreview(asset: asset)
+            } else if ext == "md" {
+                MarkdownWebPreview(url: asset.url)
+                    .id(asset.id)
             } else {
                 TextEditor(text: $store.previewText)
                     .font(.system(size: 12, design: .monospaced))
@@ -190,6 +197,41 @@ final class CenteredScrollView: NSScrollView {
             docView.frame.origin = NSPoint(x: 0, y: 0)
             contentView.bounds.origin = NSPoint(x: -offsetX, y: -offsetY)
         }
+    }
+}
+
+// MARK: - Markdown Preview
+
+struct MarkdownWebPreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.allowsMagnification = true
+        webView.setValue(false, forKey: "drawsBackground")
+        load(url: url, into: webView)
+        context.coordinator.loadedURL = url
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        guard context.coordinator.loadedURL != url else { return }
+        load(url: url, into: nsView)
+        context.coordinator.loadedURL = url
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    private func load(url: URL, into webView: WKWebView) {
+        guard let markdown = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let html = MarkdownPDFExporter.html(markdown: markdown, title: url.deletingPathExtension().lastPathComponent)
+        webView.loadHTMLString(html, baseURL: url.deletingLastPathComponent())
+    }
+
+    final class Coordinator {
+        var loadedURL: URL?
     }
 }
 

@@ -1706,6 +1706,28 @@ final class WorkbenchStore: ObservableObject {
         }
     }
 
+    func exportMarkdownAsPDF(_ asset: ProjectAsset) {
+        guard asset.url.pathExtension.lowercased() == "md",
+              let markdown = try? String(contentsOf: asset.url, encoding: .utf8) else {
+            runner.append("PDF export failed: selected file is not readable Markdown.")
+            return
+        }
+
+        let pdfURL = asset.url
+            .deletingPathExtension()
+            .appendingPathExtension("pdf")
+        let baseURL = asset.url.deletingLastPathComponent()
+        Task {
+            do {
+                try await MarkdownPDFExporter.exportPDF(markdown: markdown, to: pdfURL, baseURL: baseURL)
+                runner.append("PDF exported: \(pdfURL.lastPathComponent)")
+                refreshWorkspace()
+            } catch {
+                runner.append("PDF export failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func preview(_ asset: ProjectAsset) {
         previewTitle = asset.title
         if asset.isTextPreviewable {
@@ -6378,7 +6400,19 @@ final class WorkbenchStore: ObservableObject {
             runner.append("pandoc not found; DOCX conversion skipped.")
         }
 
-        assistantMessages.append(AssistantMessage(role: .system, text: "✅ 最终 PopPK 报告已生成：\(reportURL.lastPathComponent)"))
+        let pdfURL = reportsDir.appendingPathComponent("Final_PopPK_Report_Run\(runID).pdf")
+        do {
+            try await MarkdownPDFExporter.exportPDF(
+                markdown: md,
+                to: pdfURL,
+                baseURL: projectURL
+            )
+            runner.append("Final PopPK PDF written: \(pdfURL.path)")
+        } catch {
+            runner.append("Final PopPK PDF conversion failed: \(error.localizedDescription)")
+        }
+
+        assistantMessages.append(AssistantMessage(role: .system, text: "✅ 最终 PopPK 报告已生成：\(reportURL.lastPathComponent) / \(pdfURL.lastPathComponent)"))
         refreshWorkspace()
     }
 
