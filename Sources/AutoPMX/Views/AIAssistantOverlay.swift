@@ -828,16 +828,14 @@ struct AssistantPanel: View {
                             }
                         }
                     } label: {
-                        Image(systemName: "arrow.down.to.line")
-                            .font(.system(size: 11, weight: .semibold))
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 26))
                             .foregroundStyle(Color.blue)
-                            .frame(width: 24, height: 24)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().stroke(Color.blue.opacity(0.2), lineWidth: 0.5))
+                            .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
-                    .padding(.trailing, 10)
-                    .padding(.bottom, 10)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 12)
                     .help("Jump to bottom")
                 }
             }
