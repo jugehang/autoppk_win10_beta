@@ -834,7 +834,7 @@ struct AssistantPanel: View {
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
-                    .padding(.trailing, 12)
+                    .padding(.trailing, 15)
                     .padding(.bottom, 12)
                     .help("Jump to bottom")
                 }
