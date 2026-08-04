@@ -6422,6 +6422,9 @@ final class WorkbenchStore: ObservableObject {
 
         var recommended = Set<String>()
         var optional = Set<String>()
+        let paramIdx = header.firstIndex(of: "parameter")
+        let corrIdx = header.firstIndex(of: "correlation")
+        var statsByCovariate: [String: [String]] = [:]
         for line in lines.dropFirst() {
             let fields = line.components(separatedBy: "\t")
             guard fields.count > max(covIdx, pIdx, sigIdx) else { continue }
@@ -6429,9 +6432,23 @@ final class WorkbenchStore: ObservableObject {
             guard !cov.isEmpty else { continue }
             let significant = fields[sigIdx].lowercased() == "true"
             let pValue = Double(fields[pIdx])
+            let corrValue = corrIdx.flatMap { idx in
+                fields.indices.contains(idx) ? Double(fields[idx]) : nil
+            }
+            if let paramIdx, fields.indices.contains(paramIdx) {
+                let param = fields[paramIdx]
+                let pText = pValue.map { $0 < 0.001 ? "<0.001" : String(format: "%.3g", $0) } ?? "n/a"
+                let corrText = corrValue.map { String(format: "%.2f", $0) } ?? ""
+                let stat = corrText.isEmpty
+                    ? "\(param): p=\(pText)"
+                    : "\(param): p=\(pText), r=\(corrText)"
+                statsByCovariate[cov, default: []].append(stat)
+            }
             if significant || (pValue.map { $0 < 0.05 } ?? false) {
                 recommended.insert(cov)
             } else if let pValue, pValue < 0.10 {
+                optional.insert(cov)
+            } else if let corrValue, abs(corrValue) >= 0.20 {
                 optional.insert(cov)
             }
         }
@@ -6446,17 +6463,24 @@ final class WorkbenchStore: ObservableObject {
         etaScreeningRecommendedCovariates = recommendedList
         etaScreeningOptionalCovariates = optionalList
 
+        func detailText(_ covariates: [String]) -> String {
+            covariates.map { cov in
+                let stats = statsByCovariate[cov] ?? []
+                return stats.isEmpty ? cov : "\(cov): \(stats.joined(separator: "; "))"
+            }.joined(separator: "；")
+        }
+
         let isEnglish = LanguageStore.shared.language == .en
         if !recommendedList.isEmpty {
             etaScreeningRecommendation = isEnglish
-                ? "ETA screening suggests prioritizing: \(recommendedList.joined(separator: ", "))."
-                    + (optionalList.isEmpty ? "" : " Optional: \(optionalList.joined(separator: ", ")).")
-                : "ETA 预筛选建议优先考察：\(recommendedList.joined(separator: "、"))。"
-                    + (optionalList.isEmpty ? "" : " 可选：\(optionalList.joined(separator: "、"))。")
+                ? "ETA screening suggests prioritizing: \(detailText(recommendedList))."
+                    + (optionalList.isEmpty ? "" : " Optional/trend: \(detailText(optionalList)).")
+                : "ETA 预筛选建议优先考察：\(detailText(recommendedList))。"
+                    + (optionalList.isEmpty ? "" : " 可选/趋势：\(detailText(optionalList))。")
         } else if !optionalList.isEmpty {
             etaScreeningRecommendation = isEnglish
-                ? "No strong ETA signal; optional covariates: \(optionalList.joined(separator: ", "))."
-                : "ETA 预筛选未见 p<0.05 的强信号；可选考察：\(optionalList.joined(separator: "、"))。"
+                ? "No strong p<0.05 signal; optional covariates with trend: \(detailText(optionalList))."
+                : "ETA 预筛选未见 p<0.05 的强信号；可选/趋势：\(detailText(optionalList))。"
         } else {
             etaScreeningRecommendation = isEnglish
                 ? "No significant ETA-covariate associations were found."
@@ -6610,7 +6634,10 @@ final class WorkbenchStore: ObservableObject {
         Rules:
         - Categorical covariates (SEX/STUDY) use Kruskal-Wallis. p < 0.05 suggests the ETA differs by group and the covariate deserves SCM evaluation.
         - Continuous covariates (WT/AGE/etc.) use linear regression of ETA on the covariate. Significant p and meaningful |correlation| suggest SCM evaluation.
-        - Do not require SCM evaluation just because p < 0.05; also consider biological plausibility, parameter, correlation strength, and sample size.
+        - Fixed ETAs have already been removed from the summary, so do not recommend screening those parameters again.
+        - Missing covariate values are excluded; do not ask the user to fill them.
+        - Treat p = 0.05-0.10 or |correlation| >= 0.20 as an optional trend, especially when several PK parameters show the same direction.
+        - Do not require SCM evaluation just because p < 0.05; also consider biological plausibility, parameter, correlation strength, sample size, and visible trends.
 
         ETA-covariate screening summary:
         \(summary.prefix(12_000))
@@ -6626,7 +6653,10 @@ final class WorkbenchStore: ObservableObject {
         规则：
         - 分类协变量（SEX/STUDY）使用 Kruskal-Wallis，p < 0.05 提示不同组别 ETA 有差异，值得在 SCM 中考察。
         - 连续协变量（WT/AGE 等）使用 ETA 对协变量的线性回归，p 显著且相关系数有实际意义时建议在 SCM 中考察。
-        - 不能只看 p < 0.05，还要结合生物学合理性、参数、相关强度和样本量。
+        - 固定 ETA 已从结果中排除，不要再建议考察这些参数。
+        - 缺失协变量已剔除，不要要求用户补数据。
+        - p 在 0.05-0.10 或 |r| >= 0.20 时视为可选趋势，尤其当多个 PK 参数方向一致时更值得关注。
+        - 不能只看 p < 0.05，还要结合生物学合理性、参数、相关强度、样本量和图中可见趋势。
 
         ETA 协变量预筛选结果：
         \(summary.prefix(12_000))
