@@ -1562,7 +1562,7 @@ struct BootstrapSetupSheet: View {
             QuickSheetCard(title: L10n.pickerModel) {
                 Picker("", selection: $selectedRunID) {
                     ForEach(availableRuns, id: \.self) { runID in
-                        Text("run\(runID)").tag(runID)
+                        Text("run\(runID)\(store.isAIRun(runID) ? " (AI)" : "")").tag(runID)
                     }
                 }
                 .pickerStyle(.menu)
@@ -1619,9 +1619,13 @@ struct BootstrapSetupSheet: View {
         )
         .onAppear {
             if selectedRunID.isEmpty {
-                selectedRunID = availableRuns.contains(store.bootstrapSheetRunID)
-                    ? store.bootstrapSheetRunID
-                    : (availableRuns.contains(store.currentRun) ? store.currentRun : (availableRuns.first ?? ""))
+                if availableRuns.contains(store.bootstrapSheetRunID) {
+                    selectedRunID = store.bootstrapSheetRunID
+                } else if let aiRun = store.preferredAIModelRunID, availableRuns.contains(aiRun) {
+                    selectedRunID = aiRun
+                } else {
+                    selectedRunID = availableRuns.contains(store.currentRun) ? store.currentRun : (availableRuns.first ?? "")
+                }
             }
         }
     }
@@ -1666,7 +1670,9 @@ struct AutomationOptionsSheetView: View {
             if store.automationStartMode == .selectedRun {
                 QuickSheetCard(title: L10n.autoParentModel) {
                     Picker("", selection: $store.automationStartRunID) {
-                        ForEach(store.automationAvailableRunIDs, id: \.self) { r in Text("run\(r)").tag(r) }
+                        ForEach(store.automationAvailableRunIDs, id: \.self) { r in
+                            Text("run\(r)\(store.isAIRun(r) ? " (AI)" : "")").tag(r)
+                        }
                     }
                     .pickerStyle(.menu)
                     .disabled(store.automationAvailableRunIDs.isEmpty)
@@ -1864,7 +1870,8 @@ struct SCMSetupSheetView: View {
             QuickSheetCard(title: L10n.scmBaseModel) {
                 Picker("", selection: $store.scmModelRunID) {
                     ForEach(store.availableModFiles(), id: \.self) { mod in
-                        Text(mod).tag(mod.replacingOccurrences(of: "run", with: "").replacingOccurrences(of: ".mod", with: ""))
+                        let runID = mod.replacingOccurrences(of: "run", with: "").replacingOccurrences(of: ".mod", with: "")
+                        Text("\(mod)\(store.isAIRun(runID) ? " (AI)" : "")").tag(runID)
                     }
                 }
                 .pickerStyle(.menu)
@@ -2838,6 +2845,13 @@ struct RunPickerSheet: View {
                                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                                 .background(Capsule().fill(.blue.opacity(0.12)))
                                         }
+                                        if store.isAIRun(runID) {
+                                            Text("AI")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(Capsule().fill(.blue))
+                                        }
                                         Image(systemName: "chevron.right")
                                             .font(.system(size: 10, weight: .semibold))
                                             .foregroundStyle(Color.adaptiveSheetText)
@@ -2865,7 +2879,11 @@ struct RunPickerSheet: View {
         )
         .onAppear {
             if bootstrapRunID.isEmpty {
-                bootstrapRunID = availableRuns.contains(store.currentRun) ? store.currentRun : (availableRuns.first ?? "")
+                if let aiRun = store.preferredAIModelRunID, availableRuns.contains(aiRun) {
+                    bootstrapRunID = aiRun
+                } else {
+                    bootstrapRunID = availableRuns.contains(store.currentRun) ? store.currentRun : (availableRuns.first ?? "")
+                }
             }
         }
     }
@@ -2876,7 +2894,7 @@ struct RunPickerSheet: View {
             QuickSheetCard(title: L10n.pickerModel) {
                 Picker("", selection: $bootstrapRunID) {
                     ForEach(availableRuns, id: \.self) { runID in
-                        Text("run\(runID)").tag(runID)
+                        Text("run\(runID)\(store.isAIRun(runID) ? " (AI)" : "")").tag(runID)
                     }
                 }
                 .pickerStyle(.menu)

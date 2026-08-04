@@ -1686,6 +1686,14 @@ final class WorkbenchStore: ObservableObject {
         aiRecommendedRunIDs.contains(runID)
     }
 
+    /// Latest AI/base-model recommendation that still exists in this project.
+    /// Used as the default selection in model pickers so the analyst can accept
+    /// DuDu's recommendation with one click instead of hunting for it.
+    var preferredAIModelRunID: String? {
+        let candidates = aiRecommendedRunIDs.filter { automationAvailableRunIDs.contains($0) }
+        return candidates.sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }.last
+    }
+
     func togglePinned(_ asset: ProjectAsset) {
         if pinnedAssetIDs.contains(asset.id) {
             pinnedAssetIDs.remove(asset.id)
@@ -2963,7 +2971,10 @@ final class WorkbenchStore: ObservableObject {
             automationDataFile = dataFile
         }
         let runs = automationAvailableRunIDs
-        if isAutomationProject(projectURL), !runs.isEmpty {
+        if let aiRun = preferredAIModelRunID, runs.contains(aiRun) {
+            automationStartMode = .selectedRun
+            automationStartRunID = aiRun
+        } else if isAutomationProject(projectURL), !runs.isEmpty {
             automationStartMode = .continueLatest
             automationStartRunID = runs.contains(currentRun) ? currentRun : (runs.last ?? "")
         } else {
@@ -5937,7 +5948,7 @@ final class WorkbenchStore: ObservableObject {
 
     func presentBootstrapSheet(for runID: String? = nil) {
         guard ensureModelFilesExist() else { return }
-        bootstrapSheetRunID = runID ?? currentRun
+        bootstrapSheetRunID = runID ?? preferredAIModelRunID ?? currentRun
         isBootstrapSheetPresented = true
     }
 
@@ -6385,20 +6396,6 @@ final class WorkbenchStore: ObservableObject {
         let reportURL = reportsDir.appendingPathComponent("Final_PopPK_Report_Run\(runID).md")
         try? md.write(to: reportURL, atomically: true, encoding: .utf8)
         runner.append("Final PopPK report written: \(reportURL.path)")
-
-        let docxURL = reportsDir.appendingPathComponent("Final_PopPK_Report_Run\(runID).docx")
-        let pandocCandidates = [
-            "/opt/homebrew/bin/pandoc",
-            "/usr/local/bin/pandoc",
-            "/usr/bin/pandoc"
-        ]
-        if let pandoc = pandocCandidates.first(where: { FileManager.default.fileExists(atPath: $0) }) {
-            let pandocCommand = "\(shellQuote(pandoc)) \(shellQuote(reportURL.path)) -o \(shellQuote(docxURL.path))"
-            _ = await runner.runAndWait(command: pandocCommand, in: projectURL)
-            runner.append("Final PopPK DOCX written: \(docxURL.path)")
-        } else {
-            runner.append("pandoc not found; DOCX conversion skipped.")
-        }
 
         let pdfURL = reportsDir.appendingPathComponent("Final_PopPK_Report_Run\(runID).pdf")
         do {
@@ -6889,7 +6886,9 @@ final class WorkbenchStore: ObservableObject {
         if let runID {
             scmModelRunID = runID
         } else {
-            scmModelRunID = mods.first?.replacingOccurrences(of: "run", with: "").replacingOccurrences(of: ".mod", with: "") ?? currentRun
+            scmModelRunID = preferredAIModelRunID
+                ?? mods.first?.replacingOccurrences(of: "run", with: "").replacingOccurrences(of: ".mod", with: "")
+                ?? currentRun
         }
         scmDataFileName = csvs.first ?? dataFile
         scmPForward = "0.01"
