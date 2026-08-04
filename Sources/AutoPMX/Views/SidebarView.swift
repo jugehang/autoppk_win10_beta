@@ -99,6 +99,24 @@ struct SidebarAssetRow: View {
                     Text(asset.title)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
+                    if asset.category == .models,
+                       let runID = asset.relatedRunID,
+                       store.isAIRun(runID) {
+                        Text("AI")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                LinearGradient(
+                                    colors: [.blue, .purple],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                in: Capsule()
+                            )
+                            .help("AI recommended model")
+                    }
                     if asset.category == .data,
                        asset.url.pathExtension.lowercased() == "csv",
                        store.dataFile == asset.title {

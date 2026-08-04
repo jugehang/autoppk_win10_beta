@@ -222,6 +222,8 @@ final class WorkbenchStore: ObservableObject {
     /// Per-project color marks for models (key = asset.id / absolute path, value = color name).
     /// Lets the user flag key models in the sidebar Models list.
     @Published var modelMarks: [String: String] = [:]
+    /// Run IDs that DuDu/AutoPMx recommended as base or final covariate models.
+    @Published var aiRecommendedRunIDs: Set<String> = []
     @Published var previewText = "" {
         didSet {
             guard let asset = selectedAsset, asset.isTextPreviewable else { return }
@@ -1649,11 +1651,16 @@ final class WorkbenchStore: ObservableObject {
     /// Load per-project model marks from project_config.json.
     private func loadModelMarks() {
         modelMarks = [:]
+        aiRecommendedRunIDs = []
         let configURL = projectURL.appendingPathComponent("project_config.json")
         guard let data = try? Data(contentsOf: configURL),
-              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let marks = config["model_marks"] as? [String: String] else { return }
-        modelMarks = marks.filter { FileManager.default.fileExists(atPath: $0.key) }
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        if let marks = config["model_marks"] as? [String: String] {
+            modelMarks = marks.filter { FileManager.default.fileExists(atPath: $0.key) }
+        }
+        if let runs = config["ai_recommended_runs"] as? [String] {
+            aiRecommendedRunIDs = Set(runs)
+        }
     }
 
     /// Persist per-project model marks into project_config.json.
@@ -1662,9 +1669,21 @@ final class WorkbenchStore: ObservableObject {
         guard let data = try? Data(contentsOf: configURL),
               var config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         config["model_marks"] = modelMarks
+        config["ai_recommended_runs"] = Array(aiRecommendedRunIDs).sorted()
         if let updated = try? JSONSerialization.data(withJSONObject: config, options: .prettyPrinted) {
             try? updated.write(to: configURL)
         }
+    }
+
+    /// Mark a run as an AI/base-model recommendation so it can be shown in the Models sidebar.
+    func markAIModel(runID: String) {
+        guard !runID.isEmpty else { return }
+        aiRecommendedRunIDs.insert(runID)
+        saveModelMarks()
+    }
+
+    func isAIRun(_ runID: String) -> Bool {
+        aiRecommendedRunIDs.contains(runID)
     }
 
     func togglePinned(_ asset: ProjectAsset) {
@@ -5675,6 +5694,7 @@ final class WorkbenchStore: ObservableObject {
                             automationStep = "Phase 1 complete — awaiting confirmation"
                             baseModelConfirmSummary = summary
                             baseModelConfirmRunID = bestRunID
+                            markAIModel(runID: bestRunID)
                             isBaseModelConfirmPresented = true
                             break
                             }
@@ -5949,6 +5969,7 @@ final class WorkbenchStore: ObservableObject {
     /// the analyst how many bootstrap samples to run before producing the final report.
     func startFinalModelPackage(for runID: String, previousRun: String) {
         guard !runner.isRunning, !isBootstrapSheetPresented else { return }
+        markAIModel(runID: runID)
         bootstrapFinalRunID = runID
         runner.append("=== Final model package for run\(runID): PK parameters + diagnostics ===")
         activateRun(runID)
@@ -6777,6 +6798,7 @@ final class WorkbenchStore: ObservableObject {
                     automationStep = "SCM replication complete — awaiting final validation choice"
                     scmFinalModelRunID = finalRun
                     scmFinalModelPreviousRun = runID
+                    markAIModel(runID: finalRun)
                     showSCMFinalModelConfirm = true
                     assistantMessages.append(AssistantMessage(role: .system, text: "SCM replication 已完成。是否以 run\(finalRun) 作为最终模型，继续验证并输出报告？"))
                 } else {
@@ -6861,6 +6883,7 @@ final class WorkbenchStore: ObservableObject {
         let previousRun = scmFinalModelPreviousRun
         showSCMFinalModelConfirm = false
         guard !runID.isEmpty else { return }
+        markAIModel(runID: runID)
         runner.append("SCM replication complete. Starting final model validation and report output for run\(runID).")
         assistantMessages.append(AssistantMessage(role: .system, text: "🚀 正在以 run\(runID) 作为最终模型，继续执行验证、Bootstrap 和报告输出。"))
         startFinalModelPackage(for: runID, previousRun: previousRun)
@@ -9001,6 +9024,7 @@ final class WorkbenchStore: ObservableObject {
         automationStep = "Phase 1 complete — awaiting confirmation"
         baseModelConfirmSummary = summary
         baseModelConfirmRunID = finalRun
+        markAIModel(runID: finalRun)
         isBaseModelConfirmPresented = true
     }
 
@@ -9017,6 +9041,7 @@ final class WorkbenchStore: ObservableObject {
         automationStep = "Phase 1 complete — awaiting confirmation"
         baseModelConfirmSummary = summary
         baseModelConfirmRunID = finalRun
+        markAIModel(runID: finalRun)
         isBaseModelConfirmPresented = true
     }
 

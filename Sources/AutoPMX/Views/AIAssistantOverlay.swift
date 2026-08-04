@@ -793,29 +793,52 @@ struct AssistantPanel: View {
     // MARK: Messages — iMessage style
     private var messagesView: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(store.assistantMessages) { msg in
-                        iMessageBubble(message: msg)
-                            .id(msg.id)
-                    }
-                    if store.isAssistantThinking || store.isAIThinking {
-                        HStack(alignment: .bottom, spacing: 8) {
-                            duDuAvatarView
-                            TypingIndicator()
-                                .padding(.horizontal, 14).padding(.vertical, 11)
-                                .background(assistantBubbleBackground)
-                            Spacer(minLength: 0)
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(store.assistantMessages) { msg in
+                            iMessageBubble(message: msg)
+                                .id(msg.id)
                         }
-                        .padding(.horizontal, 12)
+                        if store.isAssistantThinking || store.isAIThinking {
+                            HStack(alignment: .bottom, spacing: 8) {
+                                duDuAvatarView
+                                TypingIndicator()
+                                    .padding(.horizontal, 14).padding(.vertical, 11)
+                                    .background(assistantBubbleBackground)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 12)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                }
+                .scrollContentBackground(.hidden)
+                .onChange(of: store.assistantMessages.count) { _ in
+                    if let last = store.assistantMessages.last {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
                 }
-                .padding(.vertical, 12)
-            }
-            .scrollContentBackground(.hidden)
-            .onChange(of: store.assistantMessages.count) { _ in
-                if let last = store.assistantMessages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+
+                if !store.assistantMessages.isEmpty {
+                    Button {
+                        withAnimation {
+                            if let last = store.assistantMessages.last {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down.to.line")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.blue)
+                            .frame(width: 24, height: 24)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Color.blue.opacity(0.2), lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 10)
+                    .help("Jump to bottom")
                 }
             }
         }
