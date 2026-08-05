@@ -34,6 +34,12 @@ import sys
 import tempfile
 from datetime import datetime
 
+try:
+    from model_generator import strip_inline_dataset_rows
+except Exception:
+    def strip_inline_dataset_rows(text):
+        return text
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1422,7 +1428,7 @@ def write_optimized_mod(result, output_path, mod_text):
             out_lines.append(header.rstrip())
             inserted = True
 
-    write_file(output_path, "\n".join(out_lines) + "\n")
+    write_file(output_path, strip_inline_dataset_rows("\n".join(out_lines) + "\n"))
     return output_path
 
 

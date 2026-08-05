@@ -2385,7 +2385,7 @@ struct LLMCommandService {
     /// Only data-like lines are dropped; comments, blanks, and valid record
     /// continuation lines are preserved.
     static func stripInlineDatasetRows(_ controlStream: String) -> String {
-        let lines = controlStream.components(separatedBy: .newlines)
+        let lines = controlStream.components(separatedBy: "\n")
         var output: [String] = []
         var afterInput = false
         var afterData = false
@@ -2425,7 +2425,32 @@ struct LLMCommandService {
             output.append(line)
         }
 
-        return output.joined(separator: "\n")
+        return compactBlankLines(output).joined(separator: "\n")
+    }
+
+    private static func compactBlankLines(_ lines: [String]) -> [String] {
+        var output: [String] = []
+        var lastWasBlank = false
+
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if !lastWasBlank && !output.isEmpty {
+                    output.append("")
+                }
+                lastWasBlank = true
+            } else {
+                if lastWasBlank && !output.isEmpty && output.last != "" {
+                    output.append("")
+                }
+                output.append(line)
+                lastWasBlank = false
+            }
+        }
+
+        while output.last == "" {
+            output.removeLast()
+        }
+        return output
     }
 
     static func sanitizeControlStream(_ content: String, projectURL: URL?, dataFile: String?) -> String {

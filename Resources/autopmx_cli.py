@@ -26,7 +26,12 @@ def _run_validate(args) -> int:
 def _run_generate(args) -> int:
     """Generate a NONMEM .mod file from a template + structured decisions."""
     try:
-        from model_generator import generate_from_template, apply_modifications, Modification
+        from model_generator import (
+            generate_from_template,
+            apply_modifications,
+            strip_inline_dataset_rows,
+            Modification,
+        )
     except ImportError:
         print("model_generator not available", file=sys.stderr)
         return 127
@@ -37,7 +42,7 @@ def _run_generate(args) -> int:
             run_id=args.run,
             data_file=args.data or "NM_dat_new.csv",
         )
-        Path(args.output).write_text(text, encoding="utf-8")
+        Path(args.output).write_text(strip_inline_dataset_rows(text), encoding="utf-8")
         print(f"Generated {args.output}")
         return 0
 
@@ -46,7 +51,7 @@ def _run_generate(args) -> int:
         mods_data = json.loads(args.modifications)
         mods = [Modification(**m) for m in mods_data]
         result = apply_modifications(source, mods)
-        Path(args.output).write_text(result, encoding="utf-8")
+        Path(args.output).write_text(strip_inline_dataset_rows(result), encoding="utf-8")
         print(f"Generated {args.output} from source")
         return 0
 

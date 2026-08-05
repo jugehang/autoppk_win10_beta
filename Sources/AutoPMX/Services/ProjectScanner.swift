@@ -428,6 +428,14 @@ struct ProjectScanner {
             }
         }
 
+        let modDestination = projectURL.appendingPathComponent("run\(runID).mod")
+        if let modText = try? String(contentsOf: modDestination, encoding: .utf8) {
+            let sanitized = LLMCommandService.stripInlineDatasetRows(modText)
+            if sanitized != modText {
+                try sanitized.write(to: modDestination, atomically: true, encoding: .utf8)
+            }
+        }
+
         return projectURL
     }
 
@@ -761,6 +769,13 @@ struct ProjectScanner {
             let dst = demoURL.appendingPathComponent(fileName)
             if !FileManager.default.fileExists(atPath: dst.path) {
                 try FileManager.default.copyItem(at: src, to: dst)
+                if fileName.hasSuffix(".mod"),
+                   let text = try? String(contentsOf: dst, encoding: .utf8) {
+                    let sanitized = LLMCommandService.stripInlineDatasetRows(text)
+                    if sanitized != text {
+                        try sanitized.write(to: dst, atomically: true, encoding: .utf8)
+                    }
+                }
             }
         }
         let run31URL = demoURL.appendingPathComponent("run31.mod")
@@ -776,7 +791,8 @@ struct ProjectScanner {
                 .replacingOccurrences(of: #"FILE=CATAB\d+"#, with: "FILE=CATAB31", options: .regularExpression)
                 .replacingOccurrences(of: #"FILE=COTAB\d+"#, with: "FILE=COTAB31", options: .regularExpression)
                 .replacingOccurrences(of: #"\$DATA\s+\S+"#, with: "$DATA NM_dat_new.csv", options: .regularExpression)
-            try run31.write(to: run31URL, atomically: true, encoding: .utf8)
+            try LLMCommandService.stripInlineDatasetRows(run31)
+                .write(to: run31URL, atomically: true, encoding: .utf8)
         }
     }
 

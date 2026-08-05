@@ -16,6 +16,12 @@ import tempfile
 from pathlib import Path
 
 try:
+    from model_generator import strip_inline_dataset_rows
+except Exception:
+    def strip_inline_dataset_rows(text):
+        return text
+
+try:
     from pydarwin import ChromosomeSpecifications, GA
     HAS_PYDARWIN = True
 except ImportError:
@@ -115,7 +121,7 @@ def extract_ofv(lst_path: Path):
 def run_psn_for_fitness(mod_text_with_values, run_id, project_dir, psn_cmd, work_dir):
     """Write a temp .mod, run PsN execute, return OFV or None."""
     temp_mod = work_dir / f"run{run_id}.mod"
-    temp_mod.write_text(mod_text_with_values, encoding="utf-8")
+    temp_mod.write_text(strip_inline_dataset_rows(mod_text_with_values), encoding="utf-8")
 
     # Copy data file into work dir if needed
     for candidate in project_dir.glob("*.csv"):
@@ -266,7 +272,7 @@ def main():
     best_mod = best_mod.replace(
         f"run{args.run_id}", f"run{out_run}"
     )
-    out_path.write_text(best_mod, encoding="utf-8")
+    out_path.write_text(strip_inline_dataset_rows(best_mod), encoding="utf-8")
     print(f"\nBest model written to: {out_path}")
     print(f"Run this model with: execute run{out_run}.mod -model_dir_name")
 

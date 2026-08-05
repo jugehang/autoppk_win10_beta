@@ -14,6 +14,24 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set
 
 
+def _is_numeric_token(token: str) -> bool:
+    if token == ".":
+        return True
+    try:
+        float(token)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_likely_data_row(tokens: List[str]) -> bool:
+    if len(tokens) < 2:
+        return False
+    first = tokens[0]
+    numeric_count = sum(1 for token in tokens if _is_numeric_token(token))
+    return first == "." or _is_numeric_token(first) or numeric_count >= max(2, len(tokens) // 2)
+
+
 # ---------------------------------------------------------------------------
 # Severity levels
 # ---------------------------------------------------------------------------
@@ -132,6 +150,45 @@ def check_input_comment_column(lines: list, text: str) -> List[ValidationIssue]:
             fix_hint="Prepend bare C to $INPUT tokens (AutoPMX convention)",
             auto_fixable=True,
         ))
+
+    return issues
+
+
+def check_inline_dataset_rows(lines: list, text: str) -> List[ValidationIssue]:
+    """Reject CSV rows accidentally embedded after $INPUT or $DATA."""
+    issues: List[ValidationIssue] = []
+    active_section: Optional[str] = None
+    flagged_sections: Set[str] = set()
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        upper = line.upper()
+
+        if upper.startswith("$"):
+            if upper.startswith("$INPUT"):
+                active_section = "$INPUT"
+            elif upper.startswith("$DATA"):
+                active_section = "$DATA"
+            else:
+                active_section = None
+            continue
+
+        if active_section not in ("$INPUT", "$DATA"):
+            continue
+        if not line or line.startswith(";"):
+            continue
+
+        tokens = line.split()
+        if active_section not in flagged_sections and _is_likely_data_row(tokens):
+            issues.append(ValidationIssue(
+                severity="error",
+                section=active_section,
+                line_number=line_number,
+                message="CSV data rows must not be embedded in the control stream",
+                fix_hint="Remove the data rows; keep $INPUT/$DATA records only",
+                auto_fixable=True,
+            ))
+            flagged_sections.add(active_section)
 
     return issues
 
@@ -541,6 +598,7 @@ def validate_mod(
     # Run all checks
     check_fns = [
         check_input_comment_column,
+        check_inline_dataset_rows,
         lambda l, t: check_input_matches_csv(l, t, csv_path),
         check_theta_omega_count,
         lambda l, t: check_data_path(t, project_dir),

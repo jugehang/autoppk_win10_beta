@@ -855,6 +855,7 @@ final class WorkbenchStore: ObservableObject {
         automationDataFile = dataFile
 
         loadModelMarks()
+        repairMissingETATablesInProject()
         runner.onExecutionDuration = { [weak self] duration in
             guard let self, self.activeBenchmark != nil else { return }
             self.activeBenchmark?.executionSeconds += max(0, duration)
@@ -1962,6 +1963,7 @@ final class WorkbenchStore: ObservableObject {
             runner.append("Created project: \(projectURL.path)")
             selectedAsset = nil
             saveRecentProject(projectURL)
+            repairMissingETATablesInProject()
             refreshWorkspace()
         } catch {
             runner.append("Create project failed: \(error.localizedDescription)")
@@ -5963,7 +5965,8 @@ final class WorkbenchStore: ObservableObject {
                         forceSameCompartment = true
                         forceEscalation = false
                         let sourceMod = projectURL.appendingPathComponent("run\(sourceRun).mod")
-                        if var modText = try? String(contentsOf: sourceMod, encoding: .utf8) {
+                        if let rawText = try? String(contentsOf: sourceMod, encoding: .utf8) {
+                            let modText = LLMCommandService.stripInlineDatasetRows(rawText)
                             let fixed = forceFixUnreliableParameter(modText, runID: sourceRun)
                             if fixed != modText {
                                 try? fixed.write(to: sourceMod, atomically: true, encoding: .utf8)
@@ -6791,7 +6794,10 @@ final class WorkbenchStore: ObservableObject {
             runner.append("ETA screening: cannot read run\(runID).mod")
             return false
         }
-        let updated = withETATableRecord(modText, runID: runID)
+        let updated = withETATableRecord(
+            LLMCommandService.stripInlineDatasetRows(modText),
+            runID: runID
+        )
         if updated != modText {
             do {
                 try updated.write(to: modURL, atomically: true, encoding: .utf8)
@@ -9179,13 +9185,22 @@ final class WorkbenchStore: ObservableObject {
     }
 
     private func validateModel(_ runID: String) async -> (passed: Bool, output: String) {
+        let modURL = projectURL.appendingPathComponent("run\(runID).mod")
+        if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
+            let sanitized = LLMCommandService.stripInlineDatasetRows(modText)
+            if sanitized != modText {
+                try? sanitized.write(to: modURL, atomically: true, encoding: .utf8)
+                runner.append("Removed inline dataset rows from run\(runID).mod")
+            }
+        }
+
         let python = resolvedPython()
         let bridge = resolveBridgeScript()
         let validatorCmd = [
             shellQuote(python),
             shellQuote(bridge),
             "validate-model",
-            "--mod", shellQuote(projectURL.appendingPathComponent("run\(runID).mod").path),
+            "--mod", shellQuote(modURL.path),
             "--project-dir", shellQuote(projectURL.path),
             "--csv", shellQuote(projectURL.appendingPathComponent(dataFile).path),
             "--run-id", runID,

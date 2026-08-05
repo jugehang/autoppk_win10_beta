@@ -27,6 +27,74 @@ from poppk_model_templates import (
 )
 
 
+def _is_numeric_token(token: str) -> bool:
+    if token == ".":
+        return True
+    try:
+        float(token)
+        return True
+    except ValueError:
+        return False
+
+
+def strip_inline_dataset_rows(text: str) -> str:
+    """Remove CSV rows accidentally pasted after $INPUT/$DATA."""
+    lines = text.split("\n")
+    output: List[str] = []
+    after_input = False
+    after_data = False
+
+    for line in lines:
+        stripped = line.strip()
+        upper = stripped.upper()
+
+        if upper.startswith("$INPUT"):
+            after_input = True
+            after_data = False
+            output.append(line)
+            continue
+        if upper.startswith("$DATA"):
+            after_input = False
+            after_data = True
+            output.append(line)
+            continue
+
+        if after_input or after_data:
+            if not stripped or stripped.startswith(";"):
+                output.append(line)
+                continue
+            if stripped.startswith("$"):
+                after_input = False
+                after_data = False
+                output.append(line)
+                continue
+
+            tokens = stripped.split()
+            if len(tokens) >= 2:
+                first = tokens[0]
+                numeric_count = sum(1 for token in tokens if _is_numeric_token(token))
+                if first == "." or _is_numeric_token(first) or numeric_count >= max(2, len(tokens) // 2):
+                    continue
+
+        output.append(line)
+
+    compact: List[str] = []
+    last_blank = False
+    for line in output:
+        if line.strip():
+            if last_blank and compact and compact[-1] != "":
+                compact.append("")
+            compact.append(line)
+            last_blank = False
+        else:
+            if not last_blank and compact:
+                compact.append("")
+            last_blank = True
+    while compact and compact[-1] == "":
+        compact.pop()
+    return "\n".join(compact)
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -526,7 +594,7 @@ def apply_modifications(
     -------
     str — modified .mod text.
     """
-    sections = parse_sections(source_text)
+    sections = parse_sections(strip_inline_dataset_rows(source_text))
 
     for mod in modifications:
         fn = ACTION_REGISTRY.get(mod.action)
@@ -540,8 +608,7 @@ def apply_modifications(
         sections = ensure_eta_table(sections, run_id)
 
     # Normalize section order
-    result = rebuild_mod(sections)
-    return result
+    return strip_inline_dataset_rows(rebuild_mod(sections))
 
 
 def apply_structured(
