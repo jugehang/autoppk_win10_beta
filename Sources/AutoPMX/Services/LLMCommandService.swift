@@ -938,6 +938,8 @@ struct LLMCommandService {
         - IV 1-cpt: S1=\(s1Expression) | IV 2+/3-cpt: S1=\(s1for2CompExpression)
         - Oral / SC / extravascular 1-cpt: S2=\(s2Expression) | Oral / SC / extravascular 2+/3-cpt: S2=\(s2for2CompExpression)
         Do NOT blindly write S1=V/1000 or S2=V/1000 — use the exact expression above.
+        Unit examples: mg + ng/mL → /1000; mg + mg/L or mg + µg/mL → V;
+        µg + µg/mL → V*1000; µg + ng/mL or µg + µg/L → V.
 
         RESIDUAL ERROR INITIAL VALUE RULE (DATA-DRIVEN):
         Dataset DV profile: typical (median) concentration = \(profile.typicalDV.map { String(format: "%.3f", $0) } ?? "unknown") \(concUnit)
@@ -2624,7 +2626,7 @@ struct LLMCommandService {
         - $INPUT must mirror the CSV header order exactly (use the project's actual $INPUT above, never assume a fixed column set). A common AutoPMX PK schema is: C ID TIME DV AMT RATE DUR CMT MDV EVID ... — always match the real dataset header.
         - C must remain a literal token and must never be C=DROP when $DATA has IGNORE=C.
         - Default residual model: IPRED=F; W=SQRT((THETA(k)*IPRED)**2 + THETA(k+1)**2); Y=IPRED+W*EPS(1); $SIGMA 1 FIX.
-        ⚠ S1/S2 SCALING NOTE: The /1000 factor is only correct when AMT/DV units require it (e.g. mg+ng/mL). When using mg+µg/mL (or units where mg/L=µg/mL numerically), use S1=V / S2=V instead. The correct expression for your dataset is specified in the PROJECT UNITS section above.
+        ⚠ S1/S2 SCALING NOTE: The /1000 factor is only correct when AMT/DV units require it (e.g. mg+ng/mL). When using mg+µg/mL (or units where mg/L=µg/mL numerically), use S1=V / S2=V instead. For AMT=µg + DV=µg/mL, use V*1000; for AMT=µg + DV=ng/mL or µg/L, use V. The correct expression for your dataset is specified in the PROJECT UNITS section above.
         """
     }
 

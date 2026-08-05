@@ -253,14 +253,31 @@ final class WorkbenchStore: ObservableObject {
     @Published var lloqValue = ""
     @Published var lloqUnit = "µg/mL"
 
-    /// Whether a 1000× scaling factor is needed between AMT and DV units
-    /// (e.g. AMT=mg, DV=ng/mL → mg/L = 1000× ng/mL → S1 needs /1000).
-    /// When false, S1=V (or S1=V1) — no additional scaling.
-    private var needsS1Scaling: Bool {
-        switch (normalizedMassUnit(amtUnit), normalizedConcentrationUnit(concUnit)) {
-        case ("mg", "ng/mL"), ("g", "µg/mL"): return true
-        default: return false
+    /// Unit factor that converts the model's natural concentration (AMT mass unit
+    /// per liter) into the DV concentration unit. S1/S2 must be `V × factor`.
+    private var unitScaleFactor: Double {
+        let massToMg: Double
+        switch normalizedMassUnit(amtUnit) {
+        case "ng": massToMg = 1e-6
+        case "µg": massToMg = 1e-3
+        case "mg": massToMg = 1
+        case "g":  massToMg = 1e3
+        default:   massToMg = 1
         }
+
+        let concentrationToMgPerL: Double
+        switch normalizedConcentrationUnit(concUnit) {
+        case "ng/mL": concentrationToMgPerL = 1e-3
+        case "µg/mL": concentrationToMgPerL = 1
+        case "mg/mL": concentrationToMgPerL = 1e3
+        case "ng/dL": concentrationToMgPerL = 1e-5
+        case "µg/L":  concentrationToMgPerL = 1e-3
+        case "mg/L":  concentrationToMgPerL = 1
+        default:      concentrationToMgPerL = 1
+        }
+
+        guard massToMg > 0, concentrationToMgPerL > 0 else { return 1 }
+        return concentrationToMgPerL / massToMg
     }
 
     /// Derived CL unit — always plain units. The S1 expression handles any
@@ -280,23 +297,38 @@ final class WorkbenchStore: ObservableObject {
         }
     }
 
-    /// Correct S1 scaling expression.
-    /// When AMT & DV units need 1000× scaling (e.g. mg+ng/mL), S1 needs /1000.
-    /// When units align (e.g. mg+µg/mL where mg/L = µg/mL), S1 = V directly.
+    /// Correct S1 scaling expression derived from AMT & DV units.
     var derivedS1Expression: String {
-        needsS1Scaling ? "V/1000" : "V"
+        scaledExpression("V")
     }
     /// Same for 2-compartment models (V1 replaces V).
     var derivedS1for2CompExpression: String {
-        needsS1Scaling ? "V1/1000" : "V1"
+        scaledExpression("V1")
     }
     /// Correct S2 scaling expression for oral / subcutaneous extravascular models.
     var derivedS2Expression: String {
-        needsS1Scaling ? "V/1000" : "V"
+        scaledExpression("V")
     }
     /// Same for 2+ compartment extravascular models (V2 replaces V).
     var derivedS2for2CompExpression: String {
-        needsS1Scaling ? "V2/1000" : "V2"
+        scaledExpression("V2")
+    }
+
+    private func scaledExpression(_ variable: String) -> String {
+        let factor = unitScaleFactor
+        if factor == 1 { return variable }
+        if factor < 1 {
+            let divisor = 1 / factor
+            if abs(divisor - divisor.rounded()) < 1e-9 {
+                return "\(variable)/\(Int(divisor.rounded()))"
+            }
+        } else {
+            let multiplier = factor
+            if abs(multiplier - multiplier.rounded()) < 1e-9 {
+                return "\(variable)*\(Int(multiplier.rounded()))"
+            }
+        }
+        return "\(variable)*\(String(format: "%.8g", factor))"
     }
 
     private func normalizedMassUnit(_ raw: String) -> String {
@@ -3104,7 +3136,7 @@ final class WorkbenchStore: ObservableObject {
                 } else {
                     variable = "V"
                 }
-                let scale = needsS1Scaling ? "\(variable)/1000" : "\(variable)"
+                let scale = scaledExpression(variable)
                 let prefix = upper.contains("S2") ? "S2" : "S1"
                 let comment = line.components(separatedBy: ";").dropFirst().joined(separator: ";")
                     .trimmingCharacters(in: .whitespaces)
