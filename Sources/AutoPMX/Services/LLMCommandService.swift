@@ -911,7 +911,10 @@ struct LLMCommandService {
             routeGuidance = """
             IV Infusion administration detected (CMT=1 with RATE>0 or DUR>0).
             Start from template: \(recommendedTemplate).
-            Preserve D1=DUR when DUR is present; use RATE only if the dataset relies on RATE.
+            Preserve D1=DUR when DUR is present, and add a tiny positive fallback for non-dose records:
+              IF (DUR.GT.0) D1=DUR
+              IF (DUR.LE.0) D1=0.0001
+            Use RATE only if the dataset relies on RATE.
             """
             routeHardRule = """
             ━━━ ROUTE LOCK: IV INFUSION ━━━
@@ -919,7 +922,10 @@ struct LLMCommandService {
             - ALLOWED templates: iv_infusion_1c_advan1_trans2 → iv_infusion_2c_advan3_trans4 → iv_infusion_3c_advan11_trans4
             - FORBIDDEN: ADVAN2, ADVAN4, ADVAN12 (oral/extravascular). Any mention of KA, oral, depot, extravascular, F1.
             - The dataset has IV infusion only — do NOT add KA or absorption compartments.
-            - If DUR is in the dataset, use D1=DUR in $PK. Do not use RATE unless DUR is absent.
+            - If DUR is in the dataset, use D1=DUR in $PK with a tiny positive fallback for non-dose records:
+              IF (DUR.GT.0) D1=DUR
+              IF (DUR.LE.0) D1=0.0001
+              Do not use RATE unless DUR is absent.
             - Structural escalation path (ONLY this path):
               Run001: 1-comp IV infusion (CL, V, D1=DUR)
               Run002+: 2-comp IV infusion (CL, V1, Q, V2, D1=DUR) — ONLY if GOF supports
@@ -3182,6 +3188,48 @@ struct LLMCommandService {
             range: range,
             withTemplate: "$1\(formatted)"
         )
+    }
+
+    /// Keep D1 positive for IV-infusion ADVAN models. Observation records often
+    /// carry missing DUR, and PREDPP aborts when the duration parameter is 0.
+    static func applyingIVInfusionDurationFix(_ modText: String) -> String {
+        let upper = modText.uppercased()
+        guard upper.contains("ADVAN1") || upper.contains("ADVAN3") || upper.contains("ADVAN11"),
+              upper.contains("DUR") else {
+            return modText
+        }
+
+        let lines = modText.components(separatedBy: "\n")
+        var result: [String] = []
+        var inserted = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let compact = trimmed.replacingOccurrences(of: " ", with: "").uppercased()
+
+            if compact == "IF(DUR.GT.0)D1=DUR" && !inserted {
+                let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+                result.append(line)
+                result.append("\(indent)IF (DUR.LE.0) D1=0.0001")
+                inserted = true
+            } else if compact.contains("D1=DUR") && compact.contains("AMT.GT.0") && !inserted {
+                let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+                result.append(line)
+                result.append("\(indent)IF (DUR.LE.0) D1=0.0001")
+                inserted = true
+            } else if compact == "D1=DUR" && !inserted {
+                let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+                result.append("\(indent)D1 = MAX(DUR, 0.0001)")
+                inserted = true
+            } else if compact.contains("IF(DUR.LE.0)D1=0.0001") {
+                inserted = true
+                result.append(line)
+            } else {
+                result.append(line)
+            }
+        }
+
+        return result.joined(separator: "\n")
     }
 
     /// Rebuild the standard NONMEM table records from the actual $INPUT and $PK

@@ -2032,6 +2032,7 @@ final class WorkbenchStore: ObservableObject {
             guard let text = try? String(contentsOf: modURL, encoding: .utf8) else { continue }
             let sanitized = LLMCommandService.stripInlineDatasetRows(text)
             var repaired = withETATableRecord(sanitized, runID: runID)
+            repaired = LLMCommandService.applyingIVInfusionDurationFix(repaired)
             repaired = LLMCommandService.normalizingTableRecords(repaired, runID: runID)
             guard repaired != text else { continue }
             do {
@@ -3286,6 +3287,7 @@ final class WorkbenchStore: ObservableObject {
             sanitizedMod.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + tableBlock,
             runID: runID
         )
+        fullMod = LLMCommandService.applyingIVInfusionDurationFix(fullMod)
         fullMod = LLMCommandService.normalizingTableRecords(fullMod, runID: runID)
         do {
             try fullMod.write(to: destMod, atomically: true, encoding: .utf8)
@@ -4502,6 +4504,7 @@ final class WorkbenchStore: ObservableObject {
             )
             drafted = enforceZeroFixForResidualError(drafted)
             drafted = withETATableRecord(drafted, runID: nextRun)
+            drafted = LLMCommandService.applyingIVInfusionDurationFix(drafted)
             drafted = LLMCommandService.normalizingTableRecords(drafted, runID: nextRun)
             try drafted.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
             runner.append("SCM replication: wrote run\(nextRun).mod (from run\(sourceRun).mod)")
@@ -5294,6 +5297,7 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = normalizeTypicalValueNaming(draftedModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
+                    draftedModel = LLMCommandService.applyingIVInfusionDurationFix(draftedModel)
                     draftedModel = LLMCommandService.normalizingTableRecords(draftedModel, runID: nextRun)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
                     let validation = await validateModel(nextRun)
@@ -5684,6 +5688,7 @@ final class WorkbenchStore: ObservableObject {
                         projectURL: projectURL,
                         dataFile: activeDataFile
                     )
+                    initialModelText = LLMCommandService.applyingIVInfusionDurationFix(initialModelText)
                     initialModelText = LLMCommandService.normalizingTableRecords(
                         initialModelText,
                         runID: "001"
@@ -6075,6 +6080,7 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     draftedModel = correctS1Scaling(draftedModel)
+                    draftedModel = LLMCommandService.applyingIVInfusionDurationFix(draftedModel)
                     draftedModel = LLMCommandService.normalizingTableRecords(draftedModel, runID: nextRun)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
                     runner.append("Created candidate model run\(nextRun).mod")
@@ -6867,6 +6873,7 @@ final class WorkbenchStore: ObservableObject {
             runID: runID
         )
         updated = LLMCommandService.normalizingTableRecords(updated, runID: runID)
+        updated = LLMCommandService.applyingIVInfusionDurationFix(updated)
         if updated != modText {
             do {
                 try updated.write(to: modURL, atomically: true, encoding: .utf8)
@@ -7403,6 +7410,7 @@ final class WorkbenchStore: ObservableObject {
 
         var candidate = LLMCommandService.stripInlineDatasetRows(gaText)
         candidate = correctS1Scaling(candidate)
+        candidate = LLMCommandService.applyingIVInfusionDurationFix(candidate)
         candidate = LLMCommandService.normalizingTableRecords(candidate, runID: runID)
         do {
             try candidate.write(to: originalModURL, atomically: true, encoding: .utf8)
@@ -9381,6 +9389,7 @@ final class WorkbenchStore: ObservableObject {
                         dataFile: dataFile
                     )
                 }
+                fixed = LLMCommandService.applyingIVInfusionDurationFix(fixed)
                 fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
                 if fixed != modText {
                     try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
