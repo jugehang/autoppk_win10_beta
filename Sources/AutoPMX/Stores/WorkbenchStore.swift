@@ -6941,8 +6941,7 @@ final class WorkbenchStore: ObservableObject {
                 indices.insert(value)
             }
         }
-        guard let max = indices.max() else { return [] }
-        return (1...max).map { "ETA\($0)" }
+        return indices.sorted().map { "ETA\($0)" }
     }
 
     private func covariateColumns(from modText: String) -> [String] {

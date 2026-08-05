@@ -3222,6 +3222,7 @@ struct LLMCommandService {
                 result.append("\(indent)D1 = MAX(DUR, 0.0001)")
                 inserted = true
             } else if compact.contains("IF(DUR.LE.0)D1=0.0001") {
+                if inserted { continue }
                 inserted = true
                 result.append(line)
             } else {
@@ -3327,8 +3328,7 @@ struct LLMCommandService {
                 indices.insert(value)
             }
         }
-        guard let maxIndex = indices.max() else { return [] }
-        return (1...maxIndex).map { "ETA\($0)" }
+        return indices.sorted().map { "ETA\($0)" }
     }
 
     /// Detect which of the given continuous covariates are time-varying, i.e. their value
