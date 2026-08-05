@@ -5025,9 +5025,7 @@ final class WorkbenchStore: ObservableObject {
 
         automationTask = Task {
             defer {
-                isAutoModeling = false
-                automationStep = "Idle"
-                automationTask = nil
+                resetAutomationUIState(step: "Idle")
                 finalizeBenchmarkFromAutomationTask(status: automationStopRequested ? .stopped : .completed)
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -5271,11 +5269,27 @@ final class WorkbenchStore: ObservableObject {
                     runner.append("Phase 2 failed: \(message)")
                     assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.autoFailed, message)))
                 }
-                isAutoModeling = false
-                automationStep = "LLM error — check connection"
-                duDuMood = .sad
+                resetAutomationUIState(step: "LLM error — check connection", mood: .sad)
                 PPKSkillStore.shared.save(to: projectURL)
             }
+        }
+    }
+
+    /// Central reset for all running indicators after automation ends, fails, or is
+    /// cancelled. Prevents “already stopped but UI still shows STOP/running” bugs.
+    private func resetAutomationUIState(step: String, mood: DuDuMood = .happy) {
+        isAutoModeling = false
+        isAIThinking = false
+        isAssistantThinking = false
+        isSCMRunning = false
+        isBootstrapRunning = false
+        automationTask = nil
+        automationStep = step
+        duDuMood = mood
+        lastRunSucceeded = false
+        if runner.isRunning {
+            runner.stopCurrentProcess()
+            runner.isRunning = false
         }
     }
 
@@ -5289,10 +5303,13 @@ final class WorkbenchStore: ObservableObject {
         runner.append("Automation stopped by user.")
         assistantMessages.append(AssistantMessage(role: .system, text: L10n.autoStoppedShort))
         runner.stopCurrentProcess()
+        runner.isRunning = false
         // Mark as stopped immediately (don't wait for the cancelled task to unwind)
         isAutoModeling = false
         isAIThinking = false
         isAssistantThinking = false
+        isSCMRunning = false
+        isBootstrapRunning = false
         automationStep = "Stopped"
         duDuMood = .happy
         clearThinkingSteps()
@@ -5378,9 +5395,7 @@ final class WorkbenchStore: ObservableObject {
 
         automationTask = Task {
             defer {
-                isAutoModeling = false
-                automationStep = "Idle"
-                automationTask = nil
+                resetAutomationUIState(step: "Idle")
                 finalizeBenchmarkFromAutomationTask(status: automationStopRequested ? .stopped : .completed)
                 // Reset mood after a delay
                 Task { @MainActor in
@@ -6024,11 +6039,7 @@ final class WorkbenchStore: ObservableObject {
                 runner.append("Automation stopped at \(stop.step).")
                 assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoStoppedAt, stop.step, best?.runID ?? currentRun)))
             } catch let datasetError as AutomationDatasetError {
-                isAutoModeling = false
-                automationTask = nil
-                automationStep = "Dataset/model validation failed"
-                duDuMood = .sad
-                lastRunSucceeded = false
+                resetAutomationUIState(step: "Dataset/model validation failed", mood: .sad)
                 let details = datasetError.output
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let message = "自动建模已停止：run\(datasetError.runID).mod 校验失败，且自动修复未能解决。请先根据下面的错误信息检查数据集或模型，不要再继续迭代。\n\n\(details)"
@@ -6048,9 +6059,7 @@ final class WorkbenchStore: ObservableObject {
                 runner.append("Automated modeling failed: \(message)")
                 assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.autoFailed, message)))
                 // Don't attempt reconnect — let the user fix the LLM service first.
-                isAutoModeling = false
-                automationStep = "LLM error — check connection"
-                duDuMood = .sad
+                resetAutomationUIState(step: "LLM error — check connection", mood: .sad)
             }
         }
     }
