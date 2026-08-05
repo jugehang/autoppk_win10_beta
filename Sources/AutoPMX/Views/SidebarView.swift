@@ -207,6 +207,12 @@ struct SidebarAssetContextMenu: View {
                 Label("Run NONMEM via PsN", systemImage: "play.fill")
             }
 
+            Button {
+                store.duplicateModelAsChild(runID: runID)
+            } label: {
+                Label("Duplicate as Child Model", systemImage: "doc.on.doc")
+            }
+
             Divider()
 
             Button {

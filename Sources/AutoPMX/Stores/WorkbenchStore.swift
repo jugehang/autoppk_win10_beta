@@ -1947,6 +1947,70 @@ final class WorkbenchStore: ObservableObject {
         parameterRows = ProjectScanner.parameterEstimates(runID: currentRun, in: projectURL)
     }
 
+    func duplicateModelAsChild(runID: String) {
+        guard !automationBusy, !runID.isEmpty else { return }
+        let sourceURL = projectURL.appendingPathComponent("run\(runID).mod")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            runner.append("Could not read run\(runID).mod for child duplication.")
+            return
+        }
+
+        let childID = nextChildRunID(parent: runID)
+        let childURL = projectURL.appendingPathComponent("run\(childID).mod")
+        guard !FileManager.default.fileExists(atPath: childURL.path) else {
+            runner.append("Child model run\(childID).mod already exists.")
+            return
+        }
+
+        var child = source
+        child = child.replacingOccurrences(of: "run\(runID)", with: "run\(childID)")
+        child = child.replacingOccurrences(of: "Run\(runID)", with: "Run\(childID)")
+        child = child.replacingOccurrences(of: "RUN\(runID)", with: "RUN\(childID)")
+        child = child.replacingOccurrences(of: "SDTAB\(runID)", with: "SDTAB\(childID)")
+        child = child.replacingOccurrences(of: "PATAB\(runID)", with: "PATAB\(childID)")
+        child = child.replacingOccurrences(of: "CATAB\(runID)", with: "CATAB\(childID)")
+        child = child.replacingOccurrences(of: "COTAB\(runID)", with: "COTAB\(childID)")
+
+        child = LLMCommandService.stripInlineDatasetRows(child)
+        child = LLMCommandService.normalizingTableRecords(child, runID: childID)
+        child = LLMCommandService.applyingIVInfusionDurationFix(child)
+
+        do {
+            try child.write(to: childURL, atomically: true, encoding: .utf8)
+            runner.append("Created child model run\(childID).mod from run\(runID).mod")
+            activateRun(childID)
+            refreshWorkspace()
+        } catch {
+            runner.append("Could not write child model run\(childID).mod: \(error.localizedDescription)")
+        }
+    }
+
+    private func childRootRunID(for runID: String) -> String {
+        guard runID.count > 3,
+              runID.suffix(2).allSatisfy(\.isNumber) else {
+            return runID
+        }
+        let base = String(runID.dropLast(2))
+        if FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("run\(base).mod").path) {
+            return base
+        }
+        return runID
+    }
+
+    private func nextChildRunID(parent: String) -> String {
+        let root = childRootRunID(for: parent)
+        let existing = Set(automationModelRuns())
+        var index = 1
+        while true {
+            let candidate = "\(root)\(String(format: "%02d", index))"
+            if !existing.contains(candidate),
+               !FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("run\(candidate).mod").path) {
+                return candidate
+            }
+            index += 1
+        }
+    }
+
     func createProjectFromCurrentRun(name: String, parentDirectory: URL? = nil) {
         guard !automationBusy else {
             runner.append(L10n.statusAutoBlockedCreate)
@@ -5100,7 +5164,6 @@ final class WorkbenchStore: ObservableObject {
                     return
                 }
                 var sourceRun = acceptedRun
-                var nextRunNumber = ((modelRuns.compactMap(Int.init).max()) ?? (Int(acceptedRun) ?? 0)) + 1
                 let maxEvaluations = 100
 
                 // ━━━ SCM Fast Screening ━━━
@@ -5269,8 +5332,7 @@ final class WorkbenchStore: ObservableObject {
                         runner.append("Reached max evaluations (\(maxEvaluations) iterations).")
                         break
                     }
-                    let nextRun = formattedRun(nextRunNumber)
-                    nextRunNumber += 1
+                    let nextRun = nextChildRunID(parent: sourceRun)
                     automationStep = "AI screening covariate for run\(nextRun)"
                     let optSkillCtx = PPKSkillStore.shared.contextBlock(for: ["modeling", "covariate", "optimization"])
                     let (nextModel, optUsage) = try await LLMCommandService.proposeOptimizedModel(
@@ -5621,6 +5683,7 @@ final class WorkbenchStore: ObservableObject {
                 var sourceRun = modelRuns.last ?? "001"
                 var previousForComparison = modelRuns.dropLast().last
                 var nextRunNumber = ((modelRuns.compactMap(Int.init).max()) ?? (Int(sourceRun) ?? 0)) + 1
+                var useChildRunIDs = false
 
                 if selectedMode == .selectedRun, modelRuns.contains(selectedRunID) {
                     sourceRun = selectedRunID
@@ -5630,8 +5693,9 @@ final class WorkbenchStore: ObservableObject {
                     } else {
                         previousForComparison = nil
                     }
-                    nextRunNumber = ((modelRuns.compactMap(Int.init).max()) ?? (Int(sourceRun) ?? 0)) + 1
-                    runner.append("User selected run\(sourceRun) as the continuation parent; next new candidate will be run\(formattedRun(nextRunNumber)).")
+                    useChildRunIDs = true
+                    nextRunNumber = -1
+                    runner.append("User selected run\(sourceRun) as the continuation parent; next child model will be run\(nextChildRunID(parent: sourceRun)).")
                 }
 
                 if modelRuns.isEmpty {
@@ -6006,8 +6070,10 @@ final class WorkbenchStore: ObservableObject {
                         assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoLimitReached, maxEvaluations, sourceRun)))
                         break
                     }
-                    let nextRun = formattedRun(nextRunNumber)
-                    nextRunNumber += 1
+                    let nextRun = useChildRunIDs
+                        ? nextChildRunID(parent: sourceRun)
+                        : formattedRun(nextRunNumber)
+                    if !useChildRunIDs { nextRunNumber += 1 }
                     automationStep = "AI drafting run\(nextRun).mod"
 
                     // HARD GATE — every structural level must reach S+C before escalating.
