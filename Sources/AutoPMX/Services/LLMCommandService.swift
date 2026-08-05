@@ -2371,6 +2371,7 @@ struct LLMCommandService {
             of: "$COVARIANCE UNCONDITIONAL",
             with: "$COVARIANCE PRINT=E MATRIX=S"
         )
+        cleaned = stripInlineDatasetRows(cleaned)
         let guarded = enforceDatasetRecords(cleaned, projectURL: projectURL, dataFile: dataFile)
         guard guarded.contains("$PROBLEM"), guarded.contains("$DATA"), guarded.contains("$EST") else {
             throw NSError(domain: "LLMCommandService", code: 1001, userInfo: [
@@ -2378,6 +2379,74 @@ struct LLMCommandService {
             ])
         }
         return guarded
+    }
+
+    /// Remove CSV rows that an LLM accidentally pasted into a control stream.
+    /// Only data-like lines are dropped; comments, blanks, and valid record
+    /// continuation lines are preserved.
+    static func stripInlineDatasetRows(_ controlStream: String) -> String {
+        let lines = controlStream.components(separatedBy: .newlines)
+        var output: [String] = []
+        var afterInput = false
+        var afterData = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+
+            if upper.hasPrefix("$INPUT") {
+                afterInput = true
+                afterData = false
+                output.append(line)
+                continue
+            }
+            if upper.hasPrefix("$DATA") {
+                afterInput = false
+                afterData = true
+                output.append(line)
+                continue
+            }
+
+            if afterInput || afterData {
+                if trimmed.isEmpty || trimmed.hasPrefix(";") {
+                    output.append(line)
+                    continue
+                }
+                if trimmed.hasPrefix("$") {
+                    afterInput = false
+                    afterData = false
+                    output.append(line)
+                    continue
+                }
+                if isLikelyInlineDataRow(trimmed) {
+                    continue
+                }
+            }
+            output.append(line)
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    static func sanitizeControlStream(_ content: String, projectURL: URL?, dataFile: String?) -> String {
+        do {
+            return try cleanControlStream(content, projectURL: projectURL, dataFile: dataFile)
+        } catch {
+            return stripInlineDatasetRows(content)
+        }
+    }
+
+    private static func isLikelyInlineDataRow(_ line: String) -> Bool {
+        let tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard tokens.count >= 2 else { return false }
+        let first = tokens[0]
+        if first == "." || Double(first) != nil {
+            return true
+        }
+        let numericCount = tokens.filter { token in
+            token == "." || Double(token) != nil
+        }.count
+        return numericCount >= max(2, tokens.count / 2)
     }
 
     private static func enforceDatasetRecords(_ controlStream: String, projectURL: URL?, dataFile: String?) -> String {

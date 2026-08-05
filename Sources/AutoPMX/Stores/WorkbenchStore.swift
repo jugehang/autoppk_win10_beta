@@ -2026,11 +2026,12 @@ final class WorkbenchStore: ObservableObject {
         for runID in automationModelRuns() {
             let modURL = projectURL.appendingPathComponent("run\(runID).mod")
             guard let text = try? String(contentsOf: modURL, encoding: .utf8) else { continue }
-            let repaired = withETATableRecord(text, runID: runID)
+            let sanitized = LLMCommandService.stripInlineDatasetRows(text)
+            let repaired = withETATableRecord(sanitized, runID: runID)
             guard repaired != text else { continue }
             do {
                 try repaired.write(to: modURL, atomically: true, encoding: .utf8)
-                runner.append("ETA table added to run\(runID).mod")
+                runner.append("Model sanitized or ETA table added to run\(runID).mod")
             } catch {
                 runner.append("Could not add ETA table to run\(runID).mod: \(error.localizedDescription)")
             }
@@ -2818,11 +2819,12 @@ final class WorkbenchStore: ObservableObject {
     }
 
     private func cleanedAgentModelText(_ raw: String) -> String {
-        raw
+        let cleaned = raw
             .replacingOccurrences(of: "```nonmem", with: "")
             .replacingOccurrences(of: "```nmtran", with: "")
             .replacingOccurrences(of: "```", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        return LLMCommandService.stripInlineDatasetRows(cleaned)
     }
 
     private func safeAgentRunID(_ raw: String?) -> String? {
@@ -3233,7 +3235,8 @@ final class WorkbenchStore: ObservableObject {
         let destMod = projectURL.appendingPathComponent("run\(runID).mod")
 
         // Add standard $TABLE blocks (SCM's final model file has no $TABLE).
-        let tableParams = detectTableParams(from: modText)
+        let sanitizedMod = LLMCommandService.stripInlineDatasetRows(modText)
+        let tableParams = detectTableParams(from: sanitizedMod)
         let tableBlock = """
         $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(runID) FORMAT=s1PE14.7
         $TABLE ID \(tableParams.paramList) ONEHEADER NOPRINT NOAPPEND FILE=patab\(runID)
@@ -3241,7 +3244,7 @@ final class WorkbenchStore: ObservableObject {
         $TABLE ID \(tableParams.paramList) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(runID)
         """
         let fullMod = withETATableRecord(
-            modText.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + tableBlock,
+            sanitizedMod.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + tableBlock,
             runID: runID
         )
         do {
@@ -4452,6 +4455,11 @@ final class WorkbenchStore: ObservableObject {
             )
             recordUsage(usage)
             var drafted = normalizeTypicalValueNaming(modText)
+            drafted = LLMCommandService.sanitizeControlStream(
+                drafted,
+                projectURL: projectURL,
+                dataFile: dataFile
+            )
             drafted = enforceZeroFixForResidualError(drafted)
             drafted = withETATableRecord(drafted, runID: nextRun)
             try drafted.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
@@ -4613,9 +4621,11 @@ final class WorkbenchStore: ObservableObject {
             runner.append("SCM: base model run\(baseRun).mod not found")
             return nil
         }
+        let sanitizedMod = LLMCommandService.stripInlineDatasetRows(modText)
+
         // Remove $TABLE block and ALL comment lines (;)
         // PsN 5.x cannot parse .mod files containing `;` comments and will fail silently.
-        let lines = modText.components(separatedBy: "\n")
+        let lines = sanitizedMod.components(separatedBy: "\n")
         var cleaned: [String] = []
         var inTable = false
         for line in lines {
@@ -5235,7 +5245,12 @@ final class WorkbenchStore: ObservableObject {
                     )
                     recordUsage(optUsage)
                     try checkAutomationStop("model drafting run\(nextRun)")
-                    var draftedModel = normalizeTypicalValueNaming(nextModel)
+                    var draftedModel = LLMCommandService.sanitizeControlStream(
+                        nextModel,
+                        projectURL: projectURL,
+                        dataFile: activeDataFile
+                    )
+                    draftedModel = normalizeTypicalValueNaming(draftedModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
@@ -5611,9 +5626,14 @@ final class WorkbenchStore: ObservableObject {
                     )
                     recordUsage(usage)
                     try checkAutomationStop("initial model drafting")
-                    let initialModelText = correctS1Scaling(
+                    var initialModelText = LLMCommandService.sanitizeControlStream(
+                        initialModel,
+                        projectURL: projectURL,
+                        dataFile: activeDataFile
+                    )
+                    initialModelText = correctS1Scaling(
                         withETATableRecord(
-                            normalizeTypicalValueNaming(initialModel),
+                            normalizeTypicalValueNaming(initialModelText),
                             runID: "001"
                         )
                     )
@@ -5976,7 +5996,12 @@ final class WorkbenchStore: ObservableObject {
                     )
                     recordUsage(optUsage)
                     try checkAutomationStop("model drafting run\(nextRun)")
-                    var draftedModel = normalizeTypicalValueNaming(nextModel)
+                    var draftedModel = LLMCommandService.sanitizeControlStream(
+                        nextModel,
+                        projectURL: projectURL,
+                        dataFile: activeDataFile
+                    )
+                    draftedModel = normalizeTypicalValueNaming(draftedModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     draftedModel = correctS1Scaling(draftedModel)
@@ -9193,7 +9218,8 @@ final class WorkbenchStore: ObservableObject {
         if result.exitCode == 0 {
             let modURL = projectURL.appendingPathComponent("run\(runID).mod")
             if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
-                let fixed = correctS1Scaling(modText)
+                let sanitized = LLMCommandService.stripInlineDatasetRows(modText)
+                let fixed = correctS1Scaling(sanitized)
                 if fixed != modText {
                     try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
                 }
