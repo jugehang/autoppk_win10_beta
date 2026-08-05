@@ -2018,7 +2018,7 @@ final class WorkbenchStore: ObservableObject {
         }
 
         let sourceRunID = asset.relatedRunID ?? ""
-        let newID = nextCopyRunID(in: targetURL)
+        let newID = nextCopyRunID(in: targetURL, preferred: sourceRunID.isEmpty ? nil : sourceRunID)
         let sourceStem = sourceURL.deletingPathExtension().lastPathComponent
         let targetStem = "run\(newID)"
         let dataReference = dataFileReference(in: sourceText)
@@ -2050,6 +2050,7 @@ final class WorkbenchStore: ObservableObject {
         copied = LLMCommandService.stripInlineDatasetRows(copied)
         copied = LLMCommandService.normalizingTableRecords(copied, runID: newID)
         copied = LLMCommandService.applyingIVInfusionDurationFix(copied)
+        copied = insertingCopySourceComment(into: copied, sourceURL: sourceURL, sourceStem: sourceStem, newID: newID)
 
         let destinationURL = targetURL.appendingPathComponent("run\(newID).mod")
         do {
@@ -2077,17 +2078,45 @@ final class WorkbenchStore: ObservableObject {
         }
     }
 
-    private func nextCopyRunID(in targetURL: URL) -> String {
+    private func nextCopyRunID(in targetURL: URL, preferred: String?) -> String {
         let existing = Set(ProjectScanner.discoverRuns(in: targetURL))
+        func isFree(_ candidate: String) -> Bool {
+            !existing.contains(candidate)
+                && !FileManager.default.fileExists(atPath: targetURL.appendingPathComponent("run\(candidate).mod").path)
+        }
+        if let preferred, !preferred.isEmpty, isFree(preferred) {
+            return preferred
+        }
+        if let preferred, !preferred.isEmpty {
+            var childIndex = 1
+            while true {
+                let candidate = "\(preferred)\(String(format: "%02d", childIndex))"
+                if isFree(candidate) { return candidate }
+                childIndex += 1
+            }
+        }
         var index = 1
         while true {
             let candidate = String(format: "%03d", index)
-            if !existing.contains(candidate),
-               !FileManager.default.fileExists(atPath: targetURL.appendingPathComponent("run\(candidate).mod").path) {
-                return candidate
-            }
+            if isFree(candidate) { return candidate }
             index += 1
         }
+    }
+
+    private func insertingCopySourceComment(into text: String, sourceURL: URL, sourceStem: String, newID: String) -> String {
+        var lines = text.components(separatedBy: "\n")
+        let comments = [
+            ";; AutoPMX source model: \(sourceURL.path)",
+            ";; AutoPMX copied from: \(sourceStem).mod -> run\(newID).mod"
+        ]
+        if let problemIndex = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("$PROBLEM")
+        }) {
+            lines.insert(contentsOf: comments, at: problemIndex + 1)
+        } else {
+            lines.insert(contentsOf: comments, at: 0)
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func copyReferencedDataset(dataReference: String, from sourceURL: URL, to targetURL: URL) {
