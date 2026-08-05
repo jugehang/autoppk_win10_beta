@@ -2208,7 +2208,7 @@ final class WorkbenchStore: ObservableObject {
 
         let total = ordered.count
         for (idx, runID) in ordered.enumerated() {
-            distillProgressText = String(format: L10n.settingsDistillStep, runID, idx + 1, total)
+            distillProgressText = String.safeFormat(L10n.settingsDistillStep, runID, idx + 1, total)
             let comp = compartmentInfoForRun(runID).compartments
             let stableRun = stable.contains(runID)
             let reason = stableRun ? "reached S+C (stable + converged)" : missingEstimationReason(runID: runID)
@@ -2256,7 +2256,7 @@ final class WorkbenchStore: ObservableObject {
         if distilled > 0 {
             PPKSkillStore.shared.saveCurrent()
             runner.append("✅ Distilled \(distilled) skill(s) from project history into the global PPK skill store.")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusDistillDone, distilled)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusDistillDone, distilled)))
         } else {
             runner.append("ℹ️ No new skills distilled (runs may already be covered, or LLM returned nothing).")
         }
@@ -2418,7 +2418,7 @@ final class WorkbenchStore: ObservableObject {
                 let modelText = probe.models.isEmpty ? "connected but no models listed" : "models: \(probe.models.prefix(4).joined(separator: ", "))"
                 llmStatus = "Connected - \(modelText)"
                 runner.append("LLM connected [\(format.displayName)]: \(modelText)")
-                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusLLMConnected, format.displayName, modelText)))
+                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusLLMConnected, format.displayName, modelText)))
             } catch {
                 availableLLMModels = []
                 syncToActiveProvider()
@@ -2742,7 +2742,7 @@ final class WorkbenchStore: ObservableObject {
             }
 
             let result = await executeAgentAction(action)
-            agentMessages.append(.init(role: .user, text: String(format: L10n.statusAgentToolResult, action.tool, result)))
+            agentMessages.append(.init(role: .user, text: String.safeFormat(L10n.statusAgentToolResult, action.tool, result)))
             runner.append("[DuDu Agent] \(action.tool)\(action.runID.map { " run\($0)" } ?? "") \(result.prefix(220))")
             refreshWorkspace()
         }
@@ -3286,12 +3286,12 @@ final class WorkbenchStore: ObservableObject {
 
         var lines: [String] = []
         lines.append(L10n.scmReportHeader)
-        lines.append(String(format: L10n.scmReportBaseStructure, baseRun, scmRun))
-        lines.append(String(format: L10n.scmReportAvailableCov, availableCovariates))
+        lines.append(String.safeFormat(L10n.scmReportBaseStructure, baseRun, scmRun))
+        lines.append(String.safeFormat(L10n.scmReportAvailableCov, availableCovariates))
         if added.isEmpty {
             lines.append(L10n.scmNoCovFound)
         } else {
-            lines.append(String(format: L10n.scmCovFound, added.count, added.joined(separator: ", ")))
+            lines.append(String.safeFormat(L10n.scmCovFound, added.count, added.joined(separator: ", ")))
         }
         if scmText.uppercased().contains("WT/MEDIAN") || scmText.uppercased().contains("0.75 FIX") {
             lines.append(L10n.scmWtIncluded)
@@ -3353,7 +3353,7 @@ final class WorkbenchStore: ObservableObject {
             )
             return reply
         } catch {
-            return String(format: L10n.scmVerificationFailed, error.localizedDescription)
+            return String.safeFormat(L10n.scmVerificationFailed, error.localizedDescription)
         }
     }
 
@@ -3400,10 +3400,10 @@ final class WorkbenchStore: ObservableObject {
             lines.append(L10n.scmCompareMatch)
         } else {
             if !onlyDuDu.isEmpty {
-                lines.append(String(format: L10n.scmCompareOnlyDuDu, onlyDuDu.sorted().joined(separator: ", ")))
+                lines.append(String.safeFormat(L10n.scmCompareOnlyDuDu, onlyDuDu.sorted().joined(separator: ", ")))
             }
             if !onlySCM.isEmpty {
-                lines.append(String(format: L10n.scmCompareOnlySCM, onlySCM.sorted().joined(separator: ", ")))
+                lines.append(String.safeFormat(L10n.scmCompareOnlySCM, onlySCM.sorted().joined(separator: ", ")))
             }
         }
         if inDuDu.isEmpty && inSCM.isEmpty {
@@ -3416,7 +3416,7 @@ final class WorkbenchStore: ObservableObject {
         } else {
             let duduLabel = duduWT ? L10n.scmCompareWTDuDuIn : L10n.scmCompareWTDuDuOut
             let scmLabel = scmWT ? L10n.scmCompareWTSCMIn : L10n.scmCompareWTSCMOut
-            lines.append(String(format: L10n.scmCompareWTWarning, duduLabel, scmLabel))
+            lines.append(String.safeFormat(L10n.scmCompareWTWarning, duduLabel, scmLabel))
         }
 
         if let scmModURL {
@@ -4018,7 +4018,7 @@ final class WorkbenchStore: ObservableObject {
             }
         }
 
-        runner.append(String(format: L10n.scmReplicateSequence,
+        runner.append(String.safeFormat(L10n.scmReplicateSequence,
                              (forwardAdded.isEmpty ? "-" : forwardAdded.joined(separator: ", ")) as NSString,
                              (removed.isEmpty ? "-" : removed.joined(separator: ", ")) as NSString))
 
@@ -4041,7 +4041,7 @@ final class WorkbenchStore: ObservableObject {
             let finalHasRelations = !finalAll.isEmpty
             if finalHasRelations && !baseAll.isEmpty {
                 assistantMessages.append(AssistantMessage(role: .system,
-                    text: String(format: L10n.scmReplicateCovInBase,
+                    text: String.safeFormat(L10n.scmReplicateCovInBase,
                                  baseAll.sorted().joined(separator: ", ") as NSString)))
             } else {
                 assistantMessages.append(AssistantMessage(role: .system, text: L10n.scmReplicateNoCov))
@@ -4071,14 +4071,14 @@ final class WorkbenchStore: ObservableObject {
 
         // 4. DuDu writes + runs each step
         assistantMessages.append(AssistantMessage(role: .system, text: L10n.scmReplicateHeader))
-        runner.append(String(format: L10n.scmReplicateBaseRun, baseRun as NSString))
+        runner.append(String.safeFormat(L10n.scmReplicateBaseRun, baseRun as NSString))
         var nextRunNumber = ((automationModelRuns().compactMap(Int.init).max()) ?? (Int(baseRun) ?? 0)) + 1
         var sourceRun = baseRun
         let sessionId = UUID().uuidString
         let totalSteps = forwardSets.count + backwardSets.count
         var stepIndex = 0
         assistantMessages.append(AssistantMessage(role: .system,
-            text: String(format: L10n.scmReplicatePlan,
+            text: String.safeFormat(L10n.scmReplicatePlan,
                          (forwardAdded.isEmpty ? "-" : forwardAdded.joined(separator: " → ")) as NSString,
                          (removed.isEmpty ? "-" : removed.joined(separator: " → ")) as NSString,
                          totalSteps)))
@@ -4091,19 +4091,19 @@ final class WorkbenchStore: ObservableObject {
                 let nextRun = formattedRun(nextRunNumber); nextRunNumber += 1
                 stepIndex += 1
                 automationStep = "SCM replication \(stepIndex)/\(totalSteps) — forward \(idx + 1)"
-                runner.append(String(format: L10n.scmReplicateForward, idx + 1,
+                runner.append(String.safeFormat(L10n.scmReplicateForward, idx + 1,
                                      nextRun as NSString, set.joined(separator: ", ") as NSString))
                 let newToken = set.last ?? ""
                 if !newToken.isEmpty {
                     assistantMessages.append(AssistantMessage(role: .system,
-                        text: String(format: L10n.scmForwardChat, idx + 1,
+                        text: String.safeFormat(L10n.scmForwardChat, idx + 1,
                                      nextRun as NSString, describeSCMRelation(newToken, in: baseText) as NSString)))
                 }
                 guard await writeAndRunSCMStep(sourceRun: sourceRun, nextRun: nextRun, dataFile: dataFile,
                                                target: set, removed: [], stepType: "forward",
                                                scmReferenceText: forwardFinalText, sessionId: sessionId) else {
                     assistantMessages.append(AssistantMessage(role: .system,
-                        text: String(format: L10n.scmReplicateFailed, "forward step \(idx + 1)" as NSString)))
+                        text: String.safeFormat(L10n.scmReplicateFailed, "forward step \(idx + 1)" as NSString)))
                     return nil
                 }
                 sourceRun = nextRun
@@ -4118,16 +4118,16 @@ final class WorkbenchStore: ObservableObject {
                 let nextRun = formattedRun(nextRunNumber); nextRunNumber += 1
                 stepIndex += 1
                 automationStep = "SCM replication \(stepIndex)/\(totalSteps) — backward \(idx + 1)"
-                runner.append(String(format: L10n.scmReplicateBackward, idx + 1,
+                runner.append(String.safeFormat(L10n.scmReplicateBackward, idx + 1,
                                      nextRun as NSString, removed[idx] as NSString))
                 assistantMessages.append(AssistantMessage(role: .system,
-                    text: String(format: L10n.scmBackwardChat, idx + 1,
+                    text: String.safeFormat(L10n.scmBackwardChat, idx + 1,
                                  nextRun as NSString, describeSCMRelation(removed[idx], in: baseText) as NSString)))
                 guard await writeAndRunSCMStep(sourceRun: sourceRun, nextRun: nextRun, dataFile: dataFile,
                                                target: set, removed: [removed[idx]], stepType: "backward",
                                                scmReferenceText: forwardFinalText, sessionId: sessionId) else {
                     assistantMessages.append(AssistantMessage(role: .system,
-                        text: String(format: L10n.scmReplicateFailed, "backward step \(idx + 1)" as NSString)))
+                        text: String.safeFormat(L10n.scmReplicateFailed, "backward step \(idx + 1)" as NSString)))
                     return nil
                 }
                 sourceRun = nextRun
@@ -4136,7 +4136,7 @@ final class WorkbenchStore: ObservableObject {
 
         // 5. Final comparison against SCM's final model
         let finalDuDuMod = projectURL.appendingPathComponent("run\(sourceRun).mod")
-        runner.append(String(format: L10n.scmReplicateFinal, sourceRun as NSString))
+        runner.append(String.safeFormat(L10n.scmReplicateFinal, sourceRun as NSString))
         if let cmp = compareFinalWithSCM(duduMod: finalDuDuMod, scmModText: scmFinalText, baseRun: baseRun, scmModURL: findSCMFinalModel(baseRun: baseRun)) {
             runner.append(cmp)
             assistantMessages.append(AssistantMessage(role: .system, text: cmp))
@@ -4158,7 +4158,7 @@ final class WorkbenchStore: ObservableObject {
             if token.uppercased().hasPrefix(param.uppercased()) {
                 let cov = String(token.dropFirst(param.count))
                 if !cov.isEmpty {
-                    return String(format: L10n.scmRelationDesc, param, cov)
+                    return String.safeFormat(L10n.scmRelationDesc, param, cov)
                 }
             }
         }
@@ -4223,12 +4223,12 @@ final class WorkbenchStore: ObservableObject {
         } else {
             let desc = finalTokens.map { describeSCMRelation($0, in: baseText) }
                 .joined(separator: L10n.scmRelationJoin)
-            lines.append(String(format: L10n.scmSummaryIncluded, desc))
+            lines.append(String.safeFormat(L10n.scmSummaryIncluded, desc))
         }
         if let baseOfv, let finalOfv {
             let dOfv = finalOfv - baseOfv
             let dAic = dOfv + 2.0 * Double(countThetas(in: scmFinalText) - countThetas(in: baseText))
-            lines.append(String(format: L10n.scmSummaryOfvAic,
+            lines.append(String.safeFormat(L10n.scmSummaryOfvAic,
                                 String(format: "%+.2f", dOfv),
                                 String(format: "%+.2f", dAic),
                                 String(format: "%.2f", baseOfv),
@@ -4411,10 +4411,10 @@ final class WorkbenchStore: ObservableObject {
             let exit = await runner.runAndWait(command: psnRunCommand(runID: nextRun), in: projectURL)
             let ofv = extractOFV(from: projectURL.appendingPathComponent("run\(nextRun).ext"))
                 .map { String(format: "%.2f", $0) } ?? "n/a"
-            runner.append(String(format: L10n.scmReplicateRunDone, nextRun, ofv) + " (exit \(exit))")
+            runner.append(String.safeFormat(L10n.scmReplicateRunDone, nextRun, ofv) + " (exit \(exit))")
             if exit == 0 {
                 assistantMessages.append(AssistantMessage(role: .system,
-                    text: String(format: L10n.scmStepDone, nextRun, ofv)))
+                    text: String.safeFormat(L10n.scmStepDone, nextRun, ofv)))
             }
             refreshWorkspace()
             return true
@@ -4727,7 +4727,7 @@ final class WorkbenchStore: ObservableObject {
             .filter { $0.hasPrefix("continuous_covariates=") || $0.hasPrefix("categorical_covariates=") || $0.hasPrefix("time_varying=") }
             .joined(separator: "；")
         assistantMessages.append(AssistantMessage(role: .system,
-            text: String(format: L10n.scmConfigReady, configName, configSummary)))
+            text: String.safeFormat(L10n.scmConfigReady, configName, configSummary)))
 
         // 3. Run PsN SCM with auto-retry on error
         let maxRetries = 2
@@ -4961,7 +4961,7 @@ final class WorkbenchStore: ObservableObject {
         isAutoModeling = true
         isAssistantPanelPresented = true
         duDuMood = .working
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusBaseModelPhase2, acceptedRun)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusBaseModelPhase2, acceptedRun)))
         runner.append("=== PHASE 2: Covariate screening starting from run\(acceptedRun) ===")
 
         automationTask = Task {
@@ -5109,7 +5109,7 @@ final class WorkbenchStore: ObservableObject {
                         let why = missingEstimationReason(runID: sourceRun)
                         let boundary = hasBoundaryWarningsFor(sourceRun) ? " boundary-estimate" : ""
                         runner.append("⚠️ run\(sourceRun) was marked ACCEPT but is NOT stable (\(why)\(boundary)). Forcing REVISE — must achieve S (minimization) + C (covariance) with no boundary estimate before acceptance.")
-                        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusForcedRevise, sourceRun)))
+                        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusForcedRevise, sourceRun)))
                         decision = "REVISE\nModel not stable (\(why)\(boundary)). Must achieve minimization + covariance success with no boundary estimate before acceptance."
                     } else {
                         assistantMessages.append(AssistantMessage.parse(formatDecisionMessage(decision, runID: sourceRun, isCovariate: true), role: .assistant))
@@ -5148,7 +5148,7 @@ final class WorkbenchStore: ObservableObject {
 
                     if isAcceptanceDecision(decision) {
                         runner.append("=== PHASE 2 COMPLETE: Covariate model run\(sourceRun) accepted ===")
-                        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctCovComplete, sourceRun)))
+                        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctCovComplete, sourceRun)))
                         break
                     }
 
@@ -5197,7 +5197,7 @@ final class WorkbenchStore: ObservableObject {
                 if !automationStopRequested {
                     let message = LLMCommandService.friendlyError(error, baseURL: llmBaseURL)
                     runner.append("Phase 2 failed: \(message)")
-                    assistantMessages.append(AssistantMessage(role: .assistant, text: String(format: L10n.autoFailed, message)))
+                    assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.autoFailed, message)))
                 }
                 isAutoModeling = false
                 automationStep = "LLM error — check connection"
@@ -5297,10 +5297,10 @@ final class WorkbenchStore: ObservableObject {
         isAssistantPanelPresented = true
         duDuMood = .working
 
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctModelingStarted, activeDataFile)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctModelingStarted, activeDataFile)))
         assistantMessages.append(AssistantMessage(role: .system, text: L10n.ctPathWarning))
         if !userGuidance.isEmpty {
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctGuidanceApplied, userGuidance)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctGuidanceApplied, userGuidance)))
         }
         runner.append("=== AutoPMX automated modeling started from \(activeDataFile) ===")
 
@@ -5350,7 +5350,7 @@ final class WorkbenchStore: ObservableObject {
                 // Save initial EDA for final model report
                 initialEDASummary = profile.summary
                 runner.append("Dataset:\n\(profile.summary)")
-                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctAnalysisComplete, profile.summary)))
+                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctAnalysisComplete, profile.summary)))
                 updateLastThinkingStep(type: .done, detail: "\(profile.route) route, \(profile.subjectCount) subjects, \(dataCovariateSummary(profile))")
 
                 // Run dose-normalized C-T plot + lag / elimination / exposure analysis
@@ -5385,7 +5385,7 @@ final class WorkbenchStore: ObservableObject {
                             assistantMessages.append(AssistantMessage(role: .system, text: L10n.ctIVroute))
                         } else if lagInfo.hasLag {
                             runner.append("CT analysis: absorption lag detected (Tlag ≈ \(String(format: "%.2f", lagInfo.lagTime))).\n\(lagInfo.recommendation)")
-                            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctAbsorptionLag, String(format: "%.2f", lagInfo.lagTime), lagInfo.recommendation)))
+                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctAbsorptionLag, String(format: "%.2f", lagInfo.lagTime), lagInfo.recommendation)))
                         } else {
                             runner.append("CT analysis: no absorption lag detected.")
                         }
@@ -5415,7 +5415,7 @@ final class WorkbenchStore: ObservableObject {
                                     let firstWord = LanguageStore.shared.language == .zhCN
                                         ? (lagInfo.firstDoseElimSimilar ? "相似" : "存在差异")
                                         : (lagInfo.firstDoseElimSimilar ? "similar" : "different")
-                                    elimText = String(format: L10n.ctElimSynthDisagree, wholeWord, firstWord)
+                                    elimText = String.safeFormat(L10n.ctElimSynthDisagree, wholeWord, firstWord)
                                 }
                             } else if firstDoseAvailable {
                                 // Only first-dose is assessable
@@ -5434,8 +5434,8 @@ final class WorkbenchStore: ObservableObject {
                             elimText = L10n.ctElimDifferent
                         }
                         runner.append(elimText)
-                        if lagInfo.multiDose && !lagInfo.firstDoseElimDetail.isEmpty { runner.append(String(format: L10n.statusFirstDoseLabel, lagInfo.firstDoseElimDetail)) }
-                        if !lagInfo.elimDetail.isEmpty { runner.append(String(format: L10n.statusFullCurveLabel, lagInfo.elimDetail)) }
+                        if lagInfo.multiDose && !lagInfo.firstDoseElimDetail.isEmpty { runner.append(String.safeFormat(L10n.statusFirstDoseLabel, lagInfo.firstDoseElimDetail)) }
+                        if !lagInfo.elimDetail.isEmpty { runner.append(String.safeFormat(L10n.statusFullCurveLabel, lagInfo.elimDetail)) }
                         assistantMessages.append(AssistantMessage(role: .system, text: elimText))
                         // Multi-compartment shape verdict (from semi-log C-T curves)
                         let compartmentText: String
@@ -5451,7 +5451,7 @@ final class WorkbenchStore: ObservableObject {
                             assistantMessages.append(AssistantMessage(role: .system, text: compartmentText))
                         }
                         if !lagInfo.compartmentShapeDetail.isEmpty {
-                            runner.append(String(format: L10n.statusSemiLogLabel, lagInfo.compartmentShapeDetail))
+                            runner.append(String.safeFormat(L10n.statusSemiLogLabel, lagInfo.compartmentShapeDetail))
                         }
                         // Dose-normalized exposure similarity verdict
                         let expText = lagInfo.linearPK ? L10n.ctLinearPK : L10n.ctNonlinearPK
@@ -5540,13 +5540,13 @@ final class WorkbenchStore: ObservableObject {
                     previousForComparison = nil
                     modelRuns = ["001"]
                     nextRunNumber = 2
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctModelCreated, activeDataFile, profile.route)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctModelCreated, activeDataFile, profile.route)))
                     runner.append("Created AI-generated starting model: run001.mod (\(profile.route) route)")
                     updateLastThinkingStep(type: .done, detail: "run001.mod — 1-comp \(profile.route)")
                     refreshWorkspace()
                 } else {
                     runner.append("=== AutoPMX RESUMING from run\(sourceRun); next candidate will be run\(formattedRun((Int(sourceRun) ?? 0) + 1)) ===")
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctResuming, sourceRun)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctResuming, sourceRun)))
                     // Previous run for comparison: use the run directly before sourceRun.
                     // If no earlier run exists, use "001" itself (meaning: no true comparison).
                     if let idx = modelRuns.firstIndex(of: sourceRun), idx > 0 {
@@ -5668,7 +5668,7 @@ final class WorkbenchStore: ObservableObject {
                         let why = missingEstimationReason(runID: sourceRun)
                         let boundary = hasBoundaryWarningsFor(sourceRun) ? " boundary-estimate" : ""
                         runner.append("⚠️ run\(sourceRun) was marked ACCEPT but is NOT stable (\(why)\(boundary)). Forcing REVISE — must achieve S (minimization) + C (covariance) with no boundary estimate before it can be the base model.")
-                        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusForcedReviseBase, sourceRun)))
+                        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusForcedReviseBase, sourceRun)))
                         decision = "REVISE\nModel not stable (\(why)\(boundary)). Must achieve minimization + covariance success with no boundary estimate before acceptance."
                     } else {
                         assistantMessages.append(AssistantMessage.parse(formatDecisionMessage(decision, runID: sourceRun, isCovariate: false), role: .assistant))
@@ -5734,7 +5734,7 @@ final class WorkbenchStore: ObservableObject {
                             let runInfo = compartmentInfoForRun(sourceRun)
                             let reason = missingEstimationReason(runID: sourceRun)
                             runner.append("AI said ACCEPT but run\(sourceRun) (\(runInfo.compartments)-comp) is NOT S+C (\(reason)). Rejecting — must achieve stable+converged at this compartment before considering escalation. Repairing at \(runInfo.compartments)-comp.")
-                            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusCompAcceptNotSC, sourceRun, String(runInfo.compartments), reason, String(runInfo.compartments))))
+                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompAcceptNotSC, sourceRun, String(runInfo.compartments), reason, String(runInfo.compartments))))
                             forceEscalation = false
                             // Fall through — proposeOptimizedModel will repair at same compartment
                         } else {
@@ -5744,7 +5744,7 @@ final class WorkbenchStore: ObservableObject {
                             let runInfo = compartmentInfoForRun(sourceRun)
                             let nextComp = runInfo.compartments + 1
                             runner.append("AI said ACCEPT but next compartment not yet tested — auto-overriding to REVISE. Current: \(runInfo.compartments)-comp. Must also test \(nextComp)-comp before acceptance.")
-                            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusCompRequireCompare, sourceRun, String(runInfo.compartments), String(nextComp), String(nextComp))))
+                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompRequireCompare, sourceRun, String(runInfo.compartments), String(nextComp), String(nextComp))))
                             forceEscalation = true  // signal to proposeOptimizedModel
                             // Force continue — skip the accept break
                         } else {
@@ -5762,7 +5762,7 @@ final class WorkbenchStore: ObservableObject {
                             if !compsMissingSC.isEmpty {
                                 let list = compsMissingSC.map { "\($0)-comp" }.joined(separator: ", ")
                                 runner.append("⚠️ Phase 1 integrity check FAILED: compartment count(s) \(list) have runs but NONE achieved S+C (stable + converged). Cannot finalize base model yet — continuing exploration within \(list).")
-                                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusCompIntegrityFail, list)))
+                                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompIntegrityFail, list)))
                                 forceEscalation = false
                                 // Do NOT set accepted=true; fall through to keep iterating at current level.
                             } else {
@@ -5789,12 +5789,12 @@ final class WorkbenchStore: ObservableObject {
                                 isAutoModeling = false
                                 automationStep = "Compartment decision needed"
                                 compDecisionAcceptedRun = bestRunID
-                                compDecisionInfo = summary + "\n\n" + String(format: L10n.statusCompDecisionRSE, String(bestComp))
+                                compDecisionInfo = summary + "\n\n" + String.safeFormat(L10n.statusCompDecisionRSE, String(bestComp))
                                 isCompDecisionPresented = true
                                 break
                             }
                             runner.append("=== PHASE 1 COMPLETE ===\n\(summary)")
-                            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
+                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
                             // Pause and show confirmation dialog
                             beginBenchmarkBaseWaitIfNeeded()
                             isAutoModeling = false
@@ -5811,7 +5811,7 @@ final class WorkbenchStore: ObservableObject {
 
                     guard iteration < maxEvaluations else {
                         runner.append("Reached max evaluations (\(maxEvaluations) iterations). Best candidate: run\(sourceRun). Click DuDu Auto again to continue from the latest run — it will NOT restart from scratch.")
-                        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoLimitReached, maxEvaluations, sourceRun)))
+                        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoLimitReached, maxEvaluations, sourceRun)))
                         break
                     }
                     let nextRun = formattedRun(nextRunNumber)
@@ -5832,8 +5832,8 @@ final class WorkbenchStore: ObservableObject {
                             forceSameCompartment = true
                             forceEscalation = false
                             let phrase = "\(sourceComp)-comp"
-                            runner.append(String(format: L10n.autoGatingLocked, phrase))
-                            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoGatingLockedShort, phrase, phrase)))
+                            runner.append(String.safeFormat(L10n.autoGatingLocked, phrase))
+                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoGatingLockedShort, phrase, phrase)))
                         }
                     }
 
@@ -5849,8 +5849,8 @@ final class WorkbenchStore: ObservableObject {
                             let fixed = forceFixUnreliableParameter(modText, runID: sourceRun)
                             if fixed != modText {
                                 try? fixed.write(to: sourceMod, atomically: true, encoding: .utf8)
-                                runner.append(String(format: L10n.autoHighRSEFix, sourceRun))
-                                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoHighRSEFix, sourceRun)))
+                                runner.append(String.safeFormat(L10n.autoHighRSEFix, sourceRun))
+                                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoHighRSEFix, sourceRun)))
                             }
                         }
                     }
@@ -5906,12 +5906,12 @@ final class WorkbenchStore: ObservableObject {
                 // Offer bootstrap + AI report for final model
                 if accepted && covariatePhase, let finalRun = acceptedRun {
                     let finalRunID = finalRun
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoCompletedMsg, phaseLabel, finalRunID, finalRunID)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoCompletedMsg, phaseLabel, finalRunID, finalRunID)))
                     startFinalModelPackage(for: finalRunID, previousRun: best?.previousRun ?? sourceRun)
                 } else if accepted {
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoCompletedSimple, phaseLabel, best?.runID ?? sourceRun)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoCompletedSimple, phaseLabel, best?.runID ?? sourceRun)))
                 } else {
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoLimitReached, maxEvaluations, best?.runID ?? sourceRun)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoLimitReached, maxEvaluations, best?.runID ?? sourceRun)))
                 }
                 refreshWorkspace()
                 if let best,
@@ -5930,7 +5930,7 @@ final class WorkbenchStore: ObservableObject {
                     }
                 }
                 runner.append("Automation stopped at \(stop.step).")
-                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.autoStoppedAt, stop.step, best?.runID ?? currentRun)))
+                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoStoppedAt, stop.step, best?.runID ?? currentRun)))
             } catch is CancellationError {
                 runner.append("Automation cancelled.")
                 assistantMessages.append(AssistantMessage(role: .system, text: L10n.autoStoppedShort))
@@ -5942,7 +5942,7 @@ final class WorkbenchStore: ObservableObject {
                 }
                 let message = LLMCommandService.friendlyError(error, baseURL: llmBaseURL)
                 runner.append("Automated modeling failed: \(message)")
-                assistantMessages.append(AssistantMessage(role: .assistant, text: String(format: L10n.autoFailed, message)))
+                assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.autoFailed, message)))
                 // Don't attempt reconnect — let the user fix the LLM service first.
                 isAutoModeling = false
                 automationStep = "LLM error — check connection"
@@ -6040,12 +6040,12 @@ final class WorkbenchStore: ObservableObject {
         }
         activateRun(runID)
         runner.append("=== Starting PsN bootstrap for run\(runID) (\(samples) samples) ===")
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusBootstrapStarted, runID, samples)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusBootstrapStarted, runID, samples)))
         duDuMood = .working
         isAssistantThinking = true
         isBootstrapRunning = true
         automationStep = "Bootstrap \(samples) samples — run\(runID)"
-        addThinkingStep(String(format: L10n.statusBootstrapPreparing, samples), type: .working)
+        addThinkingStep(String.safeFormat(L10n.statusBootstrapPreparing, samples), type: .working)
         let isFinalReport = bootstrapFinalRunID == runID
         Task {
             updateLastThinkingStep(type: .working, detail: "\(samples) samples")
@@ -6053,13 +6053,13 @@ final class WorkbenchStore: ObservableObject {
             let exit = await runner.runAndWait(command: pythonBootstrapCommand(runID: runID, samples: samples), in: projectURL)
             if exit == 0 {
                 updateLastThinkingStep(type: .done)
-                addThinkingStep(String(format: L10n.statusBootstrapParsing, runID), type: .working)
+                addThinkingStep(String.safeFormat(L10n.statusBootstrapParsing, runID), type: .working)
                 await analyzeBootstrapResults(runID: runID)
                 updateLastThinkingStep(type: .done)
             } else {
                 updateLastThinkingStep(type: .error, detail: "exit \(exit)")
                 runner.append("Bootstrap run\(runID) failed (exit \(exit)).")
-                assistantMessages.append(AssistantMessage(role: .assistant, text: String(format: L10n.statusBootstrapFailed, runID)))
+                assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.statusBootstrapFailed, runID)))
             }
             isAssistantThinking = false
             isBootstrapRunning = false
@@ -6164,7 +6164,7 @@ final class WorkbenchStore: ObservableObject {
             runner.append("AI Bootstrap analysis for run\(runID) complete.")
         } catch {
             runner.append("AI Bootstrap analysis failed: \(error.localizedDescription)")
-            assistantMessages.append(AssistantMessage(role: .assistant, text: String(format: L10n.statusBootstrapParseFailed, LLMCommandService.friendlyError(error, baseURL: llmBaseURL))))
+            assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.statusBootstrapParseFailed, LLMCommandService.friendlyError(error, baseURL: llmBaseURL))))
         }
     }
 
@@ -6872,7 +6872,7 @@ final class WorkbenchStore: ObservableObject {
             let covList = ["WT", "AGE", "SEX", studyDisplayName ?? "STUDY"]
                 .filter { included.contains($0) }
                 .joined(separator: " ")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusSCMStarted,
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusSCMStarted,
                                                                                   runID, runID, resolvedData, covList,
                                                                                   String(format: "%.3f", pForward),
                                                                                   String(format: "%.3f", ofvForward),
@@ -6891,7 +6891,7 @@ final class WorkbenchStore: ObservableObject {
             if let result = await prepareAndRunSCM(baseRun: runID, dataFile: resolvedData, profile: profile,
                                                     pForward: pForward, pBackward: pBackward,
                                                     includedCovariates: included) {
-                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusSCMDone, String(result.prefix(3000)))))
+                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusSCMDone, String(result.prefix(3000)))))
 
                 // ── DuDu replicates SCM's forward inclusion / backward elimination in the
                 // project path (writing its own mods, running them), then compares its final
@@ -6913,7 +6913,7 @@ final class WorkbenchStore: ObservableObject {
                 finalizeBenchmarkAfterSCM(success: true, cancelled: false)
             } else {
                 assistantMessages.append(AssistantMessage(role: .system,
-                    text: scmCancelled ? L10n.scmCancelled : String(format: L10n.statusSCMFailed, runID)))
+                    text: scmCancelled ? L10n.scmCancelled : String.safeFormat(L10n.statusSCMFailed, runID)))
                 duDuMood = .happy
                 isSCMRunning = false
                 automationStep = "Idle"
@@ -7033,7 +7033,7 @@ final class WorkbenchStore: ObservableObject {
         // Only run if current model has succeeded
         guard isModelRunSuccessful(runID: currentRun) else {
             runner.append("Model run\(currentRun) has not succeeded — skipping diagnostics. Run NONMEM first.")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.ctDiagSkipped, currentRun)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctDiagSkipped, currentRun)))
             return
         }
         guard !runner.isRunning else {
@@ -7041,7 +7041,7 @@ final class WorkbenchStore: ObservableObject {
             return
         }
         isAssistantPanelPresented = true
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.auditRunning, currentRun)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.auditRunning, currentRun)))
         Task {
             _ = await runAutomationDiagnostics(runID: currentRun, previousRun: previousRun)
             refreshWorkspace()
@@ -7064,7 +7064,7 @@ final class WorkbenchStore: ObservableObject {
         let modPath = projectURL.appendingPathComponent("run\(currentRun).mod").path
         guard FileManager.default.fileExists(atPath: modPath) else {
             runner.append("GA: run\(currentRun).mod not found.")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAModelMissing, currentRun)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAModelMissing, currentRun)))
             return
         }
 
@@ -7072,7 +7072,7 @@ final class WorkbenchStore: ObservableObject {
         gaStatus = "Starting GA initial estimate optimization..."
         gaResultText = nil
         isAssistantPanelPresented = true
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAOptimizing, currentRun)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAOptimizing, currentRun)))
         runner.append("🧬 GA: launching initial estimate optimizer for run\(currentRun)")
 
         Task {
@@ -7114,7 +7114,7 @@ final class WorkbenchStore: ObservableObject {
 
                 refreshWorkspace()
                 if outputExists {
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAOptimizeDone, currentRun)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAOptimizeDone, currentRun)))
                 }
                 // Try parsing the JSON output for details
                 let outputLines = runner.logText
@@ -7126,7 +7126,7 @@ final class WorkbenchStore: ObservableObject {
             } else {
                 gaStatus = "❌ GA initial estimate optimization failed (exit \(exit))"
                 gaResultText = "Check the Run Log for details. Common issues:\n- nmfe path not configured\n- NONMEM license unavailable\n- .mod file has syntax errors"
-                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAFailed, Int(exit))))
+                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAFailed, Int(exit))))
             }
 
             runner.append(gaStatus)
@@ -7154,7 +7154,7 @@ final class WorkbenchStore: ObservableObject {
         let modPath = projectURL.appendingPathComponent("run\(currentRun).mod").path
         guard FileManager.default.fileExists(atPath: modPath) else {
             runner.append("GA Structural: run\(currentRun).mod not found.")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAStructuralModelMissing, currentRun)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAStructuralModelMissing, currentRun)))
             return
         }
 
@@ -7162,7 +7162,7 @@ final class WorkbenchStore: ObservableObject {
         structuralGAStatus = "Starting structural GA search..."
         structuralGAResultText = nil
         isAssistantPanelPresented = true
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAStructuralSearching, currentRun)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAStructuralSearching, currentRun)))
         runner.append("🧬 GA Structural: launching hybrid optimizer for run\(currentRun)")
 
         Task {
@@ -7207,7 +7207,7 @@ final class WorkbenchStore: ObservableObject {
 
                 refreshWorkspace()
                 if outputExists {
-                    assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAStructuralDone, currentRun)))
+                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAStructuralDone, currentRun)))
                 }
                 // Try parsing the JSON output
                 let outputLines = runner.logText
@@ -7219,7 +7219,7 @@ final class WorkbenchStore: ObservableObject {
             } else {
                 structuralGAStatus = "❌ GA Structural search failed (exit \(exit))"
                 structuralGAResultText = "Check the Run Log for details."
-                assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusGAStructuralFailed, Int(exit))))
+                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusGAStructuralFailed, Int(exit))))
             }
 
             runner.append(structuralGAStatus)
@@ -7235,7 +7235,7 @@ final class WorkbenchStore: ObservableObject {
         // Only audit if model has actually succeeded
         guard isModelRunSuccessful(runID: runID) else {
             runner.append("Model run\(runID) has not succeeded — skipping audit. Check LST for errors.")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusAuditNotRun, runID)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusAuditNotRun, runID)))
             return
         }
         activateRun(runID)
@@ -7245,12 +7245,12 @@ final class WorkbenchStore: ObservableObject {
     func evaluateModelWithAI(_ runID: String) {
         guard isModelRunSuccessful(runID: runID) else {
             runner.append("Model run\(runID) has not succeeded — cannot evaluate. Run NONMEM first.")
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusEvaluateNotRun, runID)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusEvaluateNotRun, runID)))
             return
         }
         activateRun(runID)
         isAssistantPanelPresented = true
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.auditFull, runID)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.auditFull, runID)))
         runFullDiagnosticSuite()
     }
 
@@ -7264,16 +7264,16 @@ final class WorkbenchStore: ObservableObject {
         isAssistantPanelPresented = true
         let lower = asset.relativePath.lowercased()
         if lower.contains("gof") {
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.auditGof, runID)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.auditGof, runID)))
             runAudit("gof-audit", runID: runID)
         } else if lower.contains("vpc") {
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.auditVpc, runID)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.auditVpc, runID)))
             runAudit("vpc-audit", runID: runID)
         } else if ["lst", "ext", "cov"].contains(asset.url.pathExtension.lowercased()) {
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.auditParameter, runID)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.auditParameter, runID)))
             runAudit("parameter-audit", runID: runID)
         } else {
-            assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.auditSelected, asset.title)))
+            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.auditSelected, asset.title)))
             sendContextualAssetPrompt(asset)
         }
     }
@@ -7596,7 +7596,7 @@ final class WorkbenchStore: ObservableObject {
         isAssistantPanelPresented = true
         let prev = compareRunA
         let curr = compareRunB
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusCompareStarting, prev, curr)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompareStarting, prev, curr)))
         addThinkingStep("Comparing run\(prev) vs run\(curr)", type: .thinking, detail: "extracting parameters")
         Task {
             // Step 1: Extract PK parameters + diagnostics for both runs
@@ -7739,7 +7739,7 @@ final class WorkbenchStore: ObservableObject {
             assistantMessages.append(AssistantMessage(role: .assistant, text: reply))
         } catch {
             updateLastThinkingStep(type: .error, detail: "LLM call failed")
-            assistantMessages.append(AssistantMessage(role: .assistant, text: String(format: L10n.statusCompareFailed, error.localizedDescription)))
+            assistantMessages.append(AssistantMessage(role: .assistant, text: String.safeFormat(L10n.statusCompareFailed, error.localizedDescription)))
         }
     }
 
@@ -8527,8 +8527,8 @@ final class WorkbenchStore: ObservableObject {
             .dropFirst("REVISE".count)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let phaseName = isCovariate ? L10n.revisePhase2 : L10n.revisePhase1
-        var msg = String(format: L10n.reviseHeader, runID) + "\n\n"
-        msg += String(format: L10n.reviseBody, phaseName)
+        var msg = String.safeFormat(L10n.reviseHeader, runID) + "\n\n"
+        msg += String.safeFormat(L10n.reviseBody, phaseName)
         if !reason.isEmpty {
             msg += "\n\(reason)"
         }
@@ -9212,7 +9212,7 @@ final class WorkbenchStore: ObservableObject {
         let finalRun = best2Comp?.runID ?? baseRun
         let summary = phaseOneSummary(runs: allRuns, acceptedRun: finalRun)
         runner.append("=== PHASE 1 COMPLETE (user chose lower comp) ===\n\(summary)")
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusPhase1CompleteSuboptimal, summary, finalRun)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1CompleteSuboptimal, summary, finalRun)))
         beginBenchmarkBaseWaitIfNeeded()
         isAutoModeling = false
         automationStep = "Phase 1 complete — awaiting confirmation"
@@ -9229,7 +9229,7 @@ final class WorkbenchStore: ObservableObject {
         let allRuns = ProjectScanner.discoverRuns(in: projectURL)
         let summary = phaseOneSummary(runs: allRuns, acceptedRun: finalRun)
         runner.append("=== PHASE 1 COMPLETE (user accepted \(compartmentInfoForRun(finalRun).compartments)-comp) ===\n\(summary)")
-        assistantMessages.append(AssistantMessage(role: .system, text: String(format: L10n.statusPhase1Complete, summary, finalRun)))
+        assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, finalRun)))
         beginBenchmarkBaseWaitIfNeeded()
         isAutoModeling = false
         automationStep = "Phase 1 complete — awaiting confirmation"

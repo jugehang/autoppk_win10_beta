@@ -772,11 +772,11 @@ struct LLMCommandService {
             switch code {
             case .cannotConnectToHost, .networkConnectionLost, .timedOut, .notConnectedToInternet:
                 if !isLikelyLocalEndpoint(baseURL) {
-                    return String(format: L10n.errorRemoteRequest,
+                    return String.safeFormat(L10n.errorRemoteRequest,
                                   baseURL as NSString, nsError.localizedDescription as NSString)
                 }
                 let tips = baseURL.contains("11434") ? L10n.errorOllamaTips : ""
-                return String(format: L10n.errorCannotConnect, baseURL, tips)
+                return String.safeFormat(L10n.errorCannotConnect, baseURL, tips)
             case .badURL:
                 return L10n.errorBadURL
             default:
@@ -785,18 +785,18 @@ struct LLMCommandService {
         }
 
         if nsError.domain == "LLMCommandService", nsError.code == 401 {
-            return String(format: L10n.errorUnauthorized, baseURL)
+            return String.safeFormat(L10n.errorUnauthorized, baseURL)
         }
 
         if nsError.localizedDescription.localizedCaseInsensitiveContains("could not connect") {
             if !isLikelyLocalEndpoint(baseURL) {
-                return String(format: L10n.errorRemoteRequest,
+                return String.safeFormat(L10n.errorRemoteRequest,
                               baseURL as NSString, nsError.localizedDescription as NSString)
             }
-            return String(format: L10n.errorCouldNotConnectLMStudio, baseURL)
+            return String.safeFormat(L10n.errorCouldNotConnectLMStudio, baseURL)
         }
 
-        return String(format: L10n.errorGeneric, error.localizedDescription)
+        return String.safeFormat(L10n.errorGeneric, error.localizedDescription)
     }
 
     static func generateInitialModel(

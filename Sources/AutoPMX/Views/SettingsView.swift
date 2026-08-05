@@ -1334,7 +1334,7 @@ struct TokensSettingsPane: View {
         }
     }
     private var weekSummary: String {
-        String(format: L10n.t("tokens.weekSummary"), weekRequests, formatTokens(weekTotal))
+        String.safeFormat(L10n.t("tokens.weekSummary"), weekRequests, formatTokens(weekTotal))
     }
 
     /// Currently displayed chart data, based on chartRange.
@@ -1342,7 +1342,7 @@ struct TokensSettingsPane: View {
         chartRange == .week ? weekData : monthData
     }
     private var currentSummaryText: String {
-        chartRange == .week ? weekSummary : String(format: L10n.t("tokens.monthSummary"), monthRequests, formatTokens(monthTotal))
+        chartRange == .week ? weekSummary : String.safeFormat(L10n.t("tokens.monthSummary"), monthRequests, formatTokens(monthTotal))
     }
     private var currentPeriodLabel: String {
         chartRange == .week ? weekLabel : monthLabel
@@ -1462,7 +1462,7 @@ struct TokensSettingsPane: View {
                     .liquidGlassCard(cornerRadius: 8, tint: .blue)
 
                     if ratio >= 0.8 {
-                        Text(String(format: L10n.t("tokens.memWarning"), ratio * 100))
+                        Text(String.safeFormat(L10n.t("tokens.memWarning"), ratio * 100))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.red)
                     }
@@ -1891,7 +1891,7 @@ struct AISkillSettingsPane: View {
                                 distillMessage = nil
                                 let n = await store.distillSkillsFromProjectHistory()
                                 distillMessage = n > 0
-                                    ? String(format: L10n.settingsDistillSuccess, n)
+                                    ? String.safeFormat(L10n.settingsDistillSuccess, n)
                                     : L10n.settingsDistillNone
                                 isDistilling = false
                             }
@@ -2218,7 +2218,7 @@ struct AISkillSettingsPane: View {
             try skillStore.exportSkills(to: url)
             skillFeedback = (L10n.aiSkillExportSuccess, false)
         } catch {
-            skillFeedback = (String(format: L10n.aiSkillExportFailed, error.localizedDescription), true)
+            skillFeedback = (String.safeFormat(L10n.aiSkillExportFailed, error.localizedDescription), true)
         }
     }
 
@@ -2234,7 +2234,7 @@ struct AISkillSettingsPane: View {
             try skillStore.importSkills(from: url, merge: true)
             skillFeedback = (L10n.aiSkillImportSuccess, false)
         } catch {
-            skillFeedback = (String(format: L10n.aiSkillImportFailed, error.localizedDescription), true)
+            skillFeedback = (String.safeFormat(L10n.aiSkillImportFailed, error.localizedDescription), true)
         }
     }
 }
@@ -2716,7 +2716,7 @@ struct DuDuPersonalityPane: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "text.bubble.fill")
                                     .font(.system(size: 10))
-                                Text(String(format: L10n.duduCollectedMessages, store.userMessageArchive.count))
+                                Text(String.safeFormat(L10n.duduCollectedMessages, store.userMessageArchive.count))
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                             }

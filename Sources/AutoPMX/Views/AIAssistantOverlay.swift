@@ -542,7 +542,7 @@ struct ContextUsageBadge: View {
             if base > 0 {
                 row(L10n.ctxCacheHitRate, String(format: "%.0f%%", Double(cached) / Double(base) * 100))
             }
-            Text(String(format: L10n.ctxWindowOccupied, Int(ratio * 100)))
+            Text(String.safeFormat(L10n.ctxWindowOccupied, Int(ratio * 100)))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(ratio < 0.6 ? .green : (ratio < 0.85 ? .orange : .red))
             if store.lastTokenUsage.input == 0 {
@@ -1689,7 +1689,7 @@ struct AutomationOptionsSheetView: View {
                 .pickerStyle(.menu)
                 .disabled(store.availableCSVFiles().count <= 1)
                 if store.availableCSVFiles().count <= 1 {
-                    Text(String(format: L10n.autoSingleDataset, store.dataFile))
+                    Text(String.safeFormat(L10n.autoSingleDataset, store.dataFile))
                         .font(DuDuFont.caption(11))
                         .foregroundStyle(Color.adaptiveSheetText)
                 }
@@ -2667,7 +2667,7 @@ struct BaseModelConfirmView: View {
             }
             .frame(maxHeight: 200)
 
-            Text(String(format: L10n.phase1ConfirmMsg, store.baseModelConfirmRunID))
+            Text(String.safeFormat(L10n.phase1ConfirmMsg, store.baseModelConfirmRunID))
                 .font(DuDuFont.body(13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -2708,7 +2708,7 @@ struct SCMFinalModelConfirmView: View {
             Text(L10n.scmFinalConfirmTitle)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(Color.adaptiveSheetText)
-            Text(String(format: L10n.scmFinalConfirmBody, store.scmFinalModelRunID))
+            Text(String.safeFormat(L10n.scmFinalConfirmBody, store.scmFinalModelRunID))
                 .font(.system(size: 13))
                 .foregroundStyle(Color.adaptiveSheetText)
                 .multilineTextAlignment(.center)

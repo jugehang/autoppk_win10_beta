@@ -1479,3 +1479,18 @@ enum L10n {
 
     ]
 }
+
+extension String {
+    /// Safe variadic formatter for localized strings. Swift `String` arguments are
+    /// explicitly bridged to `NSString` before `%@` formatting so a non-bridged
+    /// Swift value can never reach Foundation's object-description path.
+    static func safeFormat(_ format: String, _ arguments: CVarArg...) -> String {
+        let bridged: [CVarArg] = arguments.map { argument in
+            if let string = argument as? String {
+                return string as NSString
+            }
+            return argument
+        }
+        return String(format: format, arguments: bridged)
+    }
+}
