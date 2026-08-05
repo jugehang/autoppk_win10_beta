@@ -5830,7 +5830,7 @@ final class WorkbenchStore: ObservableObject {
                 ) = (false, 0, "", true, false, "", true, "", true, "", false, "Unknown", false, "")
                 if resolvedR().isEmpty == false {
                     addThinkingStep("Plotting dose-normalized C-T curves", type: .working)
-                    lagInfo = runCTAnalysis(dataFile: activeDataFile)
+                    lagInfo = await runCTAnalysis(dataFile: activeDataFile)
                     // Show the C-T plot to the user in the chat
                     let ctImgName = activeDataFile.replacingOccurrences(of: ".csv", with: "") + "_dose_norm_ct.png"
                     let ctImgPath = projectURL.appendingPathComponent(ctImgName).path
@@ -9060,7 +9060,7 @@ final class WorkbenchStore: ObservableObject {
     }
 
     /// Run dose-normalized C-T analysis (lag, elimination, exposure similarity) via R
-    private func runCTAnalysis(dataFile: String) -> (
+    private func runCTAnalysis(dataFile: String) async -> (
         hasLag: Bool, lagTime: Double, recommendation: String,
         elimSimilar: Bool, elimReliable: Bool, elimDetail: String,
         linearPK: Bool, exposureDetail: String,
@@ -9088,23 +9088,9 @@ final class WorkbenchStore: ObservableObject {
         runner.append("  R: \(rscript)")
         runner.append("  Script: \(script)")
         runner.append("  Data: \(csvPath)")
-        // Run synchronously (fast R script)
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = ["-c", cmd]
-        task.currentDirectoryURL = projectURL
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            runner.append("CT analysis process failed to launch: \(error.localizedDescription)")
-            return (false, 0, "", true, false, "", true, "", true, "", false, "Unknown", false, "")
-        }
-        let exitCode = task.terminationStatus
-        let allOutput = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let result = await runner.runAndWaitWithOutput(command: cmd, in: projectURL)
+        let exitCode = result.exitCode
+        let allOutput = result.output
         if exitCode != 0 {
             runner.append("CT analysis R script failed (exit \(exitCode)):")
             // Show last 10 lines of output for quick diagnosis

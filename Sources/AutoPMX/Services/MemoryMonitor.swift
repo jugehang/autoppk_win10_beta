@@ -61,12 +61,21 @@ final class MemoryMonitor: ObservableObject {
         guard Date().timeIntervalSince(lastRefreshAt) >= 1.0 else { return }
         lastRefreshAt = Date()
         snapshot = Self.systemMemory()
-        (llmProcessName, llmProcessBytes) = Self.localLLMProcessMemory()
         cpuUsageRatio = Self.cpuUsage(prev: &prevCPUTicks)
         if gpuDeviceName.isEmpty {
             (gpuDeviceName, gpuVramBytes) = Self.gpuInfo()
         }
         gpuUsageRatio = Self.gpuUsage()
+
+        Task.detached(priority: .utility) {
+            let llm = MemoryMonitor.localLLMProcessMemory()
+            let name = llm.name
+            let bytes = llm.bytes
+            await MainActor.run {
+                MemoryMonitor.shared.llmProcessName = name
+                MemoryMonitor.shared.llmProcessBytes = bytes
+            }
+        }
     }
 
     // MARK: - System memory via host_statistics64
@@ -113,7 +122,7 @@ final class MemoryMonitor: ObservableObject {
 
     /// Find the running local LLM server process (ollama / oMLX / llama-server / mlx)
     /// and return (name, resident memory bytes).
-    private static func localLLMProcessMemory() -> (name: String, bytes: UInt64) {
+    nonisolated private static func localLLMProcessMemory() -> (name: String, bytes: UInt64) {
         let needles = ["ollama", "omlx", "mlx_server", "llama-server", "llama_server", "llamacpp", "lmstudio", "LM Studio"]
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/ps")
