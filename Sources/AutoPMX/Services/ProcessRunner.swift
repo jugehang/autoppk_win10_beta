@@ -73,11 +73,21 @@ final class ProcessRunner: ObservableObject {
     func recoverIfStuck() {
         guard isRunning else { return }
         if let task = currentTask, task.isRunning { return }
-        if let root = managedRootPID, !processTreeSnapshot(rootPID: root).isEmpty { return }
-        isRunning = false
-        currentTask = nil
-        managedRootPID = nil
-        append("ℹ️ Task state auto-recovered — no actual process is running.")
+        guard let root = managedRootPID else {
+            isRunning = false
+            currentTask = nil
+            managedRootPID = nil
+            append("ℹ️ Task state auto-recovered — no actual process is running.")
+            return
+        }
+        Task { @MainActor in
+            let snapshot = await processTreeSnapshot(rootPID: root)
+            guard snapshot.isEmpty else { return }
+            isRunning = false
+            currentTask = nil
+            managedRootPID = nil
+            append("ℹ️ Task state auto-recovered — no actual process is running.")
+        }
     }
 
     func run(command: String, in directory: URL) {
@@ -170,39 +180,43 @@ final class ProcessRunner: ObservableObject {
             return
         }
         append("Stop requested. Terminating process tree...")
-        let snapshot = processTreeSnapshot(rootPID: root)
-        if snapshot.isEmpty && !(currentTask?.isRunning ?? false) {
-            append("No external process is currently running.")
-            managedRootPID = nil
-            return
-        }
-        // Terminate deepest descendants first, then the shell itself. Never signal our own PID.
-        for entry in snapshot.reversed() {
-            let pid = entry.pid
-            if pid > 1 && pid != getpid() { kill(pid, SIGTERM) }
-        }
-        if let task = currentTask, task.isRunning { task.terminate() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self else { return }
-            // Identity check before SIGKILL: only kill PIDs whose start time still matches the
-            // snapshot, so a recycled PID (now belonging to an unrelated process) is never hit.
-            let currentStarts = self.liveProcessStartTimes()
+        Task { @MainActor in
+            let snapshot = await processTreeSnapshot(rootPID: root)
+            if snapshot.isEmpty && !(currentTask?.isRunning ?? false) {
+                append("No external process is currently running.")
+                managedRootPID = nil
+                return
+            }
+            // Terminate deepest descendants first, then the shell itself. Never signal our own PID.
             for entry in snapshot.reversed() {
                 let pid = entry.pid
-                guard pid > 1, pid != getpid(), currentStarts[pid] == entry.lstart else { continue }
-                if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+                if pid > 1 && pid != getpid() { kill(pid, SIGTERM) }
             }
-            if let task = self.currentTask, task.isRunning {
-                self.append("Process did not exit after terminate; interrupting it.")
-                task.interrupt()
+            if let task = currentTask, task.isRunning { task.terminate() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self else { return }
+                Task { @MainActor in
+                    // Identity check before SIGKILL: only kill PIDs whose start time still
+                    // matches the snapshot, so a recycled PID is never hit.
+                    let currentStarts = await self.liveProcessStartTimes()
+                    for entry in snapshot.reversed() {
+                        let pid = entry.pid
+                        guard pid > 1, pid != getpid(), currentStarts[pid] == entry.lstart else { continue }
+                        if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+                    }
+                    if let task = self.currentTask, task.isRunning {
+                        self.append("Process did not exit after terminate; interrupting it.")
+                        task.interrupt()
+                    }
+                    self.managedRootPID = nil
+                }
             }
-            self.managedRootPID = nil
         }
     }
 
     /// Snapshot (pid, lstart) for rootPID and all of its descendants (breadth-first).
-    private func processTreeSnapshot(rootPID: Int32) -> [(pid: Int32, lstart: String)] {
-        let (children, starts) = processTable()
+    private func processTreeSnapshot(rootPID: Int32) async -> [(pid: Int32, lstart: String)] {
+        let (children, starts) = await processTable()
         var result: [(pid: Int32, lstart: String)] = []
         var seen = Set<Int32>()
         var queue = [rootPID]
@@ -218,35 +232,43 @@ final class ProcessRunner: ObservableObject {
     }
 
     /// Current pid → start-time map (used to verify PID identity before the delayed SIGKILL).
-    private func liveProcessStartTimes() -> [Int32: String] {
-        processTable().starts
+    private func liveProcessStartTimes() async -> [Int32: String] {
+        await processTable().starts
     }
 
     /// One `ps` pass: (pid → children, pid → start time). Called only on STOP.
-    private func processTable() -> (children: [Int32: [Int32]], starts: [Int32: String]) {
-        var children: [Int32: [Int32]] = [:]
-        var starts: [Int32: String] = [:]
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/ps")
-        task.arguments = ["-axo", "pid=,ppid=,lstart="]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = Pipe()
-        do {
-            try task.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            guard let text = String(data: data, encoding: .utf8) else { return (children, starts) }
-            for line in text.components(separatedBy: "\n") {
-                let parts = line.split(whereSeparator: { $0 == " " }).map(String.init)
-                guard parts.count >= 3,
-                      let pid = Int32(parts[0]),
-                      let ppid = Int32(parts[1]) else { continue }
-                children[ppid, default: []].append(pid)
-                starts[pid] = parts[2...].joined(separator: " ")
+    private func processTable() async -> (children: [Int32: [Int32]], starts: [Int32: String]) {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var children: [Int32: [Int32]] = [:]
+                var starts: [Int32: String] = [:]
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/bin/ps")
+                task.arguments = ["-axo", "pid=,ppid=,lstart="]
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = Pipe()
+                do {
+                    try task.run()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    task.waitUntilExit()
+                    guard let text = String(data: data, encoding: .utf8) else {
+                        continuation.resume(returning: (children, starts))
+                        return
+                    }
+                    for line in text.components(separatedBy: "\n") {
+                        let parts = line.split(whereSeparator: { $0 == " " }).map(String.init)
+                        guard parts.count >= 3,
+                              let pid = Int32(parts[0]),
+                              let ppid = Int32(parts[1]) else { continue }
+                        children[ppid, default: []].append(pid)
+                        starts[pid] = parts[2...].joined(separator: " ")
+                    }
+                } catch {
+                }
+                continuation.resume(returning: (children, starts))
             }
-        } catch { }
-        return (children, starts)
+        }
     }
 
     func runAndWait(command: String, in directory: URL) async -> Int32 {

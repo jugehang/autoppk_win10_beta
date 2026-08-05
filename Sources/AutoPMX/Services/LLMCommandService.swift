@@ -819,6 +819,7 @@ struct LLMCommandService {
         multiDose: Bool = false,
         route: String = "Unknown",
         doseUnit: String = "mg",
+        amtUnit: String = "mg",
         concUnit: String = "μg/mL",
         timeUnit: String = "h",
         compartmentSuspected: Bool = false,
@@ -928,7 +929,7 @@ struct LLMCommandService {
         Return ONLY the complete .mod file. No markdown, no explanation outside the file.
 
         PROJECT UNITS (from user configuration):
-          Dose unit: \(doseUnit)   |   AMT unit: \(doseUnit)   |   Conc. unit: \(concUnit)   |   Time unit: \(timeUnit)
+          Dose unit: \(doseUnit)   |   AMT unit: \(amtUnit)   |   Conc. unit: \(concUnit)   |   Time unit: \(timeUnit)
         Use these units consistently in ALL parameter labels, axis labels, and THETA comments.
         For example: CL should be labelled in L/\(timeUnit), V in \(derivedVUnit) (derived from AMT=\(doseUnit) & DV=\(concUnit)).
         CRITICAL — S1 SCALING: Based on your AMT & DV units, the correct scale parameter is S1=\(s1Expression) (1-cpt) / S1=\(s1for2CompExpression) (2+ cpt).

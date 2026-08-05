@@ -257,7 +257,7 @@ final class WorkbenchStore: ObservableObject {
     /// (e.g. AMT=mg, DV=ng/mL → mg/L = 1000× ng/mL → S1 needs /1000).
     /// When false, S1=V (or S1=V1) — no additional scaling.
     private var needsS1Scaling: Bool {
-        switch (amtUnit, concUnit) {
+        switch (normalizedMassUnit(amtUnit), normalizedConcentrationUnit(concUnit)) {
         case ("mg", "ng/mL"), ("g", "µg/mL"): return true
         default: return false
         }
@@ -266,7 +266,7 @@ final class WorkbenchStore: ObservableObject {
     /// Derived CL unit — always plain units. The S1 expression handles any
     /// unit scaling, so CL/V are always reported in standard volume/time.
     var derivedCLUnit: String {
-        switch (amtUnit, concUnit) {
+        switch (normalizedMassUnit(amtUnit), normalizedConcentrationUnit(concUnit)) {
         case ("µg", "µg/mL"): return "mL/h"
         case ("mg", "mg/mL"): return "mL/h"
         default:              return "L/h"
@@ -274,7 +274,7 @@ final class WorkbenchStore: ObservableObject {
     }
     /// Derived V unit — always plain volume unit. S1 handles the rest.
     var derivedVUnit: String {
-        switch (amtUnit, concUnit) {
+        switch (normalizedMassUnit(amtUnit), normalizedConcentrationUnit(concUnit)) {
         case ("µg", "µg/mL"), ("mg", "mg/mL"): return "mL"
         default:                               return "L"
         }
@@ -289,6 +289,31 @@ final class WorkbenchStore: ObservableObject {
     /// Same for 2-compartment models (V1 replaces V).
     var derivedS1for2CompExpression: String {
         needsS1Scaling ? "V1/1000" : "V1"
+    }
+
+    private func normalizedMassUnit(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        if lower.contains("mg") { return "mg" }
+        if lower.contains("µg") || lower.contains("μg") || lower.contains("ug") || lower.contains("mcg") { return "µg" }
+        if lower.contains("ng") { return "ng" }
+        if lower.contains("g") { return "g" }
+        if lower.contains("mmol") { return "mmol" }
+        if lower.contains("mol") { return "mol" }
+        return raw
+    }
+
+    private func normalizedConcentrationUnit(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        if lower.contains("ng/ml") || lower.contains("ng per ml") { return "ng/mL" }
+        if lower.contains("mg/l") || lower.contains("mg per l") { return "mg/L" }
+        if lower.contains("µg/ml") || lower.contains("μg/ml") || lower.contains("ug/ml") || lower.contains("mcg/ml") {
+            return "µg/mL"
+        }
+        if lower.contains("mg/ml") || lower.contains("mg per ml") { return "mg/mL" }
+        if lower.contains("µg/l") || lower.contains("μg/l") || lower.contains("ug/l") { return "µg/L" }
+        if lower.contains("iu/ml") { return "IU/mL" }
+        if lower.contains("ng/dl") { return "ng/dL" }
+        return raw
     }
 
     func setColorSchemeMode(_ mode: String) {
@@ -3042,6 +3067,52 @@ final class WorkbenchStore: ObservableObject {
         }
         return result.joined(separator: "\n")
     }
+
+    /// Hard-code-level S1/S2 unit guard: corrects the scale expression from the
+    /// actual AMT/DV units instead of trusting the LLM to remember /1000.
+    private func correctS1Scaling(_ modText: String) -> String {
+        let lines = modText.components(separatedBy: "\n")
+        var result: [String] = []
+        var inPK = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$PK") {
+                inPK = true
+                result.append(line)
+                continue
+            }
+            if inPK && upper.hasPrefix("$") {
+                inPK = false
+            }
+
+            if inPK, line.range(of: #"\bS[12]\s*="#, options: .regularExpression) != nil {
+                let variable: String
+                if upper.contains("V2") {
+                    variable = "V2"
+                } else if upper.contains("V1") {
+                    variable = "V1"
+                } else {
+                    variable = "V"
+                }
+                let scale = needsS1Scaling ? "\(variable)/1000" : "\(variable)"
+                let prefix = upper.contains("S2") ? "S2" : "S1"
+                let comment = line.components(separatedBy: ";").dropFirst().joined(separator: ";")
+                    .trimmingCharacters(in: .whitespaces)
+                if comment.isEmpty {
+                    result.append("\(prefix) = \(scale)")
+                } else {
+                    result.append("\(prefix) = \(scale) ; \(comment)")
+                }
+                continue
+            }
+
+            result.append(line)
+        }
+        return result.joined(separator: "\n")
+    }
+
     private func normalizeTypicalValueNaming(_ text: String) -> String {
         // Longer names first so e.g. "V1" is handled before "V".
         let pkParams = ["V3", "V2", "V1", "V", "CL", "Q", "KA2", "KA1", "KA"]
@@ -5438,6 +5509,7 @@ final class WorkbenchStore: ObservableObject {
                         multiDose: lagInfo.multiDose,
                         route: lagInfo.route,
                         doseUnit: doseUnit,
+                        amtUnit: amtUnit,
                         concUnit: concUnit,
                         timeUnit: timeUnit,
                         compartmentSuspected: lagInfo.compartmentSuspected,
@@ -5450,9 +5522,11 @@ final class WorkbenchStore: ObservableObject {
                     )
                     recordUsage(usage)
                     try checkAutomationStop("initial model drafting")
-                    let initialModelText = withETATableRecord(
-                        normalizeTypicalValueNaming(initialModel),
-                        runID: "001"
+                    let initialModelText = correctS1Scaling(
+                        withETATableRecord(
+                            normalizeTypicalValueNaming(initialModel),
+                            runID: "001"
+                        )
                     )
                     try initialModelText.write(to: projectURL.appendingPathComponent("run001.mod"), atomically: true, encoding: .utf8)
                     // Preflight validation of the generated model
@@ -5805,6 +5879,7 @@ final class WorkbenchStore: ObservableObject {
                     var draftedModel = normalizeTypicalValueNaming(nextModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
+                    draftedModel = correctS1Scaling(draftedModel)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
                     runner.append("Created candidate model run\(nextRun).mod")
                     // Preflight validation before NONMEM
@@ -8997,6 +9072,15 @@ final class WorkbenchStore: ObservableObject {
         ].joined(separator: " ")
 
         let exit = await runner.runAndWait(command: fixCmd, in: projectURL)
+        if exit == 0 {
+            let modURL = projectURL.appendingPathComponent("run\(runID).mod")
+            if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
+                let fixed = correctS1Scaling(modText)
+                if fixed != modText {
+                    try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
+                }
+            }
+        }
         return exit == 0
     }
 
