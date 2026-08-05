@@ -213,6 +213,31 @@ struct SidebarAssetContextMenu: View {
                 Label("Duplicate as Child Model", systemImage: "doc.on.doc")
             }
 
+            Menu {
+                let copyTargets = store.recentProjectURLs.filter {
+                    $0.standardizedFileURL != store.projectURL.standardizedFileURL
+                }
+                if copyTargets.isEmpty {
+                    Text("No recent projects")
+                } else {
+                    ForEach(copyTargets, id: \.self) { target in
+                        Button {
+                            store.copyModel(asset: asset, toProject: target, openAfterCopy: true)
+                        } label: {
+                            Text(target.lastPathComponent)
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    store.chooseCopyTargetAndCopyModel(asset: asset)
+                } label: {
+                    Label("Choose Folder...", systemImage: "folder")
+                }
+            } label: {
+                Label("Copy Model to Project...", systemImage: "doc.on.doc.fill")
+            }
+
             Divider()
 
             Button {

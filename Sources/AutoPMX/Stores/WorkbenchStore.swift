@@ -1985,6 +1985,166 @@ final class WorkbenchStore: ObservableObject {
         }
     }
 
+    func chooseCopyTargetAndCopyModel(asset: ProjectAsset) {
+        let panel = NSOpenPanel()
+        panel.title = "Copy Model to Project"
+        panel.message = "Choose the target project folder for \(asset.title). The referenced dataset will also be copied when found."
+        panel.prompt = "Copy"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        copyModel(asset: asset, toProject: url, openAfterCopy: true)
+    }
+
+    func copyModel(asset: ProjectAsset, toProject targetURL: URL, openAfterCopy: Bool = false) {
+        guard !automationBusy else {
+            runner.append("Copy model skipped: auto modeling is running.")
+            return
+        }
+
+        let sourceURL = asset.url
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            runner.append("Could not copy \(asset.title): source file is missing.")
+            return
+        }
+        guard FileManager.default.fileExists(atPath: targetURL.path) else {
+            runner.append("Could not copy \(asset.title): target project folder does not exist.")
+            return
+        }
+        guard let sourceText = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            runner.append("Could not read \(asset.title).")
+            return
+        }
+
+        let sourceRunID = asset.relatedRunID ?? ""
+        let newID = nextCopyRunID(in: targetURL)
+        let sourceStem = sourceURL.deletingPathExtension().lastPathComponent
+        let targetStem = "run\(newID)"
+        let dataReference = dataFileReference(in: sourceText)
+        let dataPlaceholder = "__AUTOPMX_COPY_DATA_FILE__"
+
+        var copied = sourceText
+        if dataReference != nil {
+            copied = replacingDataFileReference(in: copied, with: dataPlaceholder)
+        }
+        copied = copied.replacingOccurrences(of: sourceStem, with: targetStem)
+        copied = copied.replacingOccurrences(of: sourceStem.uppercased(), with: targetStem.uppercased())
+        copied = copied.replacingOccurrences(of: sourceStem.lowercased(), with: targetStem.lowercased())
+        if !sourceRunID.isEmpty {
+            copied = copied.replacingOccurrences(of: "SDTAB\(sourceRunID)", with: "SDTAB\(newID)")
+            copied = copied.replacingOccurrences(of: "PATAB\(sourceRunID)", with: "PATAB\(newID)")
+            copied = copied.replacingOccurrences(of: "CATAB\(sourceRunID)", with: "CATAB\(newID)")
+            copied = copied.replacingOccurrences(of: "COTAB\(sourceRunID)", with: "COTAB\(newID)")
+            copied = copied.replacingOccurrences(of: "Run\(sourceRunID)", with: "Run\(newID)")
+            copied = copied.replacingOccurrences(of: "RUN\(sourceRunID)", with: "RUN\(newID)")
+            copied = copied.replacingOccurrences(of: "run\(sourceRunID).ETA", with: "run\(newID).ETA")
+            copied = copied.replacingOccurrences(of: "000\(sourceRunID).ETA", with: "run\(newID).ETA")
+        }
+        if let dataReference {
+            let dataFileName = URL(fileURLWithPath: dataReference).lastPathComponent
+            copied = copied.replacingOccurrences(of: dataPlaceholder, with: dataFileName)
+            copyReferencedDataset(dataReference: dataReference, from: sourceURL, to: targetURL)
+        }
+
+        copied = LLMCommandService.stripInlineDatasetRows(copied)
+        copied = LLMCommandService.normalizingTableRecords(copied, runID: newID)
+        copied = LLMCommandService.applyingIVInfusionDurationFix(copied)
+
+        let destinationURL = targetURL.appendingPathComponent("run\(newID).mod")
+        do {
+            try copied.write(to: destinationURL, atomically: true, encoding: .utf8)
+            runner.append("Copied \(asset.title) → \(destinationURL.path) as run\(newID).mod")
+        } catch {
+            runner.append("Could not copy \(asset.title): \(error.localizedDescription)")
+            return
+        }
+
+        if openAfterCopy {
+            openProject(url: targetURL)
+            if let dataReference {
+                let dataFileName = URL(fileURLWithPath: dataReference).lastPathComponent
+                if FileManager.default.fileExists(atPath: targetURL.appendingPathComponent(dataFileName).path) {
+                    switchDataFile(dataFileName)
+                }
+            }
+            let newAsset = ProjectAsset(
+                url: destinationURL,
+                category: .models,
+                relativePath: destinationURL.lastPathComponent
+            )
+            select(newAsset)
+        }
+    }
+
+    private func nextCopyRunID(in targetURL: URL) -> String {
+        let existing = Set(ProjectScanner.discoverRuns(in: targetURL))
+        var index = 1
+        while true {
+            let candidate = String(format: "%03d", index)
+            if !existing.contains(candidate),
+               !FileManager.default.fileExists(atPath: targetURL.appendingPathComponent("run\(candidate).mod").path) {
+                return candidate
+            }
+            index += 1
+        }
+    }
+
+    private func copyReferencedDataset(dataReference: String, from sourceURL: URL, to targetURL: URL) {
+        let dataName = URL(fileURLWithPath: dataReference).lastPathComponent
+        let sourceDataURL: URL
+        if dataReference.hasPrefix("/") {
+            sourceDataURL = URL(fileURLWithPath: dataReference).standardizedFileURL
+        } else {
+            sourceDataURL = sourceURL.deletingLastPathComponent().appendingPathComponent(dataReference).standardizedFileURL
+        }
+        guard FileManager.default.fileExists(atPath: sourceDataURL.path) else {
+            runner.append("Referenced dataset \(dataReference) was not found beside the model; only the model was copied.")
+            return
+        }
+        let destinationURL = targetURL.appendingPathComponent(dataName)
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            let sourceData = try? Data(contentsOf: sourceDataURL)
+            let destinationData = try? Data(contentsOf: destinationURL)
+            if let sourceData, let destinationData, sourceData == destinationData {
+                runner.append("Dataset \(dataName) already exists in \(targetURL.lastPathComponent); identical copy already present.")
+            } else {
+                runner.append("Dataset \(dataName) already exists in \(targetURL.lastPathComponent) with different content; kept the existing file. Check the copied model's $DATA before running.")
+            }
+            return
+        }
+        do {
+            try FileManager.default.copyItem(at: sourceDataURL, to: destinationURL)
+            runner.append("Copied dataset \(dataName) → \(destinationURL.path)")
+        } catch {
+            runner.append("Could not copy dataset \(dataName): \(error.localizedDescription)")
+        }
+    }
+
+    private func dataFileReference(in modText: String) -> String? {
+        guard let line = modText.components(separatedBy: .newlines).first(where: {
+            $0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("$DATA")
+        }) else { return nil }
+        let tokens = line
+            .trimmingCharacters(in: .whitespaces)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard tokens.count >= 2 else { return nil }
+        var token = tokens[1]
+        if token.hasPrefix("\""), token.hasSuffix("\"") {
+            token = String(token.dropFirst().dropLast())
+        }
+        return token.isEmpty ? nil : token
+    }
+
+    private func replacingDataFileReference(in text: String, with fileName: String) -> String {
+        let mutable = NSMutableString(string: text)
+        if let regex = try? NSRegularExpression(pattern: #"(\$DATA\s+)(?:"[^"]+"|\S+)"#, options: [.caseInsensitive]) {
+            regex.replaceMatches(in: mutable, options: [], range: NSRange(location: 0, length: mutable.length), withTemplate: "$1\(fileName)")
+        }
+        return mutable as String
+    }
+
     private func childRootRunID(for runID: String) -> String {
         guard runID.count > 3,
               runID.suffix(2).allSatisfy(\.isNumber) else {
