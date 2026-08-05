@@ -826,6 +826,8 @@ struct LLMCommandService {
         compartmentShapeDetail: String = "",
         s1Expression: String = "V/1000",
         s1for2CompExpression: String = "V1/1000",
+        s2Expression: String = "V/1000",
+        s2for2CompExpression: String = "V2/1000",
         derivedVUnit: String = "L",
         derivedCLUnit: String = "L/h",
         apiFormat: APIFormat = .openAICompatible
@@ -903,7 +905,7 @@ struct LLMCommandService {
             - ALLOWED templates: extravascular_1c_advan2_trans2 → extravascular_2c_advan4_trans4 → extravascular_3c_advan12_trans4
             - FORBIDDEN: ADVAN1, ADVAN3, ADVAN11 (IV-only). Do not remove KA.
             - The dataset has absorption — KA must be present in $PK and $THETA.
-            - Depot = CMT=1, Central = CMT=2 (use S2=V/1000 for scaling).
+            - Depot = CMT=1, Central = CMT=2 (use S2=\(s2Expression) for scaling).
             - Structural escalation path (ONLY this path):
               Run001: 1-comp oral (KA, CL, V)
               Run002+: 2-comp oral (KA, CL, V2, Q, V3) — ONLY if GOF supports
@@ -932,8 +934,10 @@ struct LLMCommandService {
           Dose unit: \(doseUnit)   |   AMT unit: \(amtUnit)   |   Conc. unit: \(concUnit)   |   Time unit: \(timeUnit)
         Use these units consistently in ALL parameter labels, axis labels, and THETA comments.
         For example: CL should be labelled in L/\(timeUnit), V in \(derivedVUnit) (derived from AMT=\(doseUnit) & DV=\(concUnit)).
-        CRITICAL — S1 SCALING: Based on your AMT & DV units, the correct scale parameter is S1=\(s1Expression) (1-cpt) / S1=\(s1for2CompExpression) (2+ cpt).
-        Do NOT blindly write S1=V/1000 — use the expression above.
+        CRITICAL — SCALE PARAMETER SCALING: Based on your AMT & DV units, the correct scale parameter is:
+        - IV 1-cpt: S1=\(s1Expression) | IV 2+/3-cpt: S1=\(s1for2CompExpression)
+        - Oral / SC / extravascular 1-cpt: S2=\(s2Expression) | Oral / SC / extravascular 2+/3-cpt: S2=\(s2for2CompExpression)
+        Do NOT blindly write S1=V/1000 or S2=V/1000 — use the exact expression above.
 
         RESIDUAL ERROR INITIAL VALUE RULE (DATA-DRIVEN):
         Dataset DV profile: typical (median) concentration = \(profile.typicalDV.map { String(format: "%.3f", $0) } ?? "unknown") \(concUnit)
@@ -1136,7 +1140,7 @@ struct LLMCommandService {
            ─────────────────────────────────────────────
            SCALE PARAMETER (REQUIRED for ADVAN1-4, ADVAN11, ADVAN12):
            - IV models (ADVAN1/3/11): ALWAYS include S1=\(s1Expression) (1-cpt) or S1=\(s1for2CompExpression) (2+/3-cpt) in $PK.
-           - Oral models (ADVAN2/4/12): ALWAYS include S2=V/1000 (1-cpt) or S2=V2/1000 (2+/3-cpt) in $PK.
+           - Oral / SC / extravascular models (ADVAN2/4/12): ALWAYS include S2=\(s2Expression) (1-cpt) or S2=\(s2for2CompExpression) (2+/3-cpt) in $PK.
            - Without S1/S2, NONMEM issues WARNING 23 — parameter estimates become unreliable.
            ─────────────────────────────────────────────
            CRITICAL: The $TABLE must ONLY contain the SAME parameters from $PK.
@@ -1202,6 +1206,8 @@ struct LLMCommandService {
         sessionId: String? = nil,
         s1Expression: String = "V/1000",
         s1for2CompExpression: String = "V1/1000",
+        s2Expression: String = "V/1000",
+        s2for2CompExpression: String = "V2/1000",
         derivedVUnit: String = "L",
         derivedCLUnit: String = "L/h",
         isCovariatePhase: Bool = false,
@@ -1295,9 +1301,12 @@ struct LLMCommandService {
 
         SCALE PARAMETER PLACEMENT RULE:
         S1 or S2 MUST be the LAST line of $PK (after all THETA/ETA definitions).
-        IV 1-cmt: S1=\(s1Expression). IV 2+/3-cmt: S1=\(s1for2CompExpression). Oral: S2=V/1000 or S2=V2/1000.
+        IV 1-cmt: S1=\(s1Expression). IV 2+/3-cmt: S1=\(s1for2CompExpression).
+        Oral / SC / extravascular 1-cmt: S2=\(s2Expression). Oral / SC / extravascular 2+/3-cmt: S2=\(s2for2CompExpression).
         The scale parameter references V or V1/V2 which must be defined BEFORE the S1/S2 line.
-        ⚠ CRITICAL: S1/V scaling depends on your dataset's AMT & DV units. S1=\(s1Expression) / S1=\(s1for2CompExpression) is correct for your dataset. Do NOT blindly write /1000 — use the exact expression above.
+        ⚠ CRITICAL: S1/S2 scaling depends on your dataset's AMT & DV units.
+        S1=\(s1Expression) / S1=\(s1for2CompExpression) and S2=\(s2Expression) / S2=\(s2for2CompExpression) are correct for your dataset.
+        Do NOT blindly write /1000 — use the exact expression above.
 
         PROGRESSIVE MODELING STRATEGY — follow this priority order:
 
@@ -1621,6 +1630,8 @@ struct LLMCommandService {
         sessionId: String? = nil,
         s1Expression: String = "V/1000",
         s1for2CompExpression: String = "V1/1000",
+        s2Expression: String = "V/1000",
+        s2for2CompExpression: String = "V2/1000",
         derivedVUnit: String = "L",
         derivedCLUnit: String = "L/h",
         apiFormat: APIFormat = .openAICompatible
@@ -1911,9 +1922,10 @@ struct LLMCommandService {
         SYNTAX CHECKLIST — follow the poppk_model_library.md template exactly:
         1. NO $IRES/$IWRES records. PsN 5.x does not support them. IRES/IWRES go INSIDE $ERROR instead: IRES=F-Y; IWRES=(F-Y)/W.
         2. SCALE PARAMETER: S1 or S2 ALWAYS goes as the LAST line of $PK (after all parameter definitions).
-           IV 1-cmt: S1=\(s1Expression). IV 2+/3-cmt: S1=\(s1for2CompExpression). Oral: S2=V/1000 or S2=V2/1000.
+           IV 1-cmt: S1=\(s1Expression). IV 2+/3-cmt: S1=\(s1for2CompExpression).
+           Oral / SC / extravascular 1-cmt: S2=\(s2Expression). Oral / SC / extravascular 2+/3-cmt: S2=\(s2for2CompExpression).
            The scale parameter references V or V1/V2 — it MUST appear AFTER the variable is defined.
-           ⚠ CRITICAL: Use the EXACT S1 expression above for your dataset — do NOT blindly add /1000.
+           ⚠ CRITICAL: Use the EXACT S1/S2 expression above for your dataset — do NOT blindly add /1000.
         3. $TABLE: COPY the exact pattern from the template. PATAB = $PK variables ONLY. No ETA() in PATAB. No FORMAT= needed.
         4. $THETA: EVERY line must be (0, value). $OMEGA: ONE variance per line, NO parentheses, values slightly different.
 
@@ -1929,7 +1941,7 @@ struct LLMCommandService {
 
         SCALE PARAMETER (REQUIRED for ADVAN1-4, ADVAN11, ADVAN12):
         - IV models: ALWAYS include S1=\(s1Expression) (1-cpt) or S1=\(s1for2CompExpression) (2+/3-cpt) in $PK.
-        - Oral models: ALWAYS include S2=V/1000 (1-cpt) or S2=V2/1000 (2+/3-cpt) in $PK.
+        - Oral / SC / extravascular models: ALWAYS include S2=\(s2Expression) (1-cpt) or S2=\(s2for2CompExpression) (2+/3-cpt) in $PK.
         - Without S1/S2, NONMEM issues WARNING 23 — parameter estimates become unreliable.
         ─────────────────────────────────────────────
         Before writing $TABLE: scan $PK, list every parameter, use THAT list.
@@ -2605,14 +2617,14 @@ struct LLMCommandService {
         AutoPMX PopPK model library fallback:
         - Initial IV bolus: ADVAN1 TRANS2 with CL, V, S1=V/1000.
         - Initial IV infusion: ADVAN1 TRANS2 with D1=DUR, CL, V, S1=V/1000.
-        - Initial extravascular: ADVAN2 TRANS2 with KA, CL, V, S2=V/1000.
+        - Initial extravascular: ADVAN2 TRANS2 with KA, CL, V, S2=V (or V/1000 only when units require it).
         - IV two-compartment: ADVAN3 TRANS4 with CL, V1, Q, V2, S1=V1/1000.
-        - Extravascular two-compartment: ADVAN4 TRANS4 with KA, CL, V2, Q, V3, S2=V2/1000.
+        - Extravascular two-compartment: ADVAN4 TRANS4 with KA, CL, V2, Q, V3, S2=V2 (or V2/1000 only when units require it).
         - Custom/nonstandard: ADVAN13 with explicit $MODEL and $DES.
         - $INPUT must mirror the CSV header order exactly (use the project's actual $INPUT above, never assume a fixed column set). A common AutoPMX PK schema is: C ID TIME DV AMT RATE DUR CMT MDV EVID ... — always match the real dataset header.
         - C must remain a literal token and must never be C=DROP when $DATA has IGNORE=C.
         - Default residual model: IPRED=F; W=SQRT((THETA(k)*IPRED)**2 + THETA(k+1)**2); Y=IPRED+W*EPS(1); $SIGMA 1 FIX.
-        ⚠ S1/V SCALING NOTE: The /1000 factor in S1=V/1000 is only correct when AMT/DV units require it (e.g. mg+ng/mL). When using mg+µg/mL (or units where mg/L=µg/mL numerically), use S1=V instead. The correct expression for your dataset is specified in the PROJECT UNITS section above.
+        ⚠ S1/S2 SCALING NOTE: The /1000 factor is only correct when AMT/DV units require it (e.g. mg+ng/mL). When using mg+µg/mL (or units where mg/L=µg/mL numerically), use S1=V / S2=V instead. The correct expression for your dataset is specified in the PROJECT UNITS section above.
         """
     }
 

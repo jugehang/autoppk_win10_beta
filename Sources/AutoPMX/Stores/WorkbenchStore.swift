@@ -290,6 +290,14 @@ final class WorkbenchStore: ObservableObject {
     var derivedS1for2CompExpression: String {
         needsS1Scaling ? "V1/1000" : "V1"
     }
+    /// Correct S2 scaling expression for oral / subcutaneous extravascular models.
+    var derivedS2Expression: String {
+        needsS1Scaling ? "V/1000" : "V"
+    }
+    /// Same for 2+ compartment extravascular models (V2 replaces V).
+    var derivedS2for2CompExpression: String {
+        needsS1Scaling ? "V2/1000" : "V2"
+    }
 
     private func normalizedMassUnit(_ raw: String) -> String {
         let lower = raw.lowercased()
@@ -5095,6 +5103,8 @@ final class WorkbenchStore: ObservableObject {
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
                         s1for2CompExpression: derivedS1for2CompExpression,
+                        s2Expression: derivedS2Expression,
+                        s2for2CompExpression: derivedS2for2CompExpression,
                         derivedVUnit: derivedVUnit,
                         derivedCLUnit: derivedCLUnit,
                         isCovariatePhase: true,
@@ -5168,6 +5178,8 @@ final class WorkbenchStore: ObservableObject {
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
                         s1for2CompExpression: derivedS1for2CompExpression,
+                        s2Expression: derivedS2Expression,
+                        s2for2CompExpression: derivedS2for2CompExpression,
                         derivedVUnit: derivedVUnit,
                         derivedCLUnit: derivedCLUnit,
                         apiFormat: activeAPIFormat
@@ -5516,6 +5528,8 @@ final class WorkbenchStore: ObservableObject {
                         compartmentShapeDetail: lagInfo.compartmentShapeDetail,
                         s1Expression: derivedS1Expression,
                         s1for2CompExpression: derivedS1for2CompExpression,
+                        s2Expression: derivedS2Expression,
+                        s2for2CompExpression: derivedS2for2CompExpression,
                         derivedVUnit: derivedVUnit,
                         derivedCLUnit: derivedCLUnit,
                         apiFormat: activeAPIFormat
@@ -5654,6 +5668,8 @@ final class WorkbenchStore: ObservableObject {
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
                         s1for2CompExpression: derivedS1for2CompExpression,
+                        s2Expression: derivedS2Expression,
+                        s2for2CompExpression: derivedS2for2CompExpression,
                         derivedVUnit: derivedVUnit,
                         derivedCLUnit: derivedCLUnit,
                         isCovariatePhase: false,
@@ -5870,6 +5886,8 @@ final class WorkbenchStore: ObservableObject {
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
                         s1for2CompExpression: derivedS1for2CompExpression,
+                        s2Expression: derivedS2Expression,
+                        s2for2CompExpression: derivedS2for2CompExpression,
                         derivedVUnit: derivedVUnit,
                         derivedCLUnit: derivedCLUnit,
                         apiFormat: activeAPIFormat
