@@ -66,6 +66,37 @@ struct DatasetProfile {
     }
 }
 
+struct NCAInitialEstimates {
+    let clearanceLPerHour: Double?
+    let volumeLiters: Double?
+    let terminalHalfLifeHours: Double?
+    let aucInfMedian: Double?
+    let subjectCount: Int
+
+    var summary: String {
+        if subjectCount == 0 {
+            return "NCA-based initial estimates: unavailable (check dataset columns)"
+        }
+        var lines = ["NCA-based initial estimates (median):"]
+        if let auc = aucInfMedian {
+            lines.append("  AUCinf = \(String(format: "%.3f", auc))")
+        }
+        if let cl = clearanceLPerHour {
+            lines.append("  CL = \(String(format: "%.4g", cl)) L/h")
+        }
+        if let v = volumeLiters {
+            lines.append("  Vz = \(String(format: "%.4g", v)) L")
+        }
+        if let hl = terminalHalfLifeHours {
+            lines.append("  t1/2 = \(String(format: "%.1f", hl)) h")
+        }
+        if subjectCount > 0 {
+            lines.append("  subjects with valid NCA = \(subjectCount)")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 struct LLMCommandService {
     // MARK: - Token usage tracking
     struct TokenUsage {
@@ -839,6 +870,7 @@ struct LLMCommandService {
         let modelLibrary = modelLibraryText(projectURL: projectURL)
         let recommendedTemplate = recommendedInitialTemplate(for: profile)
         let inputRecord = inputRecordFromDataset(projectURL: projectURL, dataFile: dataFile) ?? defaultInputRecord
+        let nca = ncaInitialEstimates(projectURL: projectURL, dataFile: dataFile)
 
         // Rule/knowledge content is intentionally preserved at the full upstream
         // budget. Speed comes from avoiding duplicate copies, not from trimming rules.
@@ -1037,6 +1069,8 @@ struct LLMCommandService {
 
         """)
         \(profile.summary)
+
+        \(nca.summary)
 
         TEMPLATE-FIRST RULES:
         - Recommended TEMPLATE_ID for run\(runID): \(recommendedTemplate)
@@ -2904,6 +2938,247 @@ struct LLMCommandService {
             ageMean: ageMean,
             sexLevels: Array(sexValues),
             studyLevels: Array(studyValues)
+        )
+    }
+
+    /// Deterministic first-pass NCA estimates for a simple compartmental model.
+    /// Uses each subject's first dosing interval, linear-trapezoidal AUC and a
+    /// log-linear terminal slope to derive CL and Vz seeds.
+    static func ncaInitialEstimates(projectURL: URL, dataFile: String) -> NCAInitialEstimates {
+        let dataURL = projectURL.appendingPathComponent(dataFile)
+        guard let raw = try? String(contentsOf: dataURL, encoding: .utf8) else {
+            return NCAInitialEstimates(
+                clearanceLPerHour: nil,
+                volumeLiters: nil,
+                terminalHalfLifeHours: nil,
+                aucInfMedian: nil,
+                subjectCount: 0
+            )
+        }
+
+        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.components(separatedBy: "\n").filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard lines.count > 1 else {
+            return NCAInitialEstimates(
+                clearanceLPerHour: nil,
+                volumeLiters: nil,
+                terminalHalfLifeHours: nil,
+                aucInfMedian: nil,
+                subjectCount: 0
+            )
+        }
+
+        let headers = parseCSVLine(lines[0]).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                .uppercased()
+        }
+        func index(_ name: String) -> Int? {
+            headers.firstIndex(where: { $0 == name })
+        }
+
+        guard
+            let idIdx = index("ID"),
+            let timeIdx = index("TIME"),
+            let dvIdx = index("DV"),
+            let amtIdx = index("AMT")
+        else {
+            return NCAInitialEstimates(
+                clearanceLPerHour: nil,
+                volumeLiters: nil,
+                terminalHalfLifeHours: nil,
+                aucInfMedian: nil,
+                subjectCount: 0
+            )
+        }
+
+        let evidIdx = index("EVID")
+        let doseIdx = index("DOSE")
+        let iiIdx = index("II")
+        let maxColumn = max(idIdx, timeIdx, dvIdx, amtIdx, evidIdx ?? 0, doseIdx ?? 0, iiIdx ?? 0)
+
+        var doseTimeByID: [String: Double] = [:]
+        var doseByID: [String: Double] = [:]
+        var intervalByID: [String: Double] = [:]
+        var observationsByID: [String: [(time: Double, conc: Double)]] = [:]
+
+        for line in lines.dropFirst() {
+            let cols = parseCSVLine(line).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            }
+            guard cols.count > maxColumn else { continue }
+
+            let id = cols[idIdx]
+            guard !id.isEmpty, id != "." else { continue }
+            guard let time = Double(cols[timeIdx]) else { continue }
+
+            let evid = evidIdx.flatMap { Double(cols[$0]) } ?? 0
+            let amt = Double(cols[amtIdx])
+            let isDose = (evid == 1 || evid == 4) || (amt ?? 0) > 0
+
+            if isDose {
+                let dose = (amt ?? 0) > 0
+                    ? amt!
+                    : (doseIdx.flatMap { Double(cols[$0]) } ?? 0)
+                let interval = iiIdx.flatMap { Double(cols[$0]) } ?? 0
+                doseTimeByID[id] = time
+                doseByID[id] = dose
+                intervalByID[id] = interval
+            } else if let dv = Double(cols[dvIdx]), dv > 0 {
+                observationsByID[id, default: []].append((time: time, conc: dv))
+            }
+        }
+
+        var clearances: [Double] = []
+        var volumes: [Double] = []
+        var halfLives: [Double] = []
+        var aucInfs: [Double] = []
+
+        for id in doseByID.keys {
+            guard
+                let dose = doseByID[id],
+                let doseTime = doseTimeByID[id],
+                dose > 0
+            else { continue }
+
+            let interval = intervalByID[id] ?? 0
+            let intervalEnd = interval > 0 ? doseTime + interval : nil
+            let points = (observationsByID[id] ?? [])
+                .filter { $0.time > doseTime && (intervalEnd == nil || $0.time < intervalEnd!) }
+                .sorted { $0.time < $1.time }
+            guard points.count >= 2 else { continue }
+
+            var auc = 0.0
+            for i in 0..<(points.count - 1) {
+                let t0 = points[i].time
+                let t1 = points[i + 1].time
+                guard t1 > t0 else { continue }
+                auc += (t1 - t0) * (points[i].conc + points[i + 1].conc) / 2.0
+            }
+
+            let tail = Array(points.suffix(3)).filter { $0.conc > 0 }
+            guard tail.count >= 2 else { continue }
+            let n = Double(tail.count)
+            let meanTime = tail.reduce(0.0) { $0 + $1.time } / n
+            let meanLog = tail.reduce(0.0) { $0 + log($1.conc) } / n
+            var numerator = 0.0
+            var denominator = 0.0
+            for point in tail {
+                let dt = point.time - meanTime
+                numerator += dt * (log(point.conc) - meanLog)
+                denominator += dt * dt
+            }
+            guard denominator > 0, numerator < 0 else { continue }
+            let lambdaZ = -numerator / denominator
+            guard lambdaZ > 1e-8 else { continue }
+
+            let clast = points.last?.conc ?? tail.last!.conc
+            let aucInf = auc + clast / lambdaZ
+            guard aucInf > 0 else { continue }
+
+            let clearance = dose / aucInf
+            let volume = clearance / lambdaZ
+            let halfLife = log(2.0) / lambdaZ
+            guard clearance > 0, volume > 0, halfLife > 0 else { continue }
+
+            clearances.append(clearance)
+            volumes.append(volume)
+            halfLives.append(halfLife)
+            aucInfs.append(aucInf)
+        }
+
+        func median(_ values: [Double]) -> Double? {
+            guard !values.isEmpty else { return nil }
+            let sorted = values.sorted()
+            return sorted[sorted.count / 2]
+        }
+
+        return NCAInitialEstimates(
+            clearanceLPerHour: median(clearances),
+            volumeLiters: median(volumes),
+            terminalHalfLifeHours: median(halfLives),
+            aucInfMedian: median(aucInfs),
+            subjectCount: clearances.count
+        )
+    }
+
+    /// Replace only the base CL/V initial values in a generated model with the
+    /// deterministic NCA seeds when they can be derived.
+    static func applyingNCAInitialValues(
+        _ modText: String,
+        projectURL: URL,
+        dataFile: String
+    ) -> String {
+        let nca = ncaInitialEstimates(projectURL: projectURL, dataFile: dataFile)
+        guard let clearance = nca.clearanceLPerHour, let volume = nca.volumeLiters else {
+            return modText
+        }
+
+        let lines = modText.components(separatedBy: "\n")
+        var result = lines
+        var inTheta = false
+        var thetaIndex = 0
+
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$THETA") {
+                inTheta = true
+                thetaIndex = 0
+                continue
+            }
+            if inTheta && trimmed.hasPrefix("$") {
+                inTheta = false
+                continue
+            }
+            guard inTheta, !trimmed.isEmpty, !trimmed.hasPrefix(";") else { continue }
+            thetaIndex += 1
+
+            let comment = line.components(separatedBy: ";")
+                .dropFirst()
+                .joined(separator: ";")
+                .uppercased()
+            let hasCL = comment.range(of: #"\bCL\b"#, options: .regularExpression) != nil
+            let hasV = comment.range(of: #"\bV\b"#, options: .regularExpression) != nil
+                && comment.range(of: #"\bV[123]\b"#, options: .regularExpression) == nil
+                && comment.range(of: #"\bVSS\b"#, options: .regularExpression) == nil
+                && comment.range(of: #"\bVZ\b"#, options: .regularExpression) == nil
+            let unlabeledBaseTheta = comment.trimmingCharacters(in: .whitespaces).isEmpty && thetaIndex <= 2
+
+            let replacement: Double?
+            if hasCL {
+                replacement = clearance
+            } else if hasV {
+                replacement = volume
+            } else if unlabeledBaseTheta {
+                replacement = thetaIndex == 1 ? clearance : volume
+            } else {
+                replacement = nil
+            }
+
+            if let replacement {
+                result[index] = replacingThetaInitialValue(line, value: replacement)
+            }
+        }
+
+        return result.joined(separator: "\n")
+    }
+
+    private static func replacingThetaInitialValue(_ line: String, value: Double) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"^(\s*\(\s*0\s*,\s*)[^,)]+"#,
+            options: []
+        ) else { return line }
+        let range = NSRange(line.startIndex..., in: line)
+        let formatted = String(format: "%.6g", value)
+        return regex.stringByReplacingMatches(
+            in: line,
+            options: [],
+            range: range,
+            withTemplate: "$1\(formatted)"
         )
     }
 

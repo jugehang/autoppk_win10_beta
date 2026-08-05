@@ -5639,6 +5639,11 @@ final class WorkbenchStore: ObservableObject {
                             runID: "001"
                         )
                     )
+                    initialModelText = LLMCommandService.applyingNCAInitialValues(
+                        initialModelText,
+                        projectURL: projectURL,
+                        dataFile: activeDataFile
+                    )
                     try initialModelText.write(to: projectURL.appendingPathComponent("run001.mod"), atomically: true, encoding: .utf8)
                     // Preflight validation of the generated model
                     let validation = await validateModel("001")
@@ -5654,6 +5659,24 @@ final class WorkbenchStore: ObservableObject {
                             )
                         }
                     }
+
+                    let ncaSeeds = LLMCommandService.ncaInitialEstimates(
+                        projectURL: projectURL,
+                        dataFile: activeDataFile
+                    )
+                    if ncaSeeds.subjectCount > 0 {
+                        automationStep = "GA initial value search"
+                        addThinkingStep("GA: refining run001 initial values around NCA seeds", type: .working)
+                        try checkAutomationStop("GA initial value search")
+                        let gaOK = await runInitialGAStart(runID: "001", dataFile: activeDataFile)
+                        try checkAutomationStop("GA initial value search")
+                        if gaOK {
+                            updateLastThinkingStep(type: .done, detail: "GA + NCA initial values ready")
+                        } else {
+                            updateLastThinkingStep(type: .working, detail: "Using NCA initial values")
+                        }
+                    }
+
                     sourceRun = "001"
                     previousForComparison = nil
                     modelRuns = ["001"]
@@ -7285,6 +7308,75 @@ final class WorkbenchStore: ObservableObject {
             BundledResource.path(forResource: "autopmx_ga", ofType: "py"),
         ].compactMap { $0 }
         return candidates.first { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    private func runInitialGAStart(runID: String, dataFile: String, popSize: Int = 6, iterations: Int = 3) async -> Bool {
+        guard let gaScript = findGAScript(), !nonmemPath.isEmpty else {
+            return false
+        }
+
+        let python = resolvedPython()
+        let rscript = resolvedR()
+        let modPath = projectURL.appendingPathComponent("run\(runID).mod").path
+        let gaOutput = projectURL.appendingPathComponent("run\(runID).ga.mod").path
+        let backupURL = projectURL.appendingPathComponent(".autopmx_backups", isDirectory: true)
+            .appendingPathComponent("run\(runID).pre_ga.mod")
+        try? FileManager.default.createDirectory(
+            at: backupURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let originalModURL = projectURL.appendingPathComponent("run\(runID).mod")
+        if let original = try? String(contentsOf: originalModURL, encoding: .utf8) {
+            try? original.write(to: backupURL, atomically: true, encoding: .utf8)
+        }
+
+        let cmd = [
+            shellQuote(python),
+            shellQuote(gaScript),
+            "--mod", shellQuote(modPath),
+            "--project-dir", shellQuote(projectURL.path),
+            "--nmfe", shellQuote(nonmemPath),
+            "--rscript", shellQuote(rscript),
+            "--output", shellQuote(gaOutput),
+            "--ga-pop", "\(popSize)",
+            "--ga-iter", "\(iterations)",
+            "--ga-elite", "0.2",
+            "--json",
+        ].joined(separator: " ")
+
+        runner.append("GA: searching initial THETA values around NCA seeds (pop=\(popSize), iterations=\(iterations))")
+        let exit = await runner.runAndWait(command: cmd, in: projectURL)
+        let outputURL = projectURL.appendingPathComponent("run\(runID).ga.mod")
+        guard exit == 0, FileManager.default.fileExists(atPath: outputURL.path),
+              let gaText = try? String(contentsOf: outputURL, encoding: .utf8) else {
+            runner.append("GA initial-value search did not produce a usable model; keeping NCA seeds.")
+            try? FileManager.default.removeItem(at: outputURL)
+            return false
+        }
+
+        var candidate = LLMCommandService.stripInlineDatasetRows(gaText)
+        candidate = correctS1Scaling(candidate)
+        do {
+            try candidate.write(to: originalModURL, atomically: true, encoding: .utf8)
+        } catch {
+            runner.append("GA initial-value model could not be written: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: outputURL)
+            return false
+        }
+        try? FileManager.default.removeItem(at: outputURL)
+
+        let validation = await validateModel(runID)
+        if validation.passed {
+            runner.append("GA refined run\(runID) initial values and validation passed.")
+            return true
+        }
+
+        if let backup = try? String(contentsOf: backupURL, encoding: .utf8) {
+            try? backup.write(to: originalModURL, atomically: true, encoding: .utf8)
+        }
+        runner.append("GA candidate failed validation; restored NCA-seeded run\(runID).")
+        return false
     }
 
     // MARK: - GA Structural Search
@@ -9234,7 +9326,14 @@ final class WorkbenchStore: ObservableObject {
             let modURL = projectURL.appendingPathComponent("run\(runID).mod")
             if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
                 let sanitized = LLMCommandService.stripInlineDatasetRows(modText)
-                let fixed = correctS1Scaling(sanitized)
+                var fixed = correctS1Scaling(sanitized)
+                if !isModelRunSuccessful(runID: runID) {
+                    fixed = LLMCommandService.applyingNCAInitialValues(
+                        fixed,
+                        projectURL: projectURL,
+                        dataFile: dataFile
+                    )
+                }
                 if fixed != modText {
                     try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
                 }
