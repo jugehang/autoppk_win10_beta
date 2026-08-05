@@ -936,6 +936,45 @@ Workspace/
   <li><span class="en"><strong>Pin to Top / Reveal in Finder / Move to Trash</strong> — Organize files in the sidebar</span><span class="zh"><strong>置顶 / 在 Finder 中显示 / 移到废纸篓</strong> —— 管理侧栏文件</span></li>
 </ul>
 
+<h3><span class="en">Model Operations at a Glance</span><span class="zh">模型操作速览</span></h3>
+<p><span class="en">A <code>.mod</code> file is the NONMEM control stream. It defines the structural model, parameters, error model, dataset mapping, and output tables. The related result files below are generated after a successful run:</span><span class="zh"><code>.mod</code> 文件是 NONMEM 控制流，它定义结构模型、参数、误差模型、数据映射与输出表。运行成功后会产生以下关联结果文件：</span></p>
+<table>
+  <tr><th><span class="en">File</span><span class="zh">文件</span></th><th><span class="en">What it tells you</span><span class="zh">含义</span></th></tr>
+  <tr><td><code>run001.mod</code></td><td><span class="en">Control stream / model definition</span><span class="zh">控制流 / 模型定义</span></td></tr>
+  <tr><td><code>run001.lst</code></td><td><span class="en">NONMEM run log; check this first when the model fails</span><span class="zh">NONMEM 运行日志；模型失败时优先查看</span></td></tr>
+  <tr><td><code>run001.ext</code></td><td><span class="en">Final THETA / OMEGA / SIGMA estimates</span><span class="zh">最终 THETA / OMEGA / SIGMA 估计</span></td></tr>
+  <tr><td><code>run001.cov</code></td><td><span class="en">Covariance matrix; used to calculate RSE / standard errors</span><span class="zh">协方差矩阵；用于计算 RSE / 标准误</span></td></tr>
+  <tr><td><code>run001.phi</code></td><td><span class="en">Individual ETA / post-hoc estimates</span><span class="zh">个体 ETA / post-hoc 估计</span></td></tr>
+  <tr><td><code>run001.ETA</code></td><td><span class="en">EBE table used by ETA-covariate screening</span><span class="zh">用于 ETA-协变量预筛选的 EBE 表</span></td></tr>
+</table>
+
+<h3><span class="en">Step-by-Step Model Operations</span><span class="zh">模型操作分步说明</span></h3>
+<ol>
+  <li><span class="en"><strong>Set the modeling dataset</strong> — Under <strong>Data</strong>, right-click a CSV and choose <strong>Set as Modeling Dataset</strong>. This is the file DuDu Auto and SCM will use.</span><span class="zh"><strong>设置建模数据集</strong> —— 在 <strong>Data</strong> 下右键 CSV，选择 <strong>Set as Modeling Dataset</strong>。DuDu Auto 与 SCM 会使用该数据集。</span></li>
+  <li><span class="en"><strong>Open a model</strong> — Click <code>run001.mod</code> or another <code>.mod</code> file in <strong>Models</strong>. The Inspector shows its PsN command and current dataset.</span><span class="zh"><strong>打开模型</strong> —— 在 <strong>Models</strong> 中点击 <code>run001.mod</code> 或其他 <code>.mod</code> 文件。检查器会显示它的 PsN 命令与当前数据集。</span></li>
+  <li><span class="en"><strong>Run the model</strong> — Click <strong>Run</strong> in the Inspector, press <strong>⌘↩</strong>, or right-click the model and choose <strong>Run NONMEM via PsN</strong>.</span><span class="zh"><strong>运行模型</strong> —— 点击检查器中的 <strong>Run</strong>、按 <strong>⌘↩</strong>，或右键模型选择 <strong>Run NONMEM via PsN</strong>。</span></li>
+  <li><span class="en"><strong>Monitor the run</strong> — Open the <strong>Terminal &amp; Run Log</strong> panel to watch execution. When finished, the new <code>.lst</code> / <code>.ext</code> / <code>.cov</code> files appear under <strong>Outputs</strong>.</span><span class="zh"><strong>查看运行状态</strong> —— 打开 <strong>终端与运行日志</strong> 面板观察执行进度。结束后，新的 <code>.lst</code> / <code>.ext</code> / <code>.cov</code> 会出现在 <strong>Outputs</strong> 下。</span></li>
+  <li><span class="en"><strong>Read the result</strong> — Select the model again and check <strong>Parameter Estimates</strong> in the Inspector. Use <code>.lst</code> when a run fails; it contains the exact NONMEM error.</span><span class="zh"><strong>查看结果</strong> —— 再次选中模型，查看检查器中的 <strong>Parameter Estimates</strong>。运行失败时查看 <code>.lst</code>，其中包含 NONMEM 的具体报错。</span></li>
+  <li><span class="en"><strong>Run diagnostics</strong> — Right-click the model and choose <strong>Run GOF</strong>, <strong>Run VPC</strong>, <strong>Individual DV-Time</strong>, or <strong>Run All Diagnostics</strong> to assess model performance.</span><span class="zh"><strong>运行诊断</strong> —— 右键模型，选择 <strong>Run GOF</strong>、<strong>Run VPC</strong>、<strong>Individual DV-Time</strong> 或 <strong>Run All Diagnostics</strong> 评估模型表现。</span></li>
+  <li><span class="en"><strong>Advanced assessment</strong> — Use <strong>AI Evaluate</strong>, <strong>ETA Covariate Screening</strong>, <strong>Bootstrap</strong>, <strong>SCM</strong>, <strong>GA Optimize</strong>, or <strong>Final Model Analysis</strong> from the same context menu.</span><span class="zh"><strong>高级评估</strong> —— 可在同一右键菜单中使用 <strong>AI Evaluate</strong>、<strong>ETA 协变量预筛选</strong>、<strong>Bootstrap</strong>、<strong>SCM</strong>、<strong>GA Optimize</strong> 或 <strong>Final Model Analysis</strong>。</span></li>
+  <li><span class="en"><strong>Mark important models</strong> — Right-click a <code>.mod</code> and choose <strong>Tag</strong> to color-mark the base model, final model, or AI-recommended model.</span><span class="zh"><strong>标记重要模型</strong> —— 右键 <code>.mod</code> 选择 <strong>Tag</strong>，为基础模型、最终模型或 AI 推荐模型添加颜色标记。</span></li>
+</ol>
+
+<div class="info">
+  <strong><span class="en">Manual Run vs DuDu Auto:</span><span class="zh">手动运行 vs DuDu Auto：</span></strong>
+  <span class="en"><strong>Manual Run</strong> executes one selected model as-is. <strong>DuDu Auto</strong> analyzes the dataset, writes/repairs models, runs NONMEM, evaluates diagnostics, and proposes the next model automatically.</span>
+  <span class="zh"><strong>手动运行</strong>只按原样执行选中的模型。<strong>DuDu Auto</strong> 会自动分析数据集、生成/修复模型、运行 NONMEM、评估诊断并给出下一步模型。</span>
+</div>
+
+<h3><span class="en">How to Choose a Parent / Baseline Model</span><span class="zh">如何选择父模型 / 基准模型</span></h3>
+<p><span class="en">DuDu Auto can continue from an existing model. The selected parent model is the baseline for the next run, so its parameter estimates are used as starting values.</span><span class="zh">DuDu Auto 可以从已有模型继续。所选父模型就是下一轮建模的基准，下一轮会以其参数估计作为起始值。</span></p>
+<ol>
+  <li><span class="en">Open <strong>DuDu Auto</strong> and set the mode to <strong>Continue From Model</strong>.</span><span class="zh">打开 <strong>DuDu Auto</strong>，将模式设为 <strong>Continue From Model</strong>。</span></li>
+  <li><span class="en">In <strong>Parent Model</strong>, select the model you want to use as the baseline.</span><span class="zh">在 <strong>Parent Model</strong> 中选择你想作为基准的模型。</span></li>
+  <li><span class="en">In <strong>Dataset</strong>, choose the dataset for the next modeling run.</span><span class="zh">在 <strong>Dataset</strong> 中选择下一轮建模使用的数据集。</span></li>
+  <li><span class="en">If you choose an IV model and a different full dataset, AutoPMx asks whether to use the IV model parameters as starting values. Confirm when that is your intent.</span><span class="zh">如果你选择的是 IV 模型，且同时切换到了其他全数据集，AutoPMx 会询问是否以 IV 模型参数作为起始值。确认即可。</span></li>
+</ol>
+
 <h3><span class="en">Daily Operations: Dataset, Pinned Files, and Model Marks</span><span class="zh">常用操作：数据集、置顶文件与模型标记</span></h3>
 <ul>
   <li><span class="en"><strong>Set a modeling dataset</strong> — Right-click any CSV under <strong>Data</strong> and choose <strong>Set as Modeling Dataset</strong>. A blue <code>Modeling Dataset</code> badge appears on the active CSV, and DuDu Auto / SCM will use that file by default.</span><span class="zh"><strong>设置建模数据集</strong> —— 在 <strong>Data</strong> 下右键任意 CSV，选择 <strong>Set as Modeling Dataset</strong>。当前数据集会显示蓝色 <code>Modeling Dataset</code> 徽标，DuDu Auto / SCM 默认使用该文件。</span></li>
