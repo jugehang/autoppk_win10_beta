@@ -8131,16 +8131,23 @@ final class WorkbenchStore: ObservableObject {
         let compartments: Int
         let structuralPrecisionIssues: [String]
         let highRSEParameters: [String]
+        let residualPrecisionIssues: [String]
 
         /// A more complex model is not worth escalating to when its key structural
-        /// parameters are imprecise, or when many estimated parameters are imprecise.
+        /// parameters are imprecise, residual-error RSE is unacceptable, or many
+        /// estimated parameters are imprecise.
         var precisionEligible: Bool {
-            structuralPrecisionIssues.isEmpty && highRSEParameters.count < 3
+            structuralPrecisionIssues.isEmpty
+                && residualPrecisionIssues.isEmpty
+                && highRSEParameters.count < 3
         }
 
         var precisionLabel: String {
             if structuralPrecisionIssues.isEmpty && highRSEParameters.isEmpty {
                 return "OK"
+            }
+            if !residualPrecisionIssues.isEmpty {
+                return "RESID(\(residualPrecisionIssues.count))"
             }
             if structuralPrecisionIssues.isEmpty {
                 return "warn(\(highRSEParameters.count))"
@@ -8149,8 +8156,9 @@ final class WorkbenchStore: ObservableObject {
         }
 
         var precisionReason: String {
-            if !structuralPrecisionIssues.isEmpty {
-                return structuralPrecisionIssues.prefix(6).joined(separator: ", ")
+            let issues = structuralPrecisionIssues + residualPrecisionIssues
+            if !issues.isEmpty {
+                return issues.prefix(6).joined(separator: ", ")
             }
             return "\(highRSEParameters.count) parameters with %RSE > 50%"
         }
@@ -8908,8 +8916,10 @@ final class WorkbenchStore: ObservableObject {
             let ofv = extractOFV(from: projectURL.appendingPathComponent("run\(runID).ext"))
             let stable = isModelStable(runID: runID)
             let precision = parameterPrecisionStatus(runID: runID)
-            let precisionIssues = precision.structuralIssues.isEmpty ? precision.highRSE : precision.structuralIssues
-            let precisionEligible = precision.structuralIssues.isEmpty && precision.highRSE.count < 3
+            let precisionIssues = precision.highRSE
+            let precisionEligible = precision.structuralIssues.isEmpty
+                && precision.residualIssues.isEmpty
+                && precision.highRSE.count < 3
             grouped[ci.compartments, default: []].append((runID, ofv, ci, stable, precisionEligible, precisionIssues))
         }
 
@@ -9061,25 +9071,37 @@ final class WorkbenchStore: ObservableObject {
             stable: stable,
             compartments: compartmentInfoForRun(runID).compartments,
             structuralPrecisionIssues: precision.structuralIssues,
-            highRSEParameters: precision.highRSE
+            highRSEParameters: precision.highRSE,
+            residualPrecisionIssues: precision.residualIssues
         )
     }
 
-    private func parameterPrecisionStatus(runID: String) -> (structuralIssues: [String], highRSE: [String]) {
+    private func parameterPrecisionStatus(runID: String) -> (structuralIssues: [String], highRSE: [String], residualIssues: [String]) {
         let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
         var structuralIssues: [String] = []
         var highRSE: [String] = []
+        var residualIssues: [String] = []
 
         for row in rows {
             guard let rse = row.rsePercent, rse.isFinite, rse > 50 else { continue }
             let text = "\(row.name) \(String(format: "%.1f", rse))%"
             highRSE.append(text)
-            if isStructuralPKParameter(row) {
+            if isResidualErrorParameter(row) {
+                residualIssues.append(text)
+            } else if isStructuralPKParameter(row) {
                 structuralIssues.append(text)
             }
         }
 
-        return (structuralIssues, highRSE)
+        return (structuralIssues, highRSE, residualIssues)
+    }
+
+    private func isResidualErrorParameter(_ row: ParameterEstimateRow) -> Bool {
+        let upper = row.name.uppercased()
+        let residualTerms = ["RE", "ERROR", "RESIDUAL", "SIGMA"]
+        return row.group == "Residual"
+            || row.group == "SIGMA"
+            || residualTerms.contains { upper.contains($0) }
     }
 
     private func isStructuralPKParameter(_ row: ParameterEstimateRow) -> Bool {
@@ -9095,8 +9117,8 @@ final class WorkbenchStore: ObservableObject {
     /// 1. For EACH compartment count (1, 2, 3), find the BEST model within that group
     /// 2. Compare consecutive compartment counts using ΔOFV threshold
     /// 3. Stop when adding a compartment does NOT bring significant improvement
-    /// 4. Reject a significantly better complex model if key structural %RSE is too
-    ///    high or many parameters are imprecise — precision must be acceptable too.
+    /// 4. Reject a significantly better complex model if structural %RSE, residual
+    ///    error %RSE, or too many estimated parameters are imprecise.
     private func selectBestBaseModel(choices: [AutomationRunChoice]) -> AutomationRunChoice? {
         guard !choices.isEmpty else { return nil }
 
@@ -9166,7 +9188,7 @@ final class WorkbenchStore: ObservableObject {
 
             if delta > threshold {
                 // Significant OFV improvement alone is not enough. A more complex model
-                // with unstable key structural %RSE (or many imprecise parameters) is
+                // with unstable structural or residual %RSE (or many imprecise parameters) is
                 // not a robust base model, so keep the simpler stable model.
                 if currentChoice.precisionEligible {
                     runner.append("Base model selection: \(currentComp)-comp run\(currentChoice.runID) significantly better than \(bestChoice.compartments)-comp (ΔOFV=\(String(format: "%.1f", delta)) > threshold \(String(format: "%.1f", threshold))) and %RSE precision acceptable → ACCEPT")
@@ -9239,7 +9261,7 @@ final class WorkbenchStore: ObservableObject {
         - Dataset route: \(profile.route)
         - Subject count: \(profile.subjectCount)
         - Observation count: \(profile.observationCount)
-        - Selection rule: stable S+C first; prefer lower OFV; reject a more complex model when key structural %RSE > 50% or ≥3 estimated parameters are imprecise.
+        - Selection rule: stable S+C first; prefer lower OFV; reject a more complex model when structural or residual %RSE > 50% or ≥3 estimated parameters are imprecise.
 
         | Run | OFV | Compartments | Minimization | Covariance | Stability | Precision | Outputs |
         | --- | ---: | --- | --- | --- | --- | --- | --- |
