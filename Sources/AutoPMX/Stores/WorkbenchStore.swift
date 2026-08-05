@@ -734,6 +734,8 @@ final class WorkbenchStore: ObservableObject {
     @Published var compDecisionInfo = ""
     @Published var automationStartMode: AutomationStartMode = .continueLatest
     @Published var automationStartRunID = ""
+    @Published var isIVAnchorConfirmPresented = false
+    @Published var automationUseIVAnchor = false
     @Published var automationUserGuidance = ""
     @Published var automationStopRequested = false
     @Published var pendingDeleteAsset: ProjectAsset?
@@ -2029,7 +2031,8 @@ final class WorkbenchStore: ObservableObject {
             let modURL = projectURL.appendingPathComponent("run\(runID).mod")
             guard let text = try? String(contentsOf: modURL, encoding: .utf8) else { continue }
             let sanitized = LLMCommandService.stripInlineDatasetRows(text)
-            let repaired = withETATableRecord(sanitized, runID: runID)
+            var repaired = withETATableRecord(sanitized, runID: runID)
+            repaired = LLMCommandService.normalizingTableRecords(repaired, runID: runID)
             guard repaired != text else { continue }
             do {
                 try repaired.write(to: modURL, atomically: true, encoding: .utf8)
@@ -3068,6 +3071,40 @@ final class WorkbenchStore: ObservableObject {
 
     func startAutomationFromOptions() {
         isAutomationOptionsPresented = false
+        automationUseIVAnchor = false
+        if shouldAskForIVAnchor() {
+            isIVAnchorConfirmPresented = true
+            return
+        }
+        startAutomatedModelingDemo()
+    }
+
+    private func shouldAskForIVAnchor() -> Bool {
+        guard automationStartMode == .selectedRun,
+              !automationStartRunID.isEmpty,
+              automationDataFile != dataFile,
+              let modText = try? String(contentsOf:
+                  projectURL.appendingPathComponent("run\(automationStartRunID).mod"),
+                  encoding: .utf8
+              ) else {
+            return false
+        }
+        let upper = modText.uppercased()
+        return upper.contains("ADVAN1") || upper.contains("ADVAN3") || upper.contains("ADVAN11")
+    }
+
+    func confirmUseIVAnchor() {
+        automationUseIVAnchor = true
+        automationStartMode = .selectedRun
+        isIVAnchorConfirmPresented = false
+        startAutomatedModelingDemo()
+    }
+
+    func skipUseIVAnchor() {
+        automationUseIVAnchor = false
+        automationStartMode = .fresh
+        automationStartRunID = ""
+        isIVAnchorConfirmPresented = false
         startAutomatedModelingDemo()
     }
 
@@ -3245,10 +3282,11 @@ final class WorkbenchStore: ObservableObject {
         $TABLE ID \(tableParams.paramList) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(runID)
         $TABLE ID \(tableParams.paramList) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(runID)
         """
-        let fullMod = withETATableRecord(
+        var fullMod = withETATableRecord(
             sanitizedMod.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + tableBlock,
             runID: runID
         )
+        fullMod = LLMCommandService.normalizingTableRecords(fullMod, runID: runID)
         do {
             try fullMod.write(to: destMod, atomically: true, encoding: .utf8)
         } catch {
@@ -4464,6 +4502,7 @@ final class WorkbenchStore: ObservableObject {
             )
             drafted = enforceZeroFixForResidualError(drafted)
             drafted = withETATableRecord(drafted, runID: nextRun)
+            drafted = LLMCommandService.normalizingTableRecords(drafted, runID: nextRun)
             try drafted.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
             runner.append("SCM replication: wrote run\(nextRun).mod (from run\(sourceRun).mod)")
             let validation = await validateModel(nextRun)
@@ -5255,6 +5294,7 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = normalizeTypicalValueNaming(draftedModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
+                    draftedModel = LLMCommandService.normalizingTableRecords(draftedModel, runID: nextRun)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
                     let validation = await validateModel(nextRun)
                     if !validation.passed {
@@ -5644,6 +5684,10 @@ final class WorkbenchStore: ObservableObject {
                         projectURL: projectURL,
                         dataFile: activeDataFile
                     )
+                    initialModelText = LLMCommandService.normalizingTableRecords(
+                        initialModelText,
+                        runID: "001"
+                    )
                     try initialModelText.write(to: projectURL.appendingPathComponent("run001.mod"), atomically: true, encoding: .utf8)
                     // Preflight validation of the generated model
                     let validation = await validateModel("001")
@@ -6031,6 +6075,7 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     draftedModel = correctS1Scaling(draftedModel)
+                    draftedModel = LLMCommandService.normalizingTableRecords(draftedModel, runID: nextRun)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
                     runner.append("Created candidate model run\(nextRun).mod")
                     // Preflight validation before NONMEM
@@ -6817,10 +6862,11 @@ final class WorkbenchStore: ObservableObject {
             runner.append("ETA screening: cannot read run\(runID).mod")
             return false
         }
-        let updated = withETATableRecord(
+        var updated = withETATableRecord(
             LLMCommandService.stripInlineDatasetRows(modText),
             runID: runID
         )
+        updated = LLMCommandService.normalizingTableRecords(updated, runID: runID)
         if updated != modText {
             do {
                 try updated.write(to: modURL, atomically: true, encoding: .utf8)
@@ -7357,6 +7403,7 @@ final class WorkbenchStore: ObservableObject {
 
         var candidate = LLMCommandService.stripInlineDatasetRows(gaText)
         candidate = correctS1Scaling(candidate)
+        candidate = LLMCommandService.normalizingTableRecords(candidate, runID: runID)
         do {
             try candidate.write(to: originalModURL, atomically: true, encoding: .utf8)
         } catch {
@@ -9334,6 +9381,7 @@ final class WorkbenchStore: ObservableObject {
                         dataFile: dataFile
                     )
                 }
+                fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
                 if fixed != modText {
                     try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
                 }

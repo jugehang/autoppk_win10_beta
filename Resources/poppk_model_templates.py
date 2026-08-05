@@ -48,13 +48,21 @@ class TemplateSpec:
     body: str
 
 
-def _tables(run: str, pk_params: list[str], eta_terms: str) -> str:
+def _tables(
+    run: str,
+    pk_params: list[str],
+    eta_terms: str,
+    cat_cols: list[str] | tuple[str, ...] = ("SEX", "STUDY", "ADA"),
+    cont_cols: list[str] | tuple[str, ...] = ("WT", "AGE", "DOSE"),
+) -> str:
     param_tokens = " ".join(pk_params) if pk_params else "CL V"
+    cat_tokens = " ".join(cat_cols) if cat_cols else "ID"
+    cont_tokens = " ".join(cont_cols) if cont_cols else "ID"
     return f"""$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=SDTAB{run} FORMAT=s1PE14.7
 $TABLE ID {param_tokens} {eta_terms} NOPRINT NOAPPEND ONEHEADER FILE=PATAB{run}
 $TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE=run{run}.ETA
-$TABLE ID WT SEX STUDY NOPRINT NOAPPEND ONEHEADER FILE=CATAB{run}
-$TABLE ID AGE NOPRINT NOAPPEND ONEHEADER FILE=COTAB{run}"""
+$TABLE ID {cat_tokens} NOPRINT NOAPPEND ONEHEADER FILE=CATAB{run}
+$TABLE ID {cont_tokens} NOPRINT NOAPPEND ONEHEADER FILE=COTAB{run}"""
 
 
 def normalize_input_columns(input_columns: Optional[Iterable[str]] = None) -> list[str]:
@@ -710,7 +718,12 @@ def render_model(
 ) -> str:
     spec = TEMPLATES[template_id]
     run = str(run_id).zfill(3) if str(run_id).isdigit() and len(str(run_id)) <= 3 else str(run_id)
-    input_record = " ".join(normalize_input_columns(input_columns))
+    normalized_columns = normalize_input_columns(input_columns)
+    input_record = " ".join(normalized_columns)
+    cat_cols = [c for c in ("SEX", "STUDY", "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV")
+                if c in normalized_columns] or ["STUDY", "SEX"]
+    cont_cols = [c for c in ("WT", "AGE", "DOSE", "AMT", "RATE", "DUR")
+                 if c in normalized_columns] or ["WT", "AGE"]
     max_eta = max([int(value) for value in re.findall(r"\bETA\((\d+)\)", spec.body)] or [0])
     eta_terms = " ".join(f"ETA{index}" for index in range(1, max_eta + 1))
     title = problem or f"AutoPMX run{run} - {spec.title}"
@@ -721,7 +734,7 @@ def render_model(
             f"$DATA {data_file} IGNORE=C",
             spec.body,
             COMMON_ESTIMATION,
-            _tables(run, _get_pk_params(template_id), eta_terms),
+            _tables(run, _get_pk_params(template_id), eta_terms, cat_cols, cont_cols),
             "",
         ]
     )

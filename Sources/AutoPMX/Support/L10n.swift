@@ -902,6 +902,10 @@ enum L10n {
         "auto.guidanceHint": [.zhCN: "可选：告诉 DuDu 测试特定结构、避免某个协变量、优先考虑稳定性、或基于生物学假设继续", .en: "Optional: tell DuDu to test a specific structure, avoid a covariate, prioritize stability, or continue from a biological hypothesis"],
         "auto.cancel": [.zhCN: "取消", .en: "Cancel"],
         "auto.start": [.zhCN: "开始", .en: "Start"],
+        "auto.ivAnchorConfirmTitle": [.zhCN: "使用 IV 模型作为起始参数？", .en: "Use IV model as starting values?"],
+        "auto.ivAnchorConfirmMessage": [.zhCN: "检测到当前项目已有 IV 最佳模型。是否以 run%@ 的参数作为全数据集建模的起始值？选择“否”将直接从全数据集建立新模型。", .en: "An IV anchor model was found. Use run%@ parameters as starting values for the full-dataset model? Choose No to start fresh from the full dataset."],
+        "auto.ivAnchorUse": [.zhCN: "是，以 IV 模型起始", .en: "Yes, start from IV model"],
+        "auto.ivAnchorSkip": [.zhCN: "否，直接全数据集开始", .en: "No, start from full dataset"],
 
         // Context menu
         "ctx.runNonmem": [.zhCN: "通过 PsN 运行 NONMEM", .en: "Run NONMEM via PsN"],

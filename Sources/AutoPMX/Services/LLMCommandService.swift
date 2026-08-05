@@ -1206,11 +1206,11 @@ struct LLMCommandService {
             - Generate ONLY the ETA(n) that have OMEGA blocks. If only ETA(1) and ETA(2) exist, do NOT list ETA3.
 
             FIRST determine which compartment model you are writing, then generate $TABLE accordingly:
-            $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(tableSuffix) FORMAT=s1PE14.7
+            $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES <other $INPUT columns excluding C, e.g. AMT RATE DUR CMT DOSE WT AGE SEX ADA> ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(tableSuffix) FORMAT=s1PE14.7
             $TABLE ID <PK-params-only> <ETA-list-only> NOPRINT NOAPPEND ONEHEADER FILE=patab\(tableSuffix)
             $TABLE ID <ETA-list-only> FIRSTONLY NOAPPEND NOPRINT FILE=run\(tableSuffix).ETA
-            $TABLE ID <PK-params-only> FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(tableSuffix)
-            $TABLE ID <PK-params-only> FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(tableSuffix)
+            $TABLE ID <categorical columns from $INPUT, e.g. SEX STUDY ADA ROUTE CMT EVID MDV> FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(tableSuffix)
+            $TABLE ID <continuous columns from $INPUT, e.g. WT AGE DOSE AMT RATE DUR> FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(tableSuffix)
 
         Use the AutoPMX rule/knowledge context and PopPK model library provided in the
         system context; do not invent NONMEM syntax outside those references.
@@ -3182,6 +3182,105 @@ struct LLMCommandService {
             range: range,
             withTemplate: "$1\(formatted)"
         )
+    }
+
+    /// Rebuild the standard NONMEM table records from the actual $INPUT and $PK
+    /// content so table headers always match the dataset columns and model parameters.
+    static func normalizingTableRecords(_ modText: String, runID: String) -> String {
+        let inputTokens = inputTokens(from: modText)
+        let pkParams = pkParameterNames(from: modText)
+        let etaTerms = etaTermNames(from: modText)
+
+        let categorical = ["SEX", "STUDY", "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV"]
+        let continuous = ["WT", "AGE", "DOSE", "AMT", "RATE", "DUR"]
+        let inputSet = Set(inputTokens)
+        var catCols = categorical.filter { inputSet.contains($0) }
+        var contCols = continuous.filter { inputSet.contains($0) }
+        if catCols.isEmpty {
+            catCols = ["STUDY", "SEX"].filter { inputSet.contains($0) }
+        }
+        if contCols.isEmpty {
+            contCols = ["WT", "AGE"].filter { inputSet.contains($0) }
+        }
+
+        let coreSdtab = Set(["ID", "TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES", "STUDY"])
+        let extraSdtab = inputTokens.filter { $0 != "C" && !coreSdtab.contains($0) }
+        let params = pkParams.isEmpty ? "CL V" : pkParams.joined(separator: " ")
+        let etas = etaTerms.joined(separator: " ")
+
+        let tableBlock = """
+        $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES \(extraSdtab.joined(separator: " ")) ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(runID) FORMAT=s1PE14.7
+        $TABLE ID \(params)\(etas.isEmpty ? "" : " \(etas)") NOPRINT NOAPPEND ONEHEADER FILE=patab\(runID)
+        $TABLE ID \(etas) FIRSTONLY NOAPPEND NOPRINT FILE=run\(runID).ETA
+        $TABLE ID \(catCols.joined(separator: " ")) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(runID)
+        $TABLE ID \(contCols.joined(separator: " ")) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(runID)
+        """
+
+        var lines = modText.components(separatedBy: "\n")
+        lines.removeAll { line in
+            line.trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+                .hasPrefix("$TABLE")
+        }
+        lines.append(tableBlock)
+        return lines.joined(separator: "\n")
+    }
+
+    private static func inputTokens(from modText: String) -> [String] {
+        guard let inputLine = modText.components(separatedBy: "\n")
+            .first(where: { $0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("$INPUT") })
+        else { return [] }
+        return inputLine
+            .dropFirst("$INPUT".count)
+            .split(whereSeparator: \.isWhitespace)
+            .map { String($0).uppercased() }
+    }
+
+    private static func pkParameterNames(from modText: String) -> [String] {
+        let pattern = #"\bTV([A-Z][A-Z0-9_]*)\s*=\s*THETA"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+        var seen = Set<String>()
+        var result: [String] = []
+        var inPK = false
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$PK") {
+                inPK = true
+                continue
+            }
+            if inPK && trimmed.hasPrefix("$") {
+                break
+            }
+            guard inPK else { continue }
+            let ns = line as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            for match in regex.matches(in: line, options: [], range: range) where match.numberOfRanges > 1 {
+                let name = ns.substring(with: match.range(at: 1)).uppercased()
+                if seen.insert(name).inserted {
+                    result.append(name)
+                }
+            }
+        }
+        return result
+    }
+
+    private static func etaTermNames(from modText: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"\bETA\s*\(\s*(\d+)\s*\)"#, options: [.caseInsensitive]) else {
+            return []
+        }
+        var indices = Set<Int>()
+        let ns = modText as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        for match in regex.matches(in: modText, options: [], range: range) where match.numberOfRanges > 1 {
+            if let value = Int(ns.substring(with: match.range(at: 1))) {
+                indices.insert(value)
+            }
+        }
+        guard let maxIndex = indices.max() else { return [] }
+        return (1...maxIndex).map { "ETA\($0)" }
     }
 
     /// Detect which of the given continuous covariates are time-varying, i.e. their value
