@@ -1997,7 +1997,13 @@ final class WorkbenchStore: ObservableObject {
         copyModel(asset: asset, toProject: url, openAfterCopy: true)
     }
 
-    func copyModel(asset: ProjectAsset, toProject targetURL: URL, openAfterCopy: Bool = false) {
+    func copyModel(
+        asset: ProjectAsset,
+        toProject targetURL: URL,
+        openAfterCopy: Bool = false,
+        copyReferencedDataset: Bool = true,
+        dataFileOverride: String? = nil
+    ) {
         guard !automationBusy else {
             runner.append("Copy model skipped: auto modeling is running.")
             return
@@ -2021,7 +2027,7 @@ final class WorkbenchStore: ObservableObject {
         let newID = nextCopyRunID(in: targetURL, preferred: sourceRunID.isEmpty ? nil : sourceRunID)
         let sourceStem = sourceURL.deletingPathExtension().lastPathComponent
         let targetStem = "run\(newID)"
-        let dataReference = dataFileReference(in: sourceText)
+        let dataReference = dataFileOverride ?? dataFileReference(in: sourceText)
         let dataPlaceholder = "__AUTOPMX_COPY_DATA_FILE__"
 
         var copied = sourceText
@@ -2044,7 +2050,9 @@ final class WorkbenchStore: ObservableObject {
         if let dataReference {
             let dataFileName = URL(fileURLWithPath: dataReference).lastPathComponent
             copied = copied.replacingOccurrences(of: dataPlaceholder, with: dataFileName)
-            copyReferencedDataset(dataReference: dataReference, from: sourceURL, to: targetURL)
+            if copyReferencedDataset {
+                self.copyReferencedDataset(dataReference: dataReference, from: sourceURL, to: targetURL)
+            }
         }
 
         copied = LLMCommandService.stripInlineDatasetRows(copied)
@@ -2117,6 +2125,37 @@ final class WorkbenchStore: ObservableObject {
             lines.insert(contentsOf: comments, at: 0)
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func modelAssetForRun(_ runID: String) -> ProjectAsset? {
+        let direct = ProjectAsset(
+            url: projectURL.appendingPathComponent("run\(runID).mod"),
+            category: .models,
+            relativePath: "run\(runID).mod"
+        )
+        if FileManager.default.fileExists(atPath: direct.url.path) {
+            return direct
+        }
+        return assets[.models]?.first {
+            $0.relatedRunID == runID && FileManager.default.fileExists(atPath: $0.url.path)
+        }
+    }
+
+    private func copyModelOutputs(runID: String, from sourceURL: URL, to targetURL: URL) {
+        for ext in ["lst", "ext", "cov", "phi"] {
+            let source = sourceURL.appendingPathComponent("run\(runID).\(ext)")
+            let destination = targetURL.appendingPathComponent("run\(runID).\(ext)")
+            guard FileManager.default.fileExists(atPath: source.path),
+                  !FileManager.default.fileExists(atPath: destination.path) else {
+                continue
+            }
+            do {
+                try FileManager.default.copyItem(at: source, to: destination)
+                runner.append("Copied IV anchor output run\(runID).\(ext) → \(destination.path)")
+            } catch {
+                runner.append("Could not copy run\(runID).\(ext): \(error.localizedDescription)")
+            }
+        }
     }
 
     private func copyReferencedDataset(dataReference: String, from sourceURL: URL, to targetURL: URL) {
@@ -3337,6 +3376,7 @@ final class WorkbenchStore: ObservableObject {
         guard automationStartMode == .selectedRun,
               !automationStartRunID.isEmpty,
               automationDataFile != dataFile,
+              LLMCommandService.analyzeDataset(projectURL: projectURL, dataFile: automationDataFile).hasOral,
               let modText = try? String(contentsOf:
                   projectURL.appendingPathComponent("run\(automationStartRunID).mod"),
                   encoding: .utf8
@@ -5645,6 +5685,22 @@ final class WorkbenchStore: ObservableObject {
             saveUnitsToConfig()
         }
 
+        var ivHandoffSourceProjectURL: URL?
+        var ivHandoff: (asset: ProjectAsset, modText: String, rows: [ParameterEstimateRow], compartments: Int)?
+        if automationUseIVAnchor,
+           selectedMode == .selectedRun,
+           !selectedRunID.isEmpty,
+           let asset = modelAssetForRun(selectedRunID) {
+            let modText = (try? String(contentsOf: asset.url, encoding: .utf8)) ?? ""
+            ivHandoffSourceProjectURL = projectURL
+            ivHandoff = (
+                asset: asset,
+                modText: modText,
+                rows: ProjectScanner.parameterEstimates(runID: selectedRunID, in: projectURL),
+                compartments: compartmentInfoForRun(selectedRunID).compartments
+            )
+        }
+
         // Fresh Start: create new project BEFORE automation begins (avoid openProject guard)
         if selectedMode == .fresh || !isAutomationProject(projectURL) {
             // ── Pre-flight: make sure the target workspace is writable. ──
@@ -5685,6 +5741,18 @@ final class WorkbenchStore: ObservableObject {
                 // so a freshly-created sub-project still inherits previously learned modeling techniques.
                 PPKSkillStore.shared.load(from: demo)
                 refreshWorkspace()
+                if let handoff = ivHandoff, let sourceURL = ivHandoffSourceProjectURL {
+                    copyModel(
+                        asset: handoff.asset,
+                        toProject: projectURL,
+                        openAfterCopy: false,
+                        copyReferencedDataset: false,
+                        dataFileOverride: activeDataFile
+                    )
+                    copyModelOutputs(runID: selectedRunID, from: sourceURL, to: projectURL)
+                    refreshWorkspace()
+                    runner.append("IV anchor parent run\(selectedRunID).mod copied into the full-dataset project.")
+                }
                 assistantMessages.append(AssistantMessage(role: .system, text: L10n.ctCleanProjectCreated))
             } catch {
                 runner.append("Failed to create AutoModel project: \(error.localizedDescription)")
@@ -5988,13 +6056,87 @@ final class WorkbenchStore: ObservableObject {
                     updateLastThinkingStep(type: .done, detail: "run001.mod — 1-comp \(profile.route)")
                     refreshWorkspace()
                 } else {
-                    runner.append("=== AutoPMX RESUMING from run\(sourceRun); next candidate will be run\(formattedRun((Int(sourceRun) ?? 0) + 1)) ===")
+                    let nextCandidateText = useChildRunIDs
+                        ? "next child model will be run\(nextChildRunID(parent: sourceRun))"
+                        : "next candidate will be run\(formattedRun((Int(sourceRun) ?? 0) + 1))"
+                    runner.append("=== AutoPMX RESUMING from run\(sourceRun); \(nextCandidateText) ===")
                     assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctResuming, sourceRun)))
                     // Previous run for comparison: use the run directly before sourceRun.
                     // If no earlier run exists, use "001" itself (meaning: no true comparison).
                     if let idx = modelRuns.firstIndex(of: sourceRun), idx > 0 {
                         previousForComparison = modelRuns[idx - 1]
                     }
+                }
+
+                if automationUseIVAnchor,
+                   let handoff = ivHandoff,
+                   modelRuns.contains(selectedRunID) {
+                    let parentRunID = selectedRunID
+                    let childID = nextChildRunID(parent: parentRunID)
+                    let hasIV = profile.hasIVBolus || profile.hasIVInfusion
+                    let hasExtravascular = profile.hasOral
+                    let includeF1 = hasIV && hasExtravascular
+
+                    automationStep = "AI writing full-dataset handoff run\(childID).mod"
+                    addThinkingStep("Building full-dataset model from IV anchor run\(parentRunID)", type: .working)
+
+                    let handoffModel = LLMCommandService.fullDatasetIVHandoffModel(
+                        childRunID: childID,
+                        parentRunID: parentRunID,
+                        projectURL: projectURL,
+                        dataFile: activeDataFile,
+                        parentModText: handoff.modText,
+                        parentRows: handoff.rows,
+                        parentCompartments: handoff.compartments,
+                        hasIV: hasIV,
+                        hasExtravascular: hasExtravascular,
+                        timeUnit: timeUnit,
+                        derivedCLUnit: derivedCLUnit,
+                        derivedVUnit: derivedVUnit,
+                        s2Expression: derivedS2Expression,
+                        s2for2CompExpression: derivedS2for2CompExpression
+                    )
+
+                    var handoffText = LLMCommandService.sanitizeControlStream(
+                        handoffModel,
+                        projectURL: projectURL,
+                        dataFile: activeDataFile
+                    )
+                    handoffText = correctS1Scaling(
+                        withETATableRecord(
+                            normalizeTypicalValueNaming(handoffText),
+                            runID: childID
+                        )
+                    )
+                    handoffText = LLMCommandService.applyingIVInfusionDurationFix(handoffText)
+                    handoffText = LLMCommandService.normalizingTableRecords(handoffText, runID: childID)
+
+                    try handoffText.write(
+                        to: projectURL.appendingPathComponent("run\(childID).mod"),
+                        atomically: true,
+                        encoding: .utf8
+                    )
+
+                    let validation = await validateModel(childID)
+                    if !validation.passed {
+                        let fix = await autoFixModel(childID)
+                        if !fix.fixed {
+                            throw AutomationDatasetError(
+                                runID: childID,
+                                output: validation.output + "\n\n" + fix.output
+                            )
+                        }
+                    }
+
+                    sourceRun = childID
+                    previousForComparison = parentRunID
+                    modelRuns.append(childID)
+                    nextRunNumber = -1
+                    useChildRunIDs = true
+                    runner.append("IV anchor handoff: run\(parentRunID) is the parent; first full-dataset model run\(childID) inherits IV estimates and adds \(includeF1 ? "KA + F1" : "KA").")
+                    assistantMessages.append(AssistantMessage(role: .system, text: "已按 IV 母本 run\(parentRunID) 生成全数据集首个模型 run\(childID)：房室结构继承母本，SC 增加 Depot 后中央室已重新编号，IV 参数估算值先固定，\(includeF1 ? "单独估算 KA 和 F1" : "单独估算 KA")。"))
+                    updateLastThinkingStep(type: .done, detail: "run\(childID).mod — \(handoff.compartments)-comp extravascular handoff")
+                    refreshWorkspace()
                 }
 
                 var accepted = false

@@ -1694,6 +1694,25 @@ struct LLMCommandService {
         🔴 HARD CONSTRAINT — run\(sourceRun) is a \(sourceCompartment)-comp model.
         run\(nextRun) MUST ALSO be \(sourceCompartment)-comp. Do NOT create a lower-comp model.
         """ : ""
+        let handoffReleaseBlock: String
+        if String(sourceText).uppercased().contains("IV-ANCHOR HANDOFF")
+            || String(sourceText).uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED") {
+            handoffReleaseBlock = """
+            ━━━ IV-ANCHOR HANDOFF RELEASE ━━━
+            run\(sourceRun) is a full-dataset handoff model built from an IV anchor. The inherited IV
+            THETA/OMEGA entries are intentionally FIXED so the first full-dataset model can estimate KA
+            (and F1 when both IV and SC routes exist) before releasing the rest.
+            - If run\(sourceRun) achieved S+C: release exactly ONE inherited THETA or OMEGA FIX in
+              run\(nextRun), starting with CL or the central volume. Keep KA/F1 estimated.
+            - If run\(sourceRun) is NOT S+C: keep the inherited FIXes unchanged and repair only KA/F1 or
+              the control stream. Do NOT release more parameters until S+C is achieved.
+            - Do NOT change route, ADVAN family, depot/central compartment numbering, or add covariates.
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+            """
+        } else {
+            handoffReleaseBlock = ""
+        }
 
         let prompt = """
         You are an expert NONMEM pharmacometrician evolving a PopPK model step by step.
@@ -1701,6 +1720,7 @@ struct LLMCommandService {
         Return ONLY the complete .mod file. No markdown, no explanation.
 
         \(compWarning)
+        \(handoffReleaseBlock)
 
         ━━━ SOURCE CITATION ━━━
         At the bottom of the .mod file AFTER $TABLE, add a comment block:
@@ -3173,6 +3193,246 @@ struct LLMCommandService {
         }
 
         return result.joined(separator: "\n")
+    }
+
+    static func datasetInputRecord(projectURL: URL, dataFile: String) -> String? {
+        inputRecordFromDataset(projectURL: projectURL, dataFile: dataFile)
+    }
+
+    /// Build the first full-dataset model from an IV anchor model.
+    ///
+    /// The IV model is copied into the project as the parent run. This initial child
+    /// keeps the IV compartment count, converts it to the extravascular ADVAN template,
+    /// inherits the IV final THETA/OMEGA estimates as FIXED starting values, and only
+    /// estimates KA (plus F1 when the full dataset contains both IV and SC dosing).
+    static func fullDatasetIVHandoffModel(
+        childRunID: String,
+        parentRunID: String,
+        projectURL: URL,
+        dataFile: String,
+        parentModText: String,
+        parentRows: [ParameterEstimateRow],
+        parentCompartments: Int,
+        hasIV: Bool,
+        hasExtravascular: Bool,
+        timeUnit: String,
+        derivedCLUnit: String,
+        derivedVUnit: String,
+        s2Expression: String,
+        s2for2CompExpression: String
+    ) -> String {
+        let inputRecord = datasetInputRecord(projectURL: projectURL, dataFile: dataFile) ?? defaultInputRecord
+        let maps = parentParameterMaps(rows: parentRows, modText: parentModText)
+        let thetaMap = maps.theta
+        let omegaMap = maps.omega
+        let includeF1 = hasIV && hasExtravascular
+            && inputRecord.components(separatedBy: .whitespaces).contains("CMT")
+        let s2 = parentCompartments <= 1 ? s2Expression : s2for2CompExpression
+        let fmt: (Double) -> String = { String(format: "%.6g", $0) }
+
+        let advan: String
+        switch parentCompartments {
+        case 2: advan = "ADVAN4 TRANS4"
+        case 3: advan = "ADVAN12 TRANS4"
+        default: advan = "ADVAN2 TRANS2"
+        }
+
+        var thetaLines = ["(0, \(fmt(thetaMap["KA"] ?? 0.5))) ; KA (1/\(timeUnit))"]
+        var omegaLines = ["0.08 ; IIV KA"]
+        var pkLines = ["TVKA=THETA(1)", "KA=TVKA*EXP(ETA(1))"]
+        var tableParams = ["KA"]
+        var thetaIndex = 2
+        var etaIndex = 2
+
+        func addStructural(key: String, sourceKey: String, unit: String, defaultValue: Double) {
+            let value = thetaMap[sourceKey] ?? defaultValue
+            let omega = omegaMap[sourceKey] ?? 0.04
+            thetaLines.append("(0, \(fmt(value))) FIX ; \(key) (\(unit))")
+            omegaLines.append("\(fmt(omega)) FIX ; IIV \(key)")
+            pkLines.append("TV\(key)=THETA(\(thetaIndex))")
+            pkLines.append("\(key)=TV\(key)*EXP(ETA(\(etaIndex)))")
+            tableParams.append(key)
+            thetaIndex += 1
+            etaIndex += 1
+        }
+
+        addStructural(key: "CL", sourceKey: "CL", unit: derivedCLUnit, defaultValue: 0.2)
+
+        switch parentCompartments {
+        case 2:
+            addStructural(key: "V2", sourceKey: "V1", unit: derivedVUnit, defaultValue: 5.0)
+            addStructural(key: "Q", sourceKey: "Q", unit: derivedCLUnit, defaultValue: 0.5)
+            addStructural(key: "V3", sourceKey: "V2", unit: derivedVUnit, defaultValue: 3.0)
+        case 3:
+            addStructural(key: "V2", sourceKey: "V1", unit: derivedVUnit, defaultValue: 5.0)
+            addStructural(key: "Q3", sourceKey: "Q2", unit: derivedCLUnit, defaultValue: 0.5)
+            addStructural(key: "V3", sourceKey: "V2", unit: derivedVUnit, defaultValue: 3.0)
+            addStructural(key: "Q4", sourceKey: "Q3", unit: derivedCLUnit, defaultValue: 0.3)
+            addStructural(key: "V4", sourceKey: "V3", unit: derivedVUnit, defaultValue: 5.0)
+        default:
+            addStructural(key: "V", sourceKey: "V", unit: derivedVUnit, defaultValue: 5.0)
+        }
+
+        if includeF1 {
+            let f1ThetaIndex = thetaIndex
+            thetaLines.append("(0, \(fmt(thetaMap["F1"] ?? 0.8))) ; F1 (SC relative to IV)")
+            pkLines.append("IF (CMT.EQ.1) F1=THETA(\(f1ThetaIndex))")
+            pkLines.append("IF (CMT.NE.1) F1=1")
+            thetaIndex += 1
+        }
+
+        let propThetaIndex = thetaIndex
+        thetaLines.append("(0, \(fmt(thetaMap["PROP.RE"] ?? 0.15))) FIX ; Prop.RE (sd)")
+        let addThetaIndex = thetaIndex + 1
+        thetaLines.append("(0, \(fmt(thetaMap["ADD.RE"] ?? 1.0))) FIX ; Add.RE (sd)")
+
+        if inputRecord.components(separatedBy: .whitespaces).contains("DUR") {
+            if inputRecord.components(separatedBy: .whitespaces).contains("CMT") {
+                pkLines.insert(contentsOf: [
+                    "IF (CMT.EQ.1 .AND. DUR.GT.0) D1=DUR",
+                    "IF (CMT.EQ.1 .AND. DUR.LE.0) D1=0.0001",
+                    "IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR",
+                    "IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001"
+                ], at: 0)
+            } else {
+                pkLines.insert(contentsOf: [
+                    "IF (DUR.GT.0) D1=DUR",
+                    "IF (DUR.LE.0) D1=0.0001"
+                ], at: 0)
+            }
+        }
+        pkLines.append("S2=\(s2)")
+
+        let etaTerms = (1..<etaIndex).map { "ETA\($0)" }.joined(separator: " ")
+        let params = tableParams.joined(separator: " ")
+        let extraSdtab = inputRecord
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { $0 != "C" }
+            .joined(separator: " ")
+
+        let lines = [
+            "$PROBLEM Run\(childRunID): Full dataset extravascular handoff from IV run\(parentRunID)",
+            ";; AutoPMX IV-anchor handoff from run\(parentRunID).mod",
+            ";; Inherited IV THETA/OMEGA are FIXED; estimate KA\(includeF1 ? " and F1" : "") first.",
+            "$INPUT \(inputRecord)",
+            "$DATA \(dataFile) IGNORE=C",
+            "$SUBROUTINES \(advan)",
+            "$PK"
+        ] + pkLines + [
+            "$ERROR",
+            "IPRED=F",
+            "W=SQRT((THETA(\(propThetaIndex))*IPRED)**2 + THETA(\(addThetaIndex))**2)",
+            "Y=IPRED+W*EPS(1)",
+            "IRES=F-Y",
+            "IWRES=(F-Y)/W",
+            "$THETA"
+        ] + thetaLines + [
+            "$OMEGA"
+        ] + omegaLines + [
+            "$SIGMA",
+            "1 FIX",
+            "$ESTIMATION METHOD=1 INTER MAXEVAL=9999 NOABORT SIG=3 PRINT=10",
+            "$COVARIANCE PRINT=E MATRIX=S",
+            "$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES \(extraSdtab) ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(childRunID) FORMAT=s1PE14.7",
+            "$TABLE ID \(params)\(etaTerms.isEmpty ? "" : " \(etaTerms)") NOPRINT NOAPPEND ONEHEADER FILE=patab\(childRunID)",
+            "$TABLE ID \(etaTerms) FIRSTONLY NOAPPEND NOPRINT FILE=run\(childRunID).ETA",
+            "$TABLE ID SEX STUDY ADA ROUTE BQL TYPE CMT EVID MDV FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(childRunID)",
+            "$TABLE ID WT AGE DOSE AMT RATE DUR FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(childRunID)"
+        ]
+
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func parentParameterMaps(rows: [ParameterEstimateRow], modText: String) -> (theta: [String: Double], omega: [String: Double]) {
+        var theta = initialThetaValuesFromMod(modText)
+        var omega = initialOmegaValuesFromMod(modText)
+
+        for row in rows {
+            guard row.group != "Fit" else { continue }
+            let key = normalizedParameterKey(row.name)
+            guard !key.isEmpty else { continue }
+            if row.group == "IIV" {
+                omega[key] = row.estimate
+            } else if ["Fixed", "PK Parameter", "Residual"].contains(row.group) {
+                theta[key] = row.estimate
+            }
+        }
+
+        return (theta, omega)
+    }
+
+    private static func normalizedParameterKey(_ raw: String) -> String {
+        var upper = raw.uppercased()
+        if upper.hasPrefix("IIV ") {
+            upper = String(upper.dropFirst(4))
+        }
+        if upper.hasPrefix("TV") {
+            upper = String(upper.dropFirst(2))
+        }
+        if let range = upper.range(of: #"\s*\(.*\)\s*$"#, options: .regularExpression) {
+            upper = String(upper[..<range.lowerBound])
+        }
+        return upper.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func initialThetaValuesFromMod(_ modText: String) -> [String: Double] {
+        var result = [String: Double]()
+        guard let regex = try? NSRegularExpression(pattern: #"\(\s*[^,]+,\s*([^,)]+)"#, options: []) else {
+            return result
+        }
+        var inTheta = false
+        for line in modText.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$THETA") {
+                inTheta = true
+                continue
+            }
+            if inTheta && trimmed.hasPrefix("$") {
+                break
+            }
+            guard inTheta, !trimmed.isEmpty, !trimmed.hasPrefix(";") else { continue }
+            let comment = line.components(separatedBy: ";").dropFirst().joined(separator: ";")
+            let key = normalizedParameterKey(comment)
+            guard !key.isEmpty else { continue }
+            let range = NSRange(trimmed.startIndex..., in: trimmed)
+            guard let match = regex.firstMatch(in: trimmed, options: [], range: range),
+                  match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: trimmed),
+                  let value = Double(String(trimmed[valueRange])) else {
+                continue
+            }
+            result[key] = value
+        }
+        return result
+    }
+
+    private static func initialOmegaValuesFromMod(_ modText: String) -> [String: Double] {
+        var result = [String: Double]()
+        var inOmega = false
+        for line in modText.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$OMEGA") {
+                inOmega = true
+                continue
+            }
+            if inOmega && trimmed.hasPrefix("$") {
+                break
+            }
+            guard inOmega, !trimmed.isEmpty, !trimmed.hasPrefix(";") else { continue }
+            let comment = line.components(separatedBy: ";").dropFirst().joined(separator: ";")
+            let key = normalizedParameterKey(comment)
+            guard !key.isEmpty else { continue }
+            let valueToken = trimmed.components(separatedBy: ";").first?
+                .split(whereSeparator: \.isWhitespace)
+                .first
+                .map(String.init) ?? ""
+            guard let value = Double(valueToken) else { continue }
+            result[key] = value
+        }
+        return result
     }
 
     private static func replacingThetaInitialValue(_ line: String, value: Double) -> String {

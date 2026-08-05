@@ -977,6 +977,11 @@ Workspace/
   <li><span class="en">If you choose an IV model and a different full dataset, AutoPMx asks whether to use the IV model parameters as starting values. Confirm when that is your intent.</span><span class="zh">如果你选择的是 IV 模型，且同时切换到了其他全数据集，AutoPMx 会询问是否以 IV 模型参数作为起始值。确认即可。</span></li>
 </ol>
 
+<div class="info">
+  <strong><span class="en">IV Anchor Handoff:</span><span class="zh">IV 母本切换全数据集：</span></strong>
+  <span class="en">When you confirm an IV parent and the selected dataset contains SC/extravascular dosing, AutoPMx copies the IV model as the parent run, preserves its run number, then writes the first full-dataset model as a child run (e.g. run006 → run00601). The inherited IV THETA/OMEGA estimates are kept as FIXED starting values; KA is estimated first, and F1 is added when both IV and SC routes exist. The ADVAN and central/peripheral numbering are converted for the extravascular depot: IV 1-cmt → ADVAN2, IV 2-cmt → ADVAN4 (V1→V2, V2→V3), IV 3-cmt → ADVAN12.</span><span class="zh">当你确认使用 IV 母本，且所选全数据集包含 SC/血管外给药时，AutoPMx 会把 IV 模型复制为母本 run，并保留原 run 编号；随后生成的全数据集首个模型使用子编号（如 run006 → run00601）。继承自 IV 的 THETA/OMEGA 估计值先以 FIX 固定，先估算 KA；若数据集同时含 IV 和 SC，则加入 F1。模型结构会自动转换为带 Depot 的血管外模板：IV 1-cmt → ADVAN2，IV 2-cmt → ADVAN4（V1→V2、V2→V3），IV 3-cmt → ADVAN12。</span>
+</div>
+
 <h3><span class="en">Daily Operations: Dataset, Pinned Files, and Model Marks</span><span class="zh">常用操作：数据集、置顶文件与模型标记</span></h3>
 <ul>
   <li><span class="en"><strong>Set a modeling dataset</strong> — Right-click any CSV under <strong>Data</strong> and choose <strong>Set as Modeling Dataset</strong>. A blue <code>Modeling Dataset</code> badge appears on the active CSV, and DuDu Auto / SCM will use that file by default.</span><span class="zh"><strong>设置建模数据集</strong> —— 在 <strong>Data</strong> 下右键任意 CSV，选择 <strong>Set as Modeling Dataset</strong>。当前数据集会显示蓝色 <code>Modeling Dataset</code> 徽标，DuDu Auto / SCM 默认使用该文件。</span></li>
