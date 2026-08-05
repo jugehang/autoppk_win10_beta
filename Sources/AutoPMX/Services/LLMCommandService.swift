@@ -2999,9 +2999,7 @@ struct LLMCommandService {
         let iiIdx = index("II")
         let maxColumn = max(idIdx, timeIdx, dvIdx, amtIdx, evidIdx ?? 0, doseIdx ?? 0, iiIdx ?? 0)
 
-        var doseTimeByID: [String: Double] = [:]
-        var doseByID: [String: Double] = [:]
-        var intervalByID: [String: Double] = [:]
+        var doseEventsByID: [String: [(time: Double, amount: Double, interval: Double?)]] = [:]
         var observationsByID: [String: [(time: Double, conc: Double)]] = [:]
 
         for line in lines.dropFirst() {
@@ -3023,10 +3021,8 @@ struct LLMCommandService {
                 let dose = (amt ?? 0) > 0
                     ? amt!
                     : (doseIdx.flatMap { Double(cols[$0]) } ?? 0)
-                let interval = iiIdx.flatMap { Double(cols[$0]) } ?? 0
-                doseTimeByID[id] = time
-                doseByID[id] = dose
-                intervalByID[id] = interval
+                let interval = iiIdx.flatMap { Double(cols[$0]) }.flatMap { $0 > 0 ? $0 : nil }
+                doseEventsByID[id, default: []].append((time: time, amount: dose, interval: interval))
             } else if let dv = Double(cols[dvIdx]), dv > 0 {
                 observationsByID[id, default: []].append((time: time, conc: dv))
             }
@@ -3037,15 +3033,21 @@ struct LLMCommandService {
         var halfLives: [Double] = []
         var aucInfs: [Double] = []
 
-        for id in doseByID.keys {
+        for id in doseEventsByID.keys {
             guard
-                let dose = doseByID[id],
-                let doseTime = doseTimeByID[id],
-                dose > 0
+                let events = doseEventsByID[id],
+                let first = events.sorted(by: { $0.time < $1.time }).first,
+                first.amount > 0
             else { continue }
+            let dose = first.amount
+            let doseTime = first.time
+            let nextDoseTime = events
+                .sorted(by: { $0.time < $1.time })
+                .first(where: { $0.time > doseTime })?
+                .time
+            let intervalEnd = nextDoseTime ?? first.interval.flatMap { doseTime + $0 }
+            guard dose > 0 else { continue }
 
-            let interval = intervalByID[id] ?? 0
-            let intervalEnd = interval > 0 ? doseTime + interval : nil
             let points = (observationsByID[id] ?? [])
                 .filter { $0.time > doseTime && (intervalEnd == nil || $0.time < intervalEnd!) }
                 .sorted { $0.time < $1.time }
