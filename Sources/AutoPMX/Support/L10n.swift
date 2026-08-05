@@ -1155,6 +1155,10 @@ enum L10n {
         "settings.tools.rHint": [.zhCN: "Rscript 路径，用于运行 R 诊断和绘图。推荐 R 4.x 并安装 xpose、ggplot2、dplyr。", .en: "Path to Rscript for running R-based diagnostics and plotting. R 4.x with xpose, ggplot2, and dplyr is recommended."],
         "settings.tools.fileViewers": [.zhCN: "文件查看器", .en: "File Viewers"],
         "settings.tools.dataFileDesc": [.zhCN: "创建新项目时的默认 CSV 文件名。如需按项目设置数据集，请在侧边栏右键 CSV → 设为建模数据集。", .en: "Default CSV filename when creating new projects. To set dataset per-project, right-click a CSV in the sidebar → Set as Modeling Dataset."],
+        "units.confirmTitle": [.zhCN: "确认单位信息", .en: "Confirm Dataset Units"],
+        "units.confirmMessage": [.zhCN: "数据集：%@\nDose: %@\nAMT: %@\nConc.: %@\nTime: %@\n\n请再次确认以上单位无误后再开始。", .en: "Dataset: %@\nDose: %@\nAMT: %@\nConc.: %@\nTime: %@\n\nPlease confirm the units above before starting."],
+        "units.confirmStart": [.zhCN: "单位无误，开始建模", .en: "Units Correct, Start Modeling"],
+        "units.confirmCancel": [.zhCN: "返回检查", .en: "Go Back"],
 
         // Rules
         "settings.rules.title": [.zhCN: "规则与知识来源", .en: "Rule & Knowledge Sources"],

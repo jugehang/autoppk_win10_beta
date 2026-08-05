@@ -1636,6 +1636,8 @@ struct BootstrapSetupSheet: View {
 
 struct AutomationOptionsSheetView: View {
     @EnvironmentObject private var store: WorkbenchStore
+    @State private var showUnitConfirm = false
+    @State private var hadSavedUnitsBefore = true
 
     var body: some View {
         VStack(spacing: 16) {
@@ -1717,7 +1719,13 @@ struct AutomationOptionsSheetView: View {
                 Spacer()
                 Button(L10n.cancel, role: .cancel) { store.isAutomationOptionsPresented = false }
                     .buttonStyle(.bordered)
-                Button(L10n.start) { store.startAutomationFromOptions() }
+                Button(L10n.start) {
+                    if hadSavedUnitsBefore {
+                        store.startAutomationFromOptions()
+                    } else {
+                        showUnitConfirm = true
+                    }
+                }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(store.automationStartMode == .selectedRun && store.automationStartRunID.isEmpty)
@@ -1731,6 +1739,32 @@ struct AutomationOptionsSheetView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
+        .alert(L10n.t("units.confirmTitle"), isPresented: $showUnitConfirm) {
+            Button(L10n.t("units.confirmStart")) {
+                store.startAutomationFromOptions()
+            }
+            Button(L10n.t("units.confirmCancel"), role: .cancel) {}
+        } message: {
+            let dataFile = store.automationDataFile.isEmpty ? store.dataFile : store.automationDataFile
+            Text(String.safeFormat(
+                L10n.t("units.confirmMessage"),
+                dataFile,
+                store.doseUnit,
+                store.amtUnit,
+                store.concUnit,
+                store.timeUnit
+            ))
+        }
+        .onAppear {
+            hadSavedUnitsBefore = store.hasSavedUnits(
+                for: store.automationDataFile.isEmpty ? store.dataFile : store.automationDataFile
+            )
+        }
+        .onChange(of: store.automationDataFile) { _ in
+            hadSavedUnitsBefore = store.hasSavedUnits(
+                for: store.automationDataFile.isEmpty ? store.dataFile : store.automationDataFile
+            )
+        }
         .onDisappear { store.handleSCMDialogDismissedIfNeeded() }
     }
 }

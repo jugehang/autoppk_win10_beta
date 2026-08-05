@@ -2114,6 +2114,18 @@ final class WorkbenchStore: ObservableObject {
         saveUnitsToConfig(for: automationDataFile.isEmpty ? dataFile : automationDataFile)
     }
 
+    /// True when this dataset already has unit information persisted in the project.
+    func hasSavedUnits(for dataFile: String) -> Bool {
+        guard !dataFile.isEmpty else { return false }
+        let configURL = projectURL.appendingPathComponent("project_config.json")
+        guard let data = try? Data(contentsOf: configURL),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let unitsData = config["units_data"] as? [String: [String: String]] else {
+            return false
+        }
+        return unitsData[dataFile] != nil
+    }
+
     /// Persist the current `dataFile` name back into `project_config.json`
     /// so the selection survives app restarts.
     func saveDataFileToConfig() {
