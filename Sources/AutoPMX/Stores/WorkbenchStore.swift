@@ -2870,7 +2870,7 @@ final class WorkbenchStore: ObservableObject {
                 return "Edit failed: \(error.localizedDescription)"
             }
 
-            guard await validateModel(runID) else {
+            guard await validateModel(runID).passed else {
                 let backups = (try? FileManager.default.contentsOfDirectory(at: backupDir, includingPropertiesForKeys: nil)) ?? []
                 if let latest = backups
                     .filter({ $0.lastPathComponent.hasPrefix("run\(runID).mod.") && $0.pathExtension == "bak" })
@@ -2892,8 +2892,8 @@ final class WorkbenchStore: ObservableObject {
             guard let runID = safeAgentRunID(action.runID) else {
                 return "Missing or invalid runID; run\(action.runID ?? "?") does not exist."
             }
-            let ok = await validateModel(runID)
-            return ok ? "Validation passed" : "Validation failed"
+            let validation = await validateModel(runID)
+            return validation.passed ? "Validation passed" : "Validation failed: \(validation.output)"
 
         case "run_mod":
             guard let runID = safeAgentRunID(action.runID) else {
@@ -4456,9 +4456,16 @@ final class WorkbenchStore: ObservableObject {
             drafted = withETATableRecord(drafted, runID: nextRun)
             try drafted.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
             runner.append("SCM replication: wrote run\(nextRun).mod (from run\(sourceRun).mod)")
-            if !(await validateModel(nextRun)) {
+            let validation = await validateModel(nextRun)
+            if !validation.passed {
                 runner.append("SCM replication: preflight issues in run\(nextRun).mod — attempting auto-fix")
-                _ = await autoFixModel(nextRun)
+                let fix = await autoFixModel(nextRun)
+                if !fix.fixed {
+                    let message = "SCM replication stopped: run\(nextRun).mod 校验失败且自动修复未解决，请检查数据集或模型。\n\n\(validation.output)\n\n\(fix.output)"
+                    runner.append(message)
+                    assistantMessages.append(AssistantMessage(role: .system, text: message))
+                    return false
+                }
             }
             let exit = await runner.runAndWait(command: psnRunCommand(runID: nextRun), in: projectURL)
             let ofv = extractOFV(from: projectURL.appendingPathComponent("run\(nextRun).ext"))
@@ -5234,7 +5241,16 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
-                    if !(await validateModel(nextRun)) { _ = await autoFixModel(nextRun) }
+                    let validation = await validateModel(nextRun)
+                    if !validation.passed {
+                        let fix = await autoFixModel(nextRun)
+                        if !fix.fixed {
+                            throw AutomationDatasetError(
+                                runID: nextRun,
+                                output: validation.output + "\n\n" + fix.output
+                            )
+                        }
+                    }
                     previousForComparison = sourceRun
                     sourceRun = nextRun
                     modelRuns.append(nextRun)
@@ -5588,10 +5604,17 @@ final class WorkbenchStore: ObservableObject {
                     )
                     try initialModelText.write(to: projectURL.appendingPathComponent("run001.mod"), atomically: true, encoding: .utf8)
                     // Preflight validation of the generated model
-                    if !(await validateModel("001")) {
+                    let validation = await validateModel("001")
+                    if !validation.passed {
                         runner.append("Initial model run001.mod has preflight issues -- attempting auto-fix")
-                        if await autoFixModel("001") {
+                        let fix = await autoFixModel("001")
+                        if fix.fixed {
                             runner.append("Auto-fix applied to run001.mod")
+                        } else {
+                            throw AutomationDatasetError(
+                                runID: "001",
+                                output: validation.output + "\n\n" + fix.output
+                            )
                         }
                     }
                     sourceRun = "001"
@@ -5945,10 +5968,17 @@ final class WorkbenchStore: ObservableObject {
                     try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
                     runner.append("Created candidate model run\(nextRun).mod")
                     // Preflight validation before NONMEM
-                    if !(await validateModel(nextRun)) {
+                    let validation = await validateModel(nextRun)
+                    if !validation.passed {
                         runner.append("Candidate model run\(nextRun).mod has preflight issues -- attempting auto-fix")
-                        if await autoFixModel(nextRun) {
+                        let fix = await autoFixModel(nextRun)
+                        if fix.fixed {
                             runner.append("Auto-fix applied to run\(nextRun).mod")
+                        } else {
+                            throw AutomationDatasetError(
+                                runID: nextRun,
+                                output: validation.output + "\n\n" + fix.output
+                            )
                         }
                     }
                     previousForComparison = sourceRun
@@ -5993,6 +6023,18 @@ final class WorkbenchStore: ObservableObject {
                 }
                 runner.append("Automation stopped at \(stop.step).")
                 assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoStoppedAt, stop.step, best?.runID ?? currentRun)))
+            } catch let datasetError as AutomationDatasetError {
+                isAutoModeling = false
+                automationTask = nil
+                automationStep = "Dataset/model validation failed"
+                duDuMood = .sad
+                lastRunSucceeded = false
+                let details = datasetError.output
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let message = "自动建模已停止：run\(datasetError.runID).mod 校验失败，且自动修复未能解决。请先根据下面的错误信息检查数据集或模型，不要再继续迭代。\n\n\(details)"
+                runner.append(message)
+                assistantMessages.append(AssistantMessage(role: .system, text: message))
+                refreshWorkspace()
             } catch is CancellationError {
                 runner.append("Automation cancelled.")
                 assistantMessages.append(AssistantMessage(role: .system, text: L10n.autoStoppedShort))
@@ -7809,6 +7851,11 @@ final class WorkbenchStore: ObservableObject {
         let step: String
     }
 
+    private struct AutomationDatasetError: Error {
+        let runID: String
+        let output: String
+    }
+
     private func checkAutomationStop(_ step: String) throws {
         if automationStopRequested || automationTask?.isCancelled == true {
             throw AutomationStoppedError(step: step)
@@ -9097,7 +9144,7 @@ final class WorkbenchStore: ObservableObject {
         return bundledBridge
     }
 
-    private func validateModel(_ runID: String) async -> Bool {
+    private func validateModel(_ runID: String) async -> (passed: Bool, output: String) {
         let python = resolvedPython()
         let bridge = resolveBridgeScript()
         let validatorCmd = [
@@ -9113,12 +9160,12 @@ final class WorkbenchStore: ObservableObject {
             "--api-key", shellQuote(llmAPIKey.isEmpty ? "lm-studio" : llmAPIKey),
         ].joined(separator: " ")
 
-        let exit = await runner.runAndWait(command: validatorCmd, in: projectURL)
-        return exit == 0
+        let result = await runner.runAndWaitWithOutput(command: validatorCmd, in: projectURL)
+        return (result.exitCode == 0, result.output)
     }
 
     /// Run the Python autóﬁxer on a .mod ﬁle (in-place).
-    private func autoFixModel(_ runID: String) async -> Bool {
+    private func autoFixModel(_ runID: String) async -> (fixed: Bool, output: String) {
         let python = resolvedPython()
         let bridge = resolveBridgeScript()
         let fixCmd = [
@@ -9133,8 +9180,8 @@ final class WorkbenchStore: ObservableObject {
             "--api-key", shellQuote(llmAPIKey.isEmpty ? "lm-studio" : llmAPIKey),
         ].joined(separator: " ")
 
-        let exit = await runner.runAndWait(command: fixCmd, in: projectURL)
-        if exit == 0 {
+        let result = await runner.runAndWaitWithOutput(command: fixCmd, in: projectURL)
+        if result.exitCode == 0 {
             let modURL = projectURL.appendingPathComponent("run\(runID).mod")
             if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
                 let fixed = correctS1Scaling(modText)
@@ -9143,7 +9190,7 @@ final class WorkbenchStore: ObservableObject {
                 }
             }
         }
-        return exit == 0
+        return (result.exitCode == 0, result.output)
     }
 
     private func savePinnedAssets() {

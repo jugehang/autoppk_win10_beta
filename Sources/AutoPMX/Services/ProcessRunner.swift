@@ -272,9 +272,14 @@ final class ProcessRunner: ObservableObject {
     }
 
     func runAndWait(command: String, in directory: URL) async -> Int32 {
+        let result = await runAndWaitWithOutput(command: command, in: directory)
+        return result.exitCode
+    }
+
+    func runAndWaitWithOutput(command: String, in directory: URL) async -> (exitCode: Int32, output: String) {
         if isRunning {
             append("A task is already running.")
-            return 2
+            return (2, "")
         }
 
         isRunning = true
@@ -291,7 +296,9 @@ final class ProcessRunner: ObservableObject {
                 var resumed = false
 
                 // Batch output on a background buffer, flush to main actor every 200ms.
+                // Keep a second full buffer so callers can capture validator/fixer output.
                 let outputBuffer = OutputBuffer()
+                let fullOutput = OutputBuffer()
                 let flushTimerBox = FlushTimerBox()
                 let flushTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                     Task { @MainActor in
@@ -308,12 +315,14 @@ final class ProcessRunner: ObservableObject {
                     let data = handle.availableData
                     guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
                     outputBuffer.append(text)
+                    fullOutput.append(text)
                 }
 
                 task.terminationHandler = { [weak self] process in
                     pipe.fileHandleForReading.readabilityHandler = nil
                     flushTimerBox.invalidate()
                     let finalFlush = outputBuffer.snapshot()
+                    let captured = fullOutput.snapshot()
                     Task { @MainActor in
                         guard !resumed else { return }
                         resumed = true
@@ -327,7 +336,7 @@ final class ProcessRunner: ObservableObject {
                         self?.currentTaskStartTime = nil
                         self?.isRunning = false
                         self?.currentTask = nil
-                        continuation.resume(returning: process.terminationStatus)
+                        continuation.resume(returning: (process.terminationStatus, captured))
                     }
                 }
 
@@ -342,7 +351,7 @@ final class ProcessRunner: ObservableObject {
                     isRunning = false
                     currentTask = nil
                     managedRootPID = nil
-                    continuation.resume(returning: 127)
+                    continuation.resume(returning: (127, ""))
                 }
             }
         } onCancel: { [weak self] in
