@@ -3885,11 +3885,13 @@ struct LLMCommandService {
         return mutable as String
     }
 
-    /// Remove $OMEGA rows whose IIV label no longer appears in $PK after an IIV was
-    /// removed, so OMEGA dimensions stay aligned with the contiguous ETA references.
+    /// Rebuild $OMEGA in the same order as $PK's ETA references. Missing OMEGA rows
+    /// are added (default 0.04), extra rows are dropped, and labels are preserved.
     static func synchronizingOmegaBlock(_ modText: String) -> String {
-        let iivParams = iivParameterNames(from: modText)
-        var result: [String] = []
+        let orderedIIV = iivParametersByEtaIndex(from: modText)
+        let maxEta = orderedIIV.keys.max() ?? 0
+        var existingValues = [String: String]()
+        var existingLines: [String] = []
         var inOmega = false
 
         for line in modText.components(separatedBy: "\n") {
@@ -3897,41 +3899,87 @@ struct LLMCommandService {
             let upper = trimmed.uppercased()
             if upper.hasPrefix("$OMEGA") {
                 inOmega = true
+                continue
+            }
+            if inOmega && trimmed.hasPrefix("$") {
+                break
+            }
+            guard inOmega else { continue }
+            let comment = line.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let valuePrefix = line.components(separatedBy: ";").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !valuePrefix.isEmpty else { continue }
+            let key = normalizedParameterKey(comment)
+            if !comment.isEmpty {
+                existingValues[key] = valuePrefix
+            } else {
+                existingLines.append(valuePrefix)
+            }
+        }
+
+        var omegaLines: [String] = []
+        for etaIndex in 1...maxEta {
+            guard let param = orderedIIV[etaIndex], !param.isEmpty else { continue }
+            let value = existingValues[param] ?? "0.04"
+            omegaLines.append("\(value) ; IIV \(param)")
+        }
+
+        // If the PK block has no ETA references, preserve unlabeled OMEGA rows so a
+        // legitimate fixed/empty IIV block is not silently erased.
+        if omegaLines.isEmpty {
+            omegaLines = existingLines
+        }
+
+        var result: [String] = []
+        var omegaAppended = false
+        var foundOmega = false
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$OMEGA") {
+                foundOmega = true
+                inOmega = true
+                result.append(line)
+                continue
+            }
+            if !foundOmega && !omegaAppended && !omegaLines.isEmpty &&
+                upper.hasPrefix("$SIGMA") {
+                result.append("$OMEGA")
+                result.append(contentsOf: omegaLines)
+                omegaAppended = true
                 result.append(line)
                 continue
             }
             if inOmega && trimmed.hasPrefix("$") {
                 inOmega = false
+                if !omegaAppended {
+                    result.append(contentsOf: omegaLines)
+                    omegaAppended = true
+                }
                 result.append(line)
                 continue
             }
             if inOmega {
-                let comment = line.components(separatedBy: ";").dropFirst()
-                    .joined(separator: ";")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if comment.isEmpty {
-                    result.append(line)
-                    continue
-                }
-                let key = normalizedParameterKey(comment)
-                if iivParams.contains(key) {
-                    result.append(line)
-                }
                 continue
             }
             result.append(line)
         }
+        if inOmega && !omegaAppended {
+            result.append(contentsOf: omegaLines)
+        }
         return result.joined(separator: "\n")
     }
 
-    private static func iivParameterNames(from modText: String) -> Set<String> {
+    private static func iivParametersByEtaIndex(from modText: String) -> [Int: String] {
         guard let regex = try? NSRegularExpression(
-            pattern: #"\b([A-Z][A-Z0-9_]*)\s*=.*EXP\s*\(\s*ETA"#,
+            pattern: #"\b([A-Z][A-Z0-9_]*)\s*=.*ETA\s*\(\s*(\d+)\s*\)"#,
             options: [.caseInsensitive]
         ) else {
-            return []
+            return [:]
         }
-        var result = Set<String>()
+        var result = [Int: String]()
         var inPK = false
         for line in modText.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3946,9 +3994,16 @@ struct LLMCommandService {
             guard inPK else { continue }
             let ns = line as NSString
             let range = NSRange(location: 0, length: ns.length)
-            for match in regex.matches(in: line, options: [], range: range)
-                where match.numberOfRanges > 1 {
-                result.insert(ns.substring(with: match.range(at: 1)).uppercased())
+            for match in regex.matches(in: line, options: [], range: range) {
+                guard match.numberOfRanges > 2,
+                      let etaRange = Range(match.range(at: 2), in: line),
+                      let etaIndex = Int(line[etaRange]) else {
+                    continue
+                }
+                let param = ns.substring(with: match.range(at: 1)).uppercased()
+                if result[etaIndex] == nil {
+                    result[etaIndex] = param
+                }
             }
         }
         return result
