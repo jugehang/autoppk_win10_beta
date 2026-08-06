@@ -2859,11 +2859,71 @@ struct LLMCommandService {
     /// Detect compartment count from a .mod file text by checking the ADVAN number.
     /// ADVAN1/2 = 1-comp, ADVAN3/4 = 2-comp, ADVAN11/12 = 3-comp.
     /// Falls back to 1 if undetectable.
-    private static func detectCompartmentCount(_ modText: String) -> Int {
+    static func detectCompartmentCount(_ modText: String) -> Int {
         let upper = modText.uppercased()
         if upper.contains("ADVAN11") || upper.contains("ADVAN12") { return 3 }
         if upper.contains("ADVAN3")  || upper.contains("ADVAN4")  { return 2 }
         return 1
+    }
+
+    /// Keep inherited IV THETA/OMEGA fixed on the first full-dataset handoff model.
+    /// Only KA and F1 are estimated in that first child; CL/V2/Q/V3 and residual
+    /// components stay pinned until the handoff model has achieved S+C.
+    static func enforceIVAnchorHandoffFixes(_ modText: String) -> String {
+        let fixedThetas = Set(["CL", "V2", "Q", "V3", "PROP.RE", "ADD.RE"])
+        let fixedOmegas = Set(["CL", "V2"])
+        var result: [String] = []
+        var inTheta = false
+        var inOmega = false
+
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$THETA") {
+                inTheta = true
+                inOmega = false
+                result.append(line)
+                continue
+            }
+            if upper.hasPrefix("$OMEGA") {
+                inTheta = false
+                inOmega = true
+                result.append(line)
+                continue
+            }
+            if inOmega && trimmed.hasPrefix("$") {
+                inOmega = false
+                result.append(line)
+                continue
+            }
+            if inTheta && trimmed.hasPrefix("$") {
+                inTheta = false
+                result.append(line)
+                continue
+            }
+
+            let comment = line.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = normalizedParameterKey(comment)
+            var updated = line
+            if inTheta, fixedThetas.contains(key), !upper.contains("FIX") {
+                if let semicolon = updated.firstIndex(of: ";") {
+                    updated.insert(contentsOf: " FIX", at: semicolon)
+                } else {
+                    updated += " FIX"
+                }
+            }
+            if inOmega, fixedOmegas.contains(key), !upper.contains("FIX") {
+                if let semicolon = updated.firstIndex(of: ";") {
+                    updated.insert(contentsOf: " FIX", at: semicolon)
+                } else {
+                    updated += " FIX"
+                }
+            }
+            result.append(updated)
+        }
+        return result.joined(separator: "\n")
     }
 
     private static func modelLibraryText(projectURL: URL, knowledgeBaseURL: URL? = nil) -> String {

@@ -6133,6 +6133,12 @@ final class WorkbenchStore: ObservableObject {
                         handoffText = deterministicHandoff
                     }
 
+                    if LLMCommandService.detectCompartmentCount(handoffText) <
+                        LLMCommandService.detectCompartmentCount(deterministicHandoff) {
+                        runner.append("AI handoff used a lower compartment count; falling back to the IV-anchor template.")
+                        handoffText = deterministicHandoff
+                    }
+
                     handoffText = LLMCommandService.sanitizeControlStream(
                         handoffText,
                         projectURL: projectURL,
@@ -6146,6 +6152,7 @@ final class WorkbenchStore: ObservableObject {
                     )
                     handoffText = LLMCommandService.applyingIVInfusionDurationFix(handoffText)
                     handoffText = LLMCommandService.normalizingTableRecords(handoffText, runID: childID)
+                    handoffText = LLMCommandService.enforceIVAnchorHandoffFixes(handoffText)
 
                     try handoffText.write(
                         to: projectURL.appendingPathComponent("run\(childID).mod"),
@@ -6509,6 +6516,26 @@ final class WorkbenchStore: ObservableObject {
                         projectURL: projectURL,
                         dataFile: activeDataFile
                     )
+                    let sourceCompartment = compartmentInfoForRun(sourceRun).compartments
+                    if LLMCommandService.detectCompartmentCount(draftedModel) < sourceCompartment {
+                        runner.append("AI attempted to downgrade run\(nextRun) below run\(sourceRun) (\(sourceCompartment)-comp); using same-compartment fallback.")
+                        let sourceURL = projectURL.appendingPathComponent("run\(sourceRun).mod")
+                        let raw = (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? ""
+                        let fallback = raw
+                            .replacingOccurrences(of: "run\(sourceRun)", with: "run\(nextRun)")
+                            .replacingOccurrences(of: "RUN\(sourceRun)", with: "RUN\(nextRun)")
+                            .replacingOccurrences(of: "Run\(sourceRun)", with: "Run\(nextRun)")
+                            .replacingOccurrences(of: "SDTAB\(sourceRun)", with: "SDTAB\(nextRun)")
+                            .replacingOccurrences(of: "PATAB\(sourceRun)", with: "PATAB\(nextRun)")
+                            .replacingOccurrences(of: "CATAB\(sourceRun)", with: "CATAB\(nextRun)")
+                            .replacingOccurrences(of: "COTAB\(sourceRun)", with: "COTAB\(nextRun)")
+                            .replacingOccurrences(of: "run\(sourceRun).ETA", with: "run\(nextRun).ETA")
+                        draftedModel = LLMCommandService.sanitizeControlStream(
+                            fallback,
+                            projectURL: projectURL,
+                            dataFile: activeDataFile
+                        )
+                    }
                     draftedModel = normalizeTypicalValueNaming(draftedModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
