@@ -71,6 +71,19 @@ struct ContentView: View {
                 Text("Move this project to Trash?")
             }
         }
+        .alert(L10n.t("auto.ivAnchorConfirmTitle"), isPresented: $store.isIVAnchorConfirmPresented) {
+            Button(L10n.t("auto.ivAnchorUse")) {
+                store.confirmUseIVAnchor()
+            }
+            Button(L10n.t("auto.ivAnchorSkip"), role: .cancel) {
+                store.skipUseIVAnchor()
+            }
+        } message: {
+            Text(String.safeFormat(
+                L10n.t("auto.ivAnchorConfirmMessage"),
+                store.automationStartRunID
+            ))
+        }
     }
 }
 

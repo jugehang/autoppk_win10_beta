@@ -1755,19 +1755,6 @@ struct AutomationOptionsSheetView: View {
                 store.timeUnit
             ))
         }
-        .alert(L10n.t("auto.ivAnchorConfirmTitle"), isPresented: $store.isIVAnchorConfirmPresented) {
-            Button(L10n.t("auto.ivAnchorUse")) {
-                store.confirmUseIVAnchor()
-            }
-            Button(L10n.t("auto.ivAnchorSkip"), role: .cancel) {
-                store.skipUseIVAnchor()
-            }
-        } message: {
-            Text(String.safeFormat(
-                L10n.t("auto.ivAnchorConfirmMessage"),
-                store.automationStartRunID
-            ))
-        }
         .onAppear {
             hadSavedUnitsBefore = store.hasSavedUnits(
                 for: store.automationDataFile.isEmpty ? store.dataFile : store.automationDataFile

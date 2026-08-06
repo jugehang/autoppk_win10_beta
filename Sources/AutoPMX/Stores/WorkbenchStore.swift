@@ -3363,12 +3363,12 @@ final class WorkbenchStore: ObservableObject {
     }
 
     func startAutomationFromOptions() {
-        isAutomationOptionsPresented = false
         automationUseIVAnchor = false
         if shouldAskForIVAnchor() {
             isIVAnchorConfirmPresented = true
             return
         }
+        isAutomationOptionsPresented = false
         startAutomatedModelingDemo()
     }
 
@@ -3390,6 +3390,7 @@ final class WorkbenchStore: ObservableObject {
         automationUseIVAnchor = true
         automationStartMode = .selectedRun
         isIVAnchorConfirmPresented = false
+        isAutomationOptionsPresented = false
         startAutomatedModelingDemo()
     }
 
@@ -3398,6 +3399,7 @@ final class WorkbenchStore: ObservableObject {
         automationStartMode = .fresh
         automationStartRunID = ""
         isIVAnchorConfirmPresented = false
+        isAutomationOptionsPresented = false
         startAutomatedModelingDemo()
     }
 
