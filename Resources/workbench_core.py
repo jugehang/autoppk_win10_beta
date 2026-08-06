@@ -529,12 +529,21 @@ class TaskRunner:
 
     def _auto_fix_mod(self, mod_path: Path) -> None:
         """Apply deterministic fixes to common .mod issues."""
-        from model_generator import apply_modifications, Modification
+        from model_generator import apply_modifications, Modification, strip_inline_dataset_rows
         from mod_validator import validate_mod
 
         text = mod_path.read_text(encoding="utf-8")
         csv_path = self.root / self.settings.data_file
         modifications: List[Modification] = []
+
+        # 0. Strip embedded data rows BEFORE any other fix.
+        #    LLMs sometimes paste CSV rows after $INPUT/$DATA — this must be cleaned first
+        #    or subsequent fixes (fix_input, fix_data) will operate on corrupted text.
+        cleaned = strip_inline_dataset_rows(text)
+        if cleaned != text:
+            mod_path.write_text(cleaned, encoding="utf-8")
+            self.log(f"[PREFLIGHT] Stripped inline data rows from {mod_path.name}")
+            text = cleaned
 
         # Determine current run ID from filename
         m = re.match(r"run(\d+)", mod_path.stem, re.IGNORECASE)

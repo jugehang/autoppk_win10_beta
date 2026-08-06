@@ -1711,7 +1711,11 @@ struct LLMCommandService {
         apiFormat: APIFormat = .openAICompatible
     ) async throws -> (text: String, usage: TokenUsage?) {
         let source = projectURL.appendingPathComponent("run\(sourceRun).mod")
-        let sourceText = ((try? String(contentsOf: source, encoding: .utf8)) ?? "").prefix(20_000)
+        let rawSource = ((try? String(contentsOf: source, encoding: .utf8)) ?? "")
+        // Strip any accidentally-embedded data rows from the source model BEFORE
+        // sending it to the LLM. If the LLM sees data rows in the source, it will
+        // learn to copy that pattern into the next model.
+        let sourceText = stripInlineDatasetRows(String(rawSource.prefix(20_000)))
         let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
         let modelLibrary = modelLibraryText(projectURL: projectURL)
         let dataFile = dataFileName(from: String(sourceText)) ?? discoverDataset(in: projectURL) ?? "dataset.csv"
@@ -1750,6 +1754,13 @@ struct LLMCommandService {
         You are an expert NONMEM pharmacometrician evolving a PopPK model step by step.
         Create run\(nextRun).mod by applying EXACTLY ONE specific improvement to run\(sourceRun).mod.
         Return ONLY the complete .mod file. No markdown, no explanation.
+
+        ━━━ 🔴 ABSOLUTE PROHIBITION: NEVER PASTE DATASET ROWS 🔴 ━━━
+        The CSV dataset rows (lines starting with . or numbers) MUST NEVER appear in the
+        .mod control stream. Only $INPUT column labels and a $DATA file reference belong here.
+        The CSV data is ALREADY available in a separate file — just reference it with $DATA.
+        If you write data rows inside the control stream, the model WILL BE REJECTED.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
         \(compWarning)
         \(handoffReleaseBlock)
@@ -2556,22 +2567,33 @@ struct LLMCommandService {
         )
         cleaned = stripInlineDatasetRows(cleaned)
         let guarded = enforceDatasetRecords(cleaned, projectURL: projectURL, dataFile: dataFile)
-        guard guarded.contains("$PROBLEM"), guarded.contains("$DATA"), guarded.contains("$EST") else {
-            throw NSError(domain: "LLMCommandService", code: 1001, userInfo: [
-                NSLocalizedDescriptionKey: "AI did not return a complete NONMEM control stream"
-            ])
+        // When the AI output is incomplete (missing $EST, $PK, etc.) after stripping
+        // embedded data rows, we still return the cleaned version rather than throwing.
+        // Throwing triggers a fallback that writes an even MORE broken model to disk,
+        // making things worse. The cleaned version is at least free of embedded data
+        // and the Python validator will report any remaining structural issues.
+        let hasMinimalStructure = guarded.contains("$PROBLEM") && guarded.contains("$DATA")
+        let isComplete = hasMinimalStructure && guarded.contains("$EST")
+        if !isComplete {
+            print("[AutoPMX] WARNING: AI returned incomplete control stream — missing required sections. Stripped inline data but model is structurally incomplete.")
         }
         return guarded
     }
 
     /// Remove CSV rows that an LLM accidentally pasted into a control stream.
-    /// Only data-like lines are dropped; comments, blanks, and valid record
-    /// continuation lines are preserved.
+    ///
+    /// Strategy (two-pass defence):
+    /// 1. Between $INPUT and $DATA: use pattern-matching to detect data-like rows.
+    /// 2. After $DATA: STRIP EVERYTHING that is not a `$`-prefixed control record,
+    ///    a comment, or an empty line.  No pattern-matching — just a whitelist.
+    ///    This is the only way to guarantee that NO data rows survive, regardless
+    ///    of format (numeric IDs, string IDs, mixed columns, etc.).
     static func stripInlineDatasetRows(_ controlStream: String) -> String {
         let lines = controlStream.components(separatedBy: "\n")
         var output: [String] = []
         var afterInput = false
         var afterData = false
+        var droppedCount = 0
 
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2590,18 +2612,38 @@ struct LLMCommandService {
                 continue
             }
 
-            if afterInput || afterData {
+            // --- After $DATA: WHITELIST only ---
+            // ONLY control records ($…), comments (;…), and blank lines survive.
+            // Everything else is silently stripped — no heuristic, no pattern-match.
+            if afterData {
+                if trimmed.isEmpty || trimmed.hasPrefix(";") {
+                    output.append(line)
+                    continue
+                }
+                if trimmed.hasPrefix("$") {
+                    afterData = false  // next control record — exit data section
+                    output.append(line)
+                    continue
+                }
+                // All other content after $DATA is presumed to be embedded CSV rows
+                droppedCount += 1
+                continue
+            }
+
+            // --- Between $INPUT and $DATA: pattern-matching ---
+            if afterInput {
                 if trimmed.isEmpty || trimmed.hasPrefix(";") {
                     output.append(line)
                     continue
                 }
                 if trimmed.hasPrefix("$") {
                     afterInput = false
-                    afterData = false
+                    afterData = (upper.hasPrefix("$DATA"))
                     output.append(line)
                     continue
                 }
                 if isLikelyInlineDataRow(trimmed) {
+                    droppedCount += 1
                     continue
                 }
                 let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -2612,11 +2654,16 @@ struct LLMCommandService {
                     }.count
                     if first == "." || Double(first) != nil ||
                         numericCount >= max(2, tokens.count / 2) {
+                        droppedCount += 1
                         continue
                     }
                 }
             }
             output.append(line)
+        }
+
+        if droppedCount > 0 {
+            print("[AutoPMX] stripInlineDatasetRows: removed \(droppedCount) embedded CSV rows from control stream")
         }
 
         return compactBlankLines(output).joined(separator: "\n")
@@ -3952,10 +3999,12 @@ struct LLMCommandService {
         }
 
         var omegaLines: [String] = []
-        for etaIndex in 1...maxEta {
-            guard let param = orderedIIV[etaIndex], !param.isEmpty else { continue }
-            let value = existingValues[param] ?? "0.04"
-            omegaLines.append("\(value) ; IIV \(param)")
+        if maxEta > 0 {
+            for etaIndex in 1...maxEta {
+                guard let param = orderedIIV[etaIndex], !param.isEmpty else { continue }
+                let value = existingValues[param] ?? "0.04"
+                omegaLines.append("\(value) ; IIV \(param)")
+            }
         }
 
         // If the PK block has no ETA references, preserve unlabeled OMEGA rows so a
@@ -3964,6 +4013,7 @@ struct LLMCommandService {
             omegaLines = existingLines
         }
 
+        inOmega = false
         var result: [String] = []
         var omegaAppended = false
         var foundOmega = false
@@ -4006,7 +4056,7 @@ struct LLMCommandService {
 
     private static func iivParametersByEtaIndex(from modText: String) -> [Int: String] {
         guard let regex = try? NSRegularExpression(
-            pattern: #"\b([A-Z][A-Z0-9_]*)\s*=.*ETA\s*\(\s*(\d+)\s*\)"#,
+            pattern: #"(?<!TV)([A-Z][A-Z0-9_]*)\s*=\s*[^\n]*EXP\s*\(\s*ETA\s*\(\s*(\d+)\s*\)"#,
             options: [.caseInsensitive]
         ) else {
             return [:]

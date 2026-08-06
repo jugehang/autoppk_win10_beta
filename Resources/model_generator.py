@@ -38,11 +38,19 @@ def _is_numeric_token(token: str) -> bool:
 
 
 def strip_inline_dataset_rows(text: str) -> str:
-    """Remove CSV rows accidentally pasted after $INPUT/$DATA."""
+    """Remove CSV rows accidentally pasted after $INPUT/$DATA.
+
+    Two-pass defence:
+    1. Between $INPUT and $DATA: pattern-match data-like rows.
+    2. After $DATA: WHITELIST — only control records ($...), comments (;...),
+       and blank lines survive.  Everything else is silently stripped.
+       No heuristic can handle all LLM output formats — a whitelist guarantees it.
+    """
     lines = text.split("\n")
     output: List[str] = []
     after_input = False
     after_data = False
+    dropped = 0
 
     for line in lines:
         stripped = line.strip()
@@ -59,13 +67,27 @@ def strip_inline_dataset_rows(text: str) -> str:
             output.append(line)
             continue
 
-        if after_input or after_data:
+        # --- After $DATA: WHITELIST only ---
+        if after_data:
+            if not stripped or stripped.startswith(";"):
+                output.append(line)
+                continue
+            if stripped.startswith("$"):
+                after_data = False  # next control record ends data section
+                output.append(line)
+                continue
+            # Everything else after $DATA is presumed embedded CSV data
+            dropped += 1
+            continue
+
+        # --- Between $INPUT and $DATA: pattern matching ---
+        if after_input:
             if not stripped or stripped.startswith(";"):
                 output.append(line)
                 continue
             if stripped.startswith("$"):
                 after_input = False
-                after_data = False
+                after_data = upper.startswith("$DATA")
                 output.append(line)
                 continue
 
@@ -74,9 +96,14 @@ def strip_inline_dataset_rows(text: str) -> str:
                 first = tokens[0]
                 numeric_count = sum(1 for token in tokens if _is_numeric_token(token))
                 if first == "." or _is_numeric_token(first) or numeric_count >= max(2, len(tokens) // 2):
+                    dropped += 1
                     continue
 
         output.append(line)
+
+    if dropped:
+        import sys
+        print(f"[model_generator] strip_inline_dataset_rows: removed {dropped} embedded CSV rows", file=sys.stderr)
 
     compact: List[str] = []
     last_blank = False

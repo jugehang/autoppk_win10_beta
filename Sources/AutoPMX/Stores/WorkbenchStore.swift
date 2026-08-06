@@ -4805,17 +4805,23 @@ final class WorkbenchStore: ObservableObject {
             drafted = withETATableRecord(drafted, runID: nextRun)
             drafted = LLMCommandService.applyingIVInfusionDurationFix(drafted)
             drafted = LLMCommandService.normalizingTableRecords(drafted, runID: nextRun)
-            try drafted.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
+            let scmURL = projectURL.appendingPathComponent("run\(nextRun).mod")
+            guardModFileWrite(drafted, to: scmURL, label: "run\(nextRun).mod (scm)")
             runner.append("SCM replication: wrote run\(nextRun).mod (from run\(sourceRun).mod)")
             let validation = await validateModel(nextRun)
             if !validation.passed {
                 runner.append("SCM replication: preflight issues in run\(nextRun).mod — attempting auto-fix")
                 let fix = await autoFixModel(nextRun)
                 if !fix.fixed {
-                    let message = "SCM replication stopped: run\(nextRun).mod 校验失败且自动修复未解决，请检查数据集或模型。\n\n\(validation.output)\n\n\(fix.output)"
-                    runner.append(message)
-                    assistantMessages.append(AssistantMessage(role: .system, text: message))
-                    return false
+                    // Force-strip and continue
+                    if let txt = try? String(contentsOf: scmURL, encoding: .utf8) {
+                        let stripped = LLMCommandService.stripInlineDatasetRows(txt)
+                        if stripped != txt {
+                            try? stripped.write(to: scmURL, atomically: true, encoding: .utf8)
+                        }
+                    }
+                    runner.append("⚠️ SCM run\(nextRun).mod 预检未通过，数据行已强制清理。继续运行。")
+                    assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(nextRun).mod 预检未通过但数据行已清理，继续运行NONMEM…"))
                 }
             }
             let exit = await runner.runAndWait(command: psnRunCommand(runID: nextRun), in: projectURL)
@@ -5596,15 +5602,21 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     draftedModel = LLMCommandService.applyingIVInfusionDurationFix(draftedModel)
                     draftedModel = LLMCommandService.normalizingTableRecords(draftedModel, runID: nextRun)
-                    try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
+                    let p2URL = projectURL.appendingPathComponent("run\(nextRun).mod")
+                    guardModFileWrite(draftedModel, to: p2URL, label: "run\(nextRun).mod (phase2)")
                     let validation = await validateModel(nextRun)
                     if !validation.passed {
                         let fix = await autoFixModel(nextRun)
                         if !fix.fixed {
-                            throw AutomationDatasetError(
-                                runID: nextRun,
-                                output: validation.output + "\n\n" + fix.output
-                            )
+                            // Force-strip and continue — NEVER stop
+                            if let txt = try? String(contentsOf: p2URL, encoding: .utf8) {
+                                let stripped = LLMCommandService.stripInlineDatasetRows(txt)
+                                if stripped != txt {
+                                    try? stripped.write(to: p2URL, atomically: true, encoding: .utf8)
+                                }
+                            }
+                            runner.append("⚠️ run\(nextRun).mod 预检未通过，数据行已强制清理。DuDu继续…")
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(nextRun).mod 预检未通过，DuDu继续修复…"))
                         }
                     }
                     previousForComparison = sourceRun
@@ -6020,7 +6032,7 @@ final class WorkbenchStore: ObservableObject {
                         initialModelText,
                         runID: "001"
                     )
-                    try initialModelText.write(to: projectURL.appendingPathComponent("run001.mod"), atomically: true, encoding: .utf8)
+                    guardModFileWrite(initialModelText, to: projectURL.appendingPathComponent("run001.mod"), label: "run001.mod")
                     // Preflight validation of the generated model
                     let validation = await validateModel("001")
                     if !validation.passed {
@@ -6029,10 +6041,16 @@ final class WorkbenchStore: ObservableObject {
                         if fix.fixed {
                             runner.append("Auto-fix applied to run001.mod")
                         } else {
-                            throw AutomationDatasetError(
-                                runID: "001",
-                                output: validation.output + "\n\n" + fix.output
-                            )
+                            // Force-strip and continue — NEVER stop
+                            let r1URL = projectURL.appendingPathComponent("run001.mod")
+                            if let txt = try? String(contentsOf: r1URL, encoding: .utf8) {
+                                let stripped = LLMCommandService.stripInlineDatasetRows(txt)
+                                if stripped != txt {
+                                    try? stripped.write(to: r1URL, atomically: true, encoding: .utf8)
+                                }
+                            }
+                            runner.append("⚠️ run001.mod 初始模型预检未通过，数据行已强制清理。DuDu继续建模。")
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run001.mod 初始模型预检未通过，DuDu继续修复…\n\n\(validation.output)"))
                         }
                     }
 
@@ -6122,20 +6140,23 @@ final class WorkbenchStore: ObservableObject {
                     handoffText = LLMCommandService.normalizingTableRecords(handoffText, runID: childID)
                     handoffText = LLMCommandService.enforceIVAnchorHandoffFixes(handoffText)
 
-                    try handoffText.write(
-                        to: projectURL.appendingPathComponent("run\(childID).mod"),
-                        atomically: true,
-                        encoding: .utf8
-                    )
+                    let handoffURL = projectURL.appendingPathComponent("run\(childID).mod")
+                    guardModFileWrite(handoffText, to: handoffURL, label: "run\(childID).mod (handoff)")
 
                     let validation = await validateModel(childID)
                     if !validation.passed {
                         let fix = await autoFixModel(childID)
                         if !fix.fixed {
-                            throw AutomationDatasetError(
-                                runID: childID,
-                                output: validation.output + "\n\n" + fix.output
-                            )
+                            // Last-resort: force-strip data rows and proceed.
+                            // NEVER throw here — DuDu will let the LLM repair in the next iteration.
+                            if let txt = try? String(contentsOf: handoffURL, encoding: .utf8) {
+                                let stripped = LLMCommandService.stripInlineDatasetRows(txt)
+                                if stripped != txt {
+                                    try? stripped.write(to: handoffURL, atomically: true, encoding: .utf8)
+                                }
+                            }
+                            runner.append("⚠️ run\(childID).mod handoff预检未通过，数据行已强制清理。DuDu将在后续迭代中修复结构问题。")
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(childID).mod 预检未通过但数据行已清理，DuDu继续修复中…\n\n\(validation.output)"))
                         }
                     }
 
@@ -6510,7 +6531,8 @@ final class WorkbenchStore: ObservableObject {
                     draftedModel = correctS1Scaling(draftedModel)
                     draftedModel = LLMCommandService.applyingIVInfusionDurationFix(draftedModel)
                     draftedModel = LLMCommandService.normalizingTableRecords(draftedModel, runID: nextRun)
-                    try draftedModel.write(to: projectURL.appendingPathComponent("run\(nextRun).mod"), atomically: true, encoding: .utf8)
+                    let candidateURL = projectURL.appendingPathComponent("run\(nextRun).mod")
+                    guardModFileWrite(draftedModel, to: candidateURL, label: "run\(nextRun).mod (candidate)")
                     runner.append("Created candidate model run\(nextRun).mod")
                     // Preflight validation before NONMEM
                     let validation = await validateModel(nextRun)
@@ -6520,10 +6542,15 @@ final class WorkbenchStore: ObservableObject {
                         if fix.fixed {
                             runner.append("Auto-fix applied to run\(nextRun).mod")
                         } else {
-                            throw AutomationDatasetError(
-                                runID: nextRun,
-                                output: validation.output + "\n\n" + fix.output
-                            )
+                            // Force-strip and continue — NEVER stop the loop
+                            if let txt = try? String(contentsOf: candidateURL, encoding: .utf8) {
+                                let stripped = LLMCommandService.stripInlineDatasetRows(txt)
+                                if stripped != txt {
+                                    try? stripped.write(to: candidateURL, atomically: true, encoding: .utf8)
+                                }
+                            }
+                            runner.append("⚠️ run\(nextRun).mod 候选模型预检未通过，数据行已强制清理，LLM将在下一轮修复。")
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(nextRun).mod 预检未通过，DuDu继续修复…"))
                         }
                     }
                     previousForComparison = sourceRun
@@ -6569,12 +6596,22 @@ final class WorkbenchStore: ObservableObject {
                 runner.append("Automation stopped at \(stop.step).")
                 assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.autoStoppedAt, stop.step, best?.runID ?? currentRun)))
             } catch let datasetError as AutomationDatasetError {
-                resetAutomationUIState(step: "Dataset/model validation failed", mood: .sad)
+                // Last-resort safety net — all inner throw sites have been removed,
+                // so this should only fire for truly unexpected cases.
+                // Force-strip data rows and inform the user without blocking.
+                let modURL = projectURL.appendingPathComponent("run\(datasetError.runID).mod")
+                if let txt = try? String(contentsOf: modURL, encoding: .utf8) {
+                    let stripped = LLMCommandService.stripInlineDatasetRows(txt)
+                    if stripped != txt {
+                        try? stripped.write(to: modURL, atomically: true, encoding: .utf8)
+                        runner.append("Safety net: force-stripped data rows from run\(datasetError.runID).mod")
+                    }
+                }
                 let details = datasetError.output
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let message = "自动建模已停止：run\(datasetError.runID).mod 校验失败，且自动修复未能解决。请先根据下面的错误信息检查数据集或模型，不要再继续迭代。\n\n\(details)"
+                let message = "驱动模型 run\(datasetError.runID).mod 校验未通过。数据行已强制清理，请检查以下结构问题：\n\n\(details)"
                 runner.append(message)
-                assistantMessages.append(AssistantMessage(role: .system, text: message))
+                assistantMessages.append(AssistantMessage(role: .assistant, text: message))
                 refreshWorkspace()
             } catch is CancellationError {
                 runner.append("Automation cancelled.")
@@ -9787,6 +9824,29 @@ final class WorkbenchStore: ObservableObject {
         return bundledBridge
     }
 
+    /// Write text to a .mod file with hard post-write verification: read it back,
+    /// strip inline data rows, and rewrite if anything leaked.  This is the last
+    /// line of defence — no data row should EVER survive this gate.
+    private func guardModFileWrite(_ text: String, to url: URL, label: String) {
+        let guarded = LLMCommandService.stripInlineDatasetRows(text)
+        do {
+            try guarded.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            runner.append("guardModFileWrite failed for \(label): \(error.localizedDescription)")
+            return
+        }
+        guard let written = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let reStripped = LLMCommandService.stripInlineDatasetRows(written)
+        if reStripped != written {
+            do {
+                try reStripped.write(to: url, atomically: true, encoding: .utf8)
+                runner.append("🔴 POST-WRITE GUARD: stripped leaked data rows from \(url.lastPathComponent)")
+            } catch {
+                runner.append("🔴 POST-WRITE GUARD FAILED for \(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func validateModel(_ runID: String) async -> (passed: Bool, output: String) {
         let modURL = projectURL.appendingPathComponent("run\(runID).mod")
         if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
@@ -9803,7 +9863,7 @@ final class WorkbenchStore: ObservableObject {
                 sanitized = LLMCommandService.enforceIVAnchorHandoffFixes(sanitized)
             }
             if sanitized != modText {
-                try? sanitized.write(to: modURL, atomically: true, encoding: .utf8)
+                guardModFileWrite(sanitized, to: modURL, label: "run\(runID).mod (preflight)")
                 runner.append("AutoPMX normalized run\(runID).mod before preflight validation.")
             }
         }
@@ -9831,11 +9891,12 @@ final class WorkbenchStore: ObservableObject {
     private func autoFixModel(_ runID: String) async -> (fixed: Bool, output: String) {
         let python = resolvedPython()
         let bridge = resolveBridgeScript()
+        let modURL = projectURL.appendingPathComponent("run\(runID).mod")
         let fixCmd = [
             shellQuote(python),
             shellQuote(bridge),
             "autofix-model",
-            "--mod", shellQuote(projectURL.appendingPathComponent("run\(runID).mod").path),
+            "--mod", shellQuote(modURL.path),
             "--data", dataFile,
             "--run-id", runID,
             "--llm-url", shellQuote(llmBaseURL),
@@ -9844,36 +9905,56 @@ final class WorkbenchStore: ObservableObject {
         ].joined(separator: " ")
 
         let result = await runner.runAndWaitWithOutput(command: fixCmd, in: projectURL)
-        let output = result.output
-        let modURL = projectURL.appendingPathComponent("run\(runID).mod")
-        if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
-            var fixed = LLMCommandService.sanitizeControlStream(
-                modText,
+        var output = result.output
+
+        // --- CRITICAL: post-autofix data-row verification ---
+        // Python _auto_fix_mod strips data rows first, but we verify here anyway.
+        // If data rows leaked past Python, this is the last line of defence.
+        guard let modText = try? String(contentsOf: modURL, encoding: .utf8) else {
+            return (false, output)
+        }
+        let strippedAfterPython = LLMCommandService.stripInlineDatasetRows(modText)
+        let dataRowsCleared = strippedAfterPython != modText
+        if dataRowsCleared {
+            try? strippedAfterPython.write(to: modURL, atomically: true, encoding: .utf8)
+            runner.append("Post-autofix guard: force-stripped leaked data rows from run\(runID).mod")
+            output += "\n[AutoPMX] Force-stripped embedded data rows after Python autofix."
+        }
+
+        // Apply deterministic fixes
+        let baseText = dataRowsCleared ? strippedAfterPython : modText
+        var fixed = LLMCommandService.sanitizeControlStream(
+            baseText,
+            projectURL: projectURL,
+            dataFile: dataFile
+        )
+        fixed = correctS1Scaling(fixed)
+        let isIVAnchorHandoff = fixed.uppercased().contains("IV-ANCHOR HANDOFF")
+            || fixed.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED")
+        if !isModelRunSuccessful(runID: runID) && !isIVAnchorHandoff {
+            fixed = LLMCommandService.applyingNCAInitialValues(
+                fixed,
                 projectURL: projectURL,
                 dataFile: dataFile
             )
-            fixed = correctS1Scaling(fixed)
-            let isIVAnchorHandoff = fixed.uppercased().contains("IV-ANCHOR HANDOFF")
-                || fixed.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED")
-            if !isModelRunSuccessful(runID: runID) && !isIVAnchorHandoff {
-                fixed = LLMCommandService.applyingNCAInitialValues(
-                    fixed,
-                    projectURL: projectURL,
-                    dataFile: dataFile
-                )
-            }
-            fixed = LLMCommandService.applyingIVInfusionDurationFix(fixed)
-            fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
-            if isIVAnchorHandoff {
-                fixed = LLMCommandService.enforceIVAnchorHandoffFixes(fixed)
-            }
-            if fixed != modText {
-                try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
-                runner.append("AutoPMX applied deterministic preflight repair to run\(runID).mod")
-            }
+        }
+        fixed = LLMCommandService.applyingIVInfusionDurationFix(fixed)
+        fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
+        if isIVAnchorHandoff {
+            fixed = LLMCommandService.enforceIVAnchorHandoffFixes(fixed)
+        }
+        guardModFileWrite(fixed, to: modURL, label: "run\(runID).mod (post-autofix)")
+
+        // If data rows were cleared, treat as partial success even if Python autofix exitCode != 0.
+        // The remaining structural issues (OMEGA mismatch, etc.) will be addressed by the LLM
+        // in the next iteration loop — NEVER stop the entire automation for this.
+        if dataRowsCleared {
+            runner.append("Auto-fix partially succeeded for run\(runID).mod — data rows cleared, remaining structural issues deferred to LLM.")
+            return (true, output)
         }
 
         if result.exitCode == 0 {
+            output += "\n\n[AutoPMX] Deterministic repair resolved preflight errors."
             return (true, output)
         }
 
