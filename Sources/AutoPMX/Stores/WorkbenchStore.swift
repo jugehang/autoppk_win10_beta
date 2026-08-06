@@ -6307,6 +6307,7 @@ final class WorkbenchStore: ObservableObject {
                         derivedVUnit: derivedVUnit,
                         derivedCLUnit: derivedCLUnit,
                         isCovariatePhase: false,
+                        isInheritedHandoffMode: inheritedHandoffMode,
                         apiFormat: activeAPIFormat
                     )
                     recordUsage(usage)

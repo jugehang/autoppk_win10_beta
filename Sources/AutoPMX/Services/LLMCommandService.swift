@@ -1286,6 +1286,7 @@ struct LLMCommandService {
         derivedVUnit: String = "L",
         derivedCLUnit: String = "L/h",
         isCovariatePhase: Bool = false,
+        isInheritedHandoffMode: Bool = false,
         apiFormat: APIFormat = .openAICompatible
     ) async throws -> (text: String, usage: TokenUsage?) {
         let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
@@ -1299,6 +1300,17 @@ struct LLMCommandService {
 
         Start with exactly one word: ACCEPT or REVISE.
         \(Self.responseLanguageDirective)
+
+        \(isInheritedHandoffMode ? """
+        ━━━ INHERITED MOTHER-MODEL HANDOFF EVALUATION MODE ━━━
+        This is the first full-dataset handoff model built from an IV mother model.
+        - Inherited CL/V/Q/V2/V3 THETA/OMEGA entries are intentionally FIXED in this handoff. Their FIX status is NOT a REVISE reason.
+        - Do NOT require a stable 1-compartment model or a higher-compartment comparison; the inherited compartment structure is authoritative.
+        - If this run is S+C and has no syntax/NMTRAN failure or boundary estimate, answer ACCEPT so the next run can release ALL inherited structural FIXes.
+        - Non-zero ETABAR for inherited fixed parameters is expected while those parameters are pinned; the release round addresses it.
+        - Do not block acceptance solely because IIV-KA shrinkage is high while structural parameters are still fixed. Re-evaluate shrinkage after the release round.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """ : "")}
 
         ━━━ SELF-CHECK BEFORE ANY ACCEPT (MANDATORY) ━━━
         Before you are allowed to output ACCEPT, you MUST verify ALL of the following and state the result in your reasoning:
