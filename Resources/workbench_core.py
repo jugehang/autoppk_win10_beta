@@ -9,7 +9,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 
 LogFn = Callable[[str], None]
@@ -313,22 +313,69 @@ def _psn_command(name: str, psn_dir: str) -> str:
     return shutil.which(name) or f"/usr/local/bin/{name}"
 
 
+def _model_input_columns(project_dir: Path, run_id: str) -> Set[str]:
+    """Return the upper-case $INPUT columns declared in run{run_id}.mod."""
+    mod_path = Path(project_dir) / f"run{run_id}.mod"
+    if not mod_path.exists():
+        return set()
+    text = mod_path.read_text(encoding="utf-8", errors="ignore")
+    match = re.search(r"(?im)^\s*\$INPUT\s+(.+)$", text)
+    if not match:
+        return set()
+    tokens = match.group(1).split()
+    return {
+        token.split("=", 1)[0].upper()
+        for token in tokens
+        if token.upper() not in ("INPUT", "C")
+    }
+
+
+def _vpc_stratify_var(project_dir: Path, run_id: str, cfg: Dict) -> Optional[str]:
+    """Choose a VPC stratification column that actually exists in the model $INPUT."""
+    input_cols = _model_input_columns(project_dir, run_id)
+    if not input_cols:
+        return None
+
+    psn_cfg = cfg.get("psn_settings", {})
+    grouping = cfg.get("grouping", {})
+    configured = [
+        psn_cfg.get("vpc_stratify"),
+        psn_cfg.get("stratify_var"),
+        grouping.get("factor"),
+        "STUDY",
+    ]
+    for candidate in configured:
+        if candidate and str(candidate).upper() in input_cols:
+            return str(candidate).upper()
+
+    priority = (
+        "ROUTE", "SEX", "STUDY", "STUDYID", "STUDYNO", "ARM",
+        "DOSE", "TRT", "RACE", "REGION", "ADA", "TYPE", "CMT", "EVID",
+    )
+    for candidate in priority:
+        if candidate in input_cols:
+            return candidate
+    return None
+
+
 def psn_vpc_command(project_dir: Path, run_id: str, psn_dir: str = "") -> List[str]:
     cfg = load_project_config(project_dir)
     psn_cfg = cfg.get("psn_settings", {})
     samples = psn_cfg.get("vpc_samples", 500)
-    stratify_var = psn_cfg.get("vpc_stratify") or psn_cfg.get("stratify_var") or "STUDY"
+    stratify_var = _vpc_stratify_var(project_dir, run_id, cfg)
     command = _psn_command("vpc", psn_dir)
-    return [
+    cmd = [
         command,
         f"run{run_id}.mod",
         f"-samples={samples}",
         f"-dir=vpc_dir_{run_id}",
-        f"-stratify_on={stratify_var}",
         "-idv=TIME",
         "-bin_by_count=1",
         "-no_of_bins=12",
     ]
+    if stratify_var:
+        cmd.insert(4, f"-stratify_on={stratify_var}")
+    return cmd
 
 
 def psn_bootstrap_command(project_dir: Path, run_id: str, psn_dir: str = "", samples: int = 0) -> List[str]:

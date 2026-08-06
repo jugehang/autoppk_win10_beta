@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import json
+import re
 from pathlib import Path
 
 # =================================================================
@@ -62,7 +63,7 @@ class DuxactPopMaster:
         # 1. 提取参数
         psn_cfg = self.config.get("psn_settings", {})
         samples = psn_cfg.get("vpc_samples", 500)
-        stratify_var = psn_cfg.get("vpc_stratify", "STUDY")
+        stratify_var = self._vpc_stratify_var()
 
         # 2. 目录清理
         if os.path.exists(self.vpc_dir):
@@ -79,11 +80,12 @@ class DuxactPopMaster:
             self.model_file,
             f"-samples={samples}",  # 仿真样本量
             f"-dir={self.vpc_dir}",  # 结果输出目录
-            f"-stratify_on={stratify_var}",  # 分层变量
             "-idv=TIME",  # 强制指定自变量，确保覆盖全量时间轴
             "-bin_by_count=1",  # 采用海报推荐的自动分 Bin 模式
             "-no_of_bins=12"  # 减少 bin 数以包含长尾数据点
         ]
+        if stratify_var:
+            cmd.insert(4, f"-stratify_on={stratify_var}")
 
         logger.info(f"🚀 任务下发指令: {' '.join(cmd)}")
         print(f"\n{'=' * 25} PsN 实时进度控制台 {'=' * 25}")
@@ -104,6 +106,46 @@ class DuxactPopMaster:
         except Exception as e:
             logger.error(f"❌ PsN 运行失败: {e}")
             return False
+
+    def _vpc_stratify_var(self):
+        """Choose a VPC stratification column that exists in the model $INPUT."""
+        input_cols = self._model_input_columns()
+        if not input_cols:
+            return None
+        psn_cfg = self.config.get("psn_settings", {})
+        grouping = self.config.get("grouping", {})
+        configured = [
+            psn_cfg.get("vpc_stratify"),
+            psn_cfg.get("stratify_var"),
+            grouping.get("factor"),
+            "STUDY",
+        ]
+        for candidate in configured:
+            if candidate and str(candidate).upper() in input_cols:
+                return str(candidate).upper()
+        priority = (
+            "ROUTE", "SEX", "STUDY", "STUDYID", "STUDYNO", "ARM",
+            "DOSE", "TRT", "RACE", "REGION", "ADA", "TYPE", "CMT", "EVID",
+        )
+        for candidate in priority:
+            if candidate in input_cols:
+                return candidate
+        return None
+
+    def _model_input_columns(self):
+        mod_path = Path(self.model_file)
+        if not mod_path.exists():
+            return set()
+        text = mod_path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?im)^\s*\$INPUT\s+(.+)$", text)
+        if not match:
+            return set()
+        tokens = match.group(1).split()
+        return {
+            token.split("=", 1)[0].upper()
+            for token in tokens
+            if token.upper() not in ("INPUT", "C")
+        }
 
     def run_r_drawing(self):
         """[R 绘图模块] 闭环调用所有诊断图，捕获详细日志"""
