@@ -349,8 +349,8 @@ def _vpc_stratify_var(project_dir: Path, run_id: str, cfg: Dict) -> Optional[str
             return str(candidate).upper()
 
     priority = (
-        "ROUTE", "SEX", "STUDY", "STUDYID", "STUDYNO", "ARM",
-        "DOSE", "TRT", "RACE", "REGION", "ADA", "TYPE", "CMT", "EVID",
+        "DOSE", "STUDY", "STUDYID", "STUDYNO", "ARM",
+        "ROUTE", "TRT", "RACE", "REGION", "SEX", "ADA", "TYPE", "CMT", "EVID",
     )
     for candidate in priority:
         if candidate in input_cols:
@@ -641,6 +641,7 @@ class TaskRunner:
         self.log(f"[PREFLIGHT] Auto‑fix applied to {mod_path.name}")
 
     def run_psn_vpc(self) -> int:
+        self._ensure_project_config()
         archive = archive_existing_paths(self.root, [self.root / f"vpc_dir_{self.settings.curr_run}"], "psn")
         if archive:
             self.log(f"Archived previous VPC directory to: {archive.name}")
@@ -699,8 +700,8 @@ class TaskRunner:
             except Exception:
                 pass
 
-        candidates = ("STUDY", "STUDYID", "STUDYNO", "ARM", "DOSE", "TRT",
-                      "SEX", "ROUTE", "RACE", "REGION")
+        candidates = ("STUDY", "STUDYID", "STUDYNO", "DOSE", "ARM", "TRT",
+                      "ROUTE", "SEX", "RACE", "REGION")
         group_factor = next((c for c in candidates if c in columns), "STUDY")
 
         if config_path.exists():
@@ -710,11 +711,12 @@ class TaskRunner:
                 current_factor = config.get("grouping", {}).get("factor", "STUDY")
                 if current_factor in columns:
                     return
-                if not group_factor or group_factor == "STUDY" and "STUDY" not in columns:
+                if not group_factor or group_factor == "STUDY" and "STUDY" not in columns and "DOSE" not in columns:
                     return
                 config.setdefault("grouping", {})["factor"] = group_factor
                 config["grouping"]["labels"] = {}
                 config.setdefault("psn_settings", {})["stratify_var"] = group_factor
+                config["psn_settings"]["vpc_stratify"] = group_factor
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=2, ensure_ascii=False)
                 self.log(f"Repaired project_config.json grouping factor: {group_factor}")
@@ -728,8 +730,8 @@ class TaskRunner:
                 import pandas as pd
                 df = pd.read_csv(data_path, nrows=1)
                 cols = [c.upper() for c in df.columns]
-                for candidate in ("STUDY", "STUDYID", "STUDYNO", "ARM", "DOSE", "TRT",
-                                  "SEX", "ROUTE", "RACE", "REGION"):
+                for candidate in ("STUDY", "STUDYID", "STUDYNO", "DOSE", "ARM", "TRT",
+                                  "ROUTE", "SEX", "RACE", "REGION"):
                     if candidate in cols:
                         group_factor = candidate
                         break
@@ -739,7 +741,12 @@ class TaskRunner:
             "project_name": self.root.name,
             "units": {"time": "Time (h)", "conc": "Concentration"},
             "grouping": {"factor": group_factor, "labels": {}},
-            "psn_settings": {"vpc_samples": 500, "bootstrap_samples": 200, "stratify_var": group_factor},
+            "psn_settings": {
+                "vpc_samples": 500,
+                "bootstrap_samples": 200,
+                "stratify_var": group_factor,
+                "vpc_stratify": group_factor,
+            },
         }
         config_path.write_text(
             json.dumps(default_config, indent=2, ensure_ascii=False),

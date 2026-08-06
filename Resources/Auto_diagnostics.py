@@ -124,8 +124,8 @@ class DuxactPopMaster:
             if candidate and str(candidate).upper() in input_cols:
                 return str(candidate).upper()
         priority = (
-            "ROUTE", "SEX", "STUDY", "STUDYID", "STUDYNO", "ARM",
-            "DOSE", "TRT", "RACE", "REGION", "ADA", "TYPE", "CMT", "EVID",
+            "DOSE", "STUDY", "STUDYID", "STUDYNO", "ARM",
+            "ROUTE", "TRT", "RACE", "REGION", "SEX", "ADA", "TYPE", "CMT", "EVID",
         )
         for candidate in priority:
             if candidate in input_cols:

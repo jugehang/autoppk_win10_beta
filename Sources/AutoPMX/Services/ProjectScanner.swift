@@ -476,6 +476,30 @@ struct ProjectScanner {
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         var config = raw
         config["data_file"] = dataFileName
+
+        let csvURL = projectURL.appendingPathComponent(dataFileName)
+        if let header = try? String(contentsOf: csvURL, encoding: .utf8).split(separator: "\n").first {
+            let columns = header.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    .uppercased()
+            }
+            let candidates = ["STUDY", "STUDYID", "STUDYNO", "DOSE", "ARM", "TRT", "ROUTE", "SEX", "RACE", "REGION"]
+            if let factor = candidates.first(where: { columns.contains($0) }) {
+                var grouping = config["grouping"] as? [String: Any] ?? [:]
+                let currentFactor = (grouping["factor"] as? String ?? "").uppercased()
+                if !columns.contains(currentFactor) {
+                    grouping["factor"] = factor
+                    grouping["labels"] = [:]
+                    config["grouping"] = grouping
+                }
+                var psnSettings = config["psn_settings"] as? [String: Any] ?? [:]
+                psnSettings["stratify_var"] = factor
+                psnSettings["vpc_stratify"] = factor
+                config["psn_settings"] = psnSettings
+            }
+        }
+
         if let updated = try? JSONSerialization.data(withJSONObject: config, options: .prettyPrinted) {
             try? updated.write(to: configURL)
         }
@@ -525,7 +549,8 @@ struct ProjectScanner {
               "psn_settings": {
                 "vpc_samples": 500,
                 "bootstrap_samples": 200,
-                "stratify_var": "STUDY"
+                "stratify_var": "STUDY",
+                "vpc_stratify": "STUDY"
               }
             }
             """

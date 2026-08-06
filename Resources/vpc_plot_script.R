@@ -32,15 +32,32 @@ if (file.exists(config_file)) {
   message("⚠️ project_config.json 未找到，使用内置默认配置")
   proj_cfg <- list(grouping = list(factor = "STUDY", labels = list()))
 }
-group_factor <- proj_cfg$grouping$factor
+configured_factor <- proj_cfg$grouping$factor
+group_factor <- configured_factor
 group_labels <- proj_cfg$grouping$labels
 group_labels_vec <- unlist(group_labels)
-format_strat_label <- function(ids) {
-  ids <- as.character(ids)
-  if (length(group_labels_vec) == 0) return(ids)
-  mapped <- unname(group_labels_vec[ids])
-  out <- ifelse(is.na(mapped), ids, as.character(mapped))
-  as.character(out)
+label_stratum <- function(values, factor) {
+  values <- as.character(values)
+  if (factor == "ROUTE") {
+    out <- ifelse(values == "1", "IV",
+                  ifelse(values == "2", "SC", paste0("Route ", values)))
+    return(out)
+  }
+  if (factor == "DOSE") {
+    dose_unit <- "mg"
+    if (!is.null(proj_cfg$units$dose)) dose_unit <- as.character(proj_cfg$units$dose)
+    data_key <- basename(raw_data_path)
+    if (!is.null(proj_cfg$units_data[[data_key]]$dose)) {
+      dose_unit <- as.character(proj_cfg$units_data[[data_key]]$dose)
+    }
+    return(ifelse(is.na(values), "Overall", paste0("Dose ", values, " ", dose_unit)))
+  }
+  if (length(group_labels_vec) > 0 && identical(factor, configured_factor)) {
+    mapped <- unname(group_labels_vec[values])
+    out <- ifelse(is.na(mapped), values, as.character(mapped))
+    return(as.character(out))
+  }
+  values
 }
 
 # --- 3. 解析 .mod 获取原始数据散点 [cite: 110, 118] ---
@@ -70,8 +87,8 @@ configured_group <- c(
   if (!is.null(proj_cfg$grouping$factor)) as.character(proj_cfg$grouping$factor),
   "STUDY"
 )
-priority_group <- c("ROUTE", "SEX", "STUDY", "STUDYID", "STUDYNO", "ARM",
-                    "DOSE", "TRT", "RACE", "REGION", "ADA", "TYPE", "CMT", "EVID")
+priority_group <- c("DOSE", "STUDY", "STUDYID", "STUDYNO", "ARM",
+                    "ROUTE", "TRT", "RACE", "REGION", "SEX", "ADA", "TYPE", "CMT", "EVID")
 pick_group <- function(candidates, cols) {
   hit <- candidates[toupper(candidates) %in% cols]
   if (length(hit) > 0) toupper(hit[1]) else NA_character_
@@ -107,7 +124,18 @@ if (is.na(group_factor)) {
   raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = as.character(!!sym(group_factor)))
 }
 raw_obs_clean <- raw_obs_clean %>%
-  mutate(STRAT_LABEL = format_strat_label(STRAT_ID))
+  mutate(STRAT_LABEL = label_stratum(STRAT_ID, group_factor))
+
+vpctab_path <- paste0("vpctab", mod_index)
+strata_value_map <- NULL
+if (file.exists(vpctab_path) && !is.na(group_factor)) {
+  vpctab <- read.csv(vpctab_path, check.names = FALSE, stringsAsFactors = FALSE)
+  if ("strata_no" %in% names(vpctab) && group_factor %in% names(vpctab)) {
+    map_df <- unique(vpctab[c("strata_no", group_factor)])
+    strata_value_map <- setNames(as.character(map_df[[group_factor]]),
+                                 as.character(map_df[["strata_no"]]))
+  }
+}
 
 # --- 4. 深度解析 vpc_results.csv (统计线) [cite: 110, 114] ---
 header_indices <- grep("median.idv", lines)
@@ -126,6 +154,9 @@ for (i in seq_along(header_indices)) {
   current_id <- if (length(prev_strata_ln) > 0) {
     as.character(str_match(lines[prev_strata_ln], strata_pattern)[2])
   } else "Overall"
+  current_value <- if (!is.null(strata_value_map) && current_id %in% names(strata_value_map)) {
+    unname(strata_value_map[current_id])
+  } else current_id
 
   block <- read.csv(text = lines[start_ln:(next_ln-1)], header = TRUE, check.names = FALSE)
   block <- robust_clean_names(block)
@@ -143,7 +174,7 @@ for (i in seq_along(header_indices)) {
       STRAT_ID = current_id
     ) %>%
     filter(!is.na(bin_mid)) %>%
-    mutate(STRAT_LABEL = format_strat_label(STRAT_ID))
+    mutate(STRAT_LABEL = label_stratum(current_value, group_factor))
   all_strata_stats[[i]] <- stratum_clean
 }
 vpc_stats <- bind_rows(all_strata_stats)
