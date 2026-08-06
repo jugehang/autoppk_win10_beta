@@ -3403,6 +3403,11 @@ final class WorkbenchStore: ObservableObject {
         startAutomatedModelingDemo()
     }
 
+    func cancelIVAnchorPrompt() {
+        automationUseIVAnchor = false
+        isIVAnchorConfirmPresented = false
+    }
+
     /// Normalize typical-value parameter naming to the PsN SCM convention (TV-prefix).
     /// SCM requires typical values like `TVCL`, `TVV1`; some AI-generated models write `CLTV`, `V1TV`
     /// (TV suffix), which makes scm fail with "No TVCL was found". Rename `XXXTV` -> `TVXXX`.

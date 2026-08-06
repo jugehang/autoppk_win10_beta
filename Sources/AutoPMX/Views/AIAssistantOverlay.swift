@@ -1759,8 +1759,11 @@ struct AutomationOptionsSheetView: View {
             Button(L10n.t("auto.ivAnchorUse")) {
                 store.confirmUseIVAnchor()
             }
-            Button(L10n.t("auto.ivAnchorSkip"), role: .cancel) {
+            Button(L10n.t("auto.ivAnchorSkip")) {
                 store.skipUseIVAnchor()
+            }
+            Button(L10n.cancel, role: .cancel) {
+                store.cancelIVAnchorPrompt()
             }
         } message: {
             Text(String.safeFormat(
