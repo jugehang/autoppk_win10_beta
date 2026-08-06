@@ -1702,6 +1702,7 @@ struct LLMCommandService {
         isCovariatePhase: Bool = false,
         forceCompartmentEscalation: Bool = false,
         forceSameCompartment: Bool = false,
+        forceReleaseInheritedFixes: Bool = false,
         apiKey: String = "",
         sessionId: String? = nil,
         s1Expression: String = "V/1000",
@@ -1736,7 +1737,8 @@ struct LLMCommandService {
         if String(sourceText).uppercased().contains("IV-ANCHOR HANDOFF")
             || String(sourceText).uppercased().contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
             || String(sourceText).uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED") {
-            handoffReleaseBlock = """
+            if hasInheritedStructuralFixes(String(sourceText)) {
+                handoffReleaseBlock = """
             ━━━ IV-ANCHOR HANDOFF RELEASE ━━━
             run\(sourceRun) is a full-dataset handoff model built from an IV anchor. The inherited IV
             structural THETA/OMEGA entries are intentionally FIXED so the first full-dataset model can
@@ -1752,6 +1754,18 @@ struct LLMCommandService {
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
             """
+            } else {
+                handoffReleaseBlock = """
+            ━━━ INHERITED HANDOFF: FIXES ALREADY RELEASED ━━━
+            run\(sourceRun) is a full-dataset handoff model built from an IV anchor. Its inherited
+            structural FIXes have already been released for full-dataset estimation.
+            - Do NOT re-add FIX to CL/V/V1/V2/Q/Q2/Q3/V3.
+            - Keep the same route and compartment count; do not add covariates unless Phase 2 is active.
+            - Continue refining estimation only.
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+            """
+            }
         } else {
             handoffReleaseBlock = ""
         }
@@ -1771,6 +1785,16 @@ struct LLMCommandService {
 
         \(compWarning)
         \(handoffReleaseBlock)
+
+        \(forceReleaseInheritedFixes ? """
+        ━━━ INHERITED MOTHER-MODEL MODE: RELEASE ALL INHERITED FIXES ━━━
+        run\(sourceRun) is an ACCEPTED full-dataset handoff model built from an IV mother model.
+        Do NOT compare or add higher compartments, and do NOT change route/compartment count.
+        Your ONLY task: remove FIX from every inherited structural THETA/OMEGA parameter
+        (CL/V/V1/V2/Q/Q2/Q3/V3), keep KA/F1 and residual error estimated, and do not add covariates.
+        The model can then re-estimate the inherited parameters freely on the full mixed dataset.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """ : "")}
 
         ━━━ SOURCE MODEL ANALYSIS CHECKLIST ━━━
         Before editing, compare run\(sourceRun).mod with the actual dataset:
@@ -3018,6 +3042,127 @@ struct LLMCommandService {
             result.append(updated)
         }
         return result.joined(separator: "\n")
+    }
+
+    static func hasInheritedStructuralFixes(_ modText: String) -> Bool {
+        let upper = modText.uppercased()
+        guard upper.contains("IV-ANCHOR HANDOFF")
+                || upper.contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
+                || upper.contains("INHERITED IV THETA/OMEGA ARE FIXED") else {
+            return false
+        }
+        let structuralParams: Set<String> = ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
+        var inTheta = false
+        var inOmega = false
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lineUpper = trimmed.uppercased()
+            if lineUpper.hasPrefix("$THETA") {
+                inTheta = true
+                inOmega = false
+                continue
+            }
+            if lineUpper.hasPrefix("$OMEGA") {
+                inTheta = false
+                inOmega = true
+                continue
+            }
+            if (inTheta || inOmega) && trimmed.hasPrefix("$") {
+                break
+            }
+            guard inTheta || inOmega else { continue }
+            let comment = line.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = normalizedParameterKey(comment)
+            if structuralParams.contains(key), lineUpper.contains("FIX") {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func releasingIVAnchorHandoffFixes(_ modText: String) -> String {
+        let structuralParams: Set<String> = ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
+        var result: [String] = []
+        var inTheta = false
+        var inOmega = false
+
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$THETA") {
+                inTheta = true
+                inOmega = false
+                result.append(line)
+                continue
+            }
+            if upper.hasPrefix("$OMEGA") {
+                inTheta = false
+                inOmega = true
+                result.append(line)
+                continue
+            }
+            if (inTheta || inOmega) && trimmed.hasPrefix("$") {
+                inTheta = false
+                inOmega = false
+                result.append(line)
+                continue
+            }
+            if !inTheta && !inOmega {
+                result.append(line)
+                continue
+            }
+
+            let comment = line.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = normalizedParameterKey(comment)
+            if structuralParams.contains(key), upper.contains("FIX") {
+                if inTheta {
+                    result.append(releasingFixedThetaLine(line))
+                } else {
+                    result.append(releasingFixedOmegaLine(line))
+                }
+                continue
+            }
+            result.append(line)
+        }
+        return result.joined(separator: "\n")
+    }
+
+    private static func releasingFixedThetaLine(_ line: String) -> String {
+        let comment = line.components(separatedBy: ";").dropFirst()
+            .joined(separator: ";")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let valuePart = line.components(separatedBy: ";").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleaned = valuePart
+            .replacingOccurrences(of: #"\s*FIX\s*"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let newValue: String
+        if cleaned.contains("(") {
+            newValue = cleaned
+        } else {
+            let valueToken = cleaned.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "0.04"
+            newValue = "(0, \(valueToken))"
+        }
+        return comment.isEmpty ? newValue : "\(newValue) ; \(comment)"
+    }
+
+    private static func releasingFixedOmegaLine(_ line: String) -> String {
+        let comment = line.components(separatedBy: ";").dropFirst()
+            .joined(separator: ";")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let valuePart = line.components(separatedBy: ";").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleaned = valuePart
+            .replacingOccurrences(of: #"\s*FIX\s*"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let valueToken = cleaned.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "0.04"
+        let value = Double(valueToken) ?? 0.04
+        let initial = value > 0 ? String(format: "%.6g", value) : "0.04"
+        return comment.isEmpty ? initial : "\(initial) ; \(comment)"
     }
 
     private static func unfixingResidualThetaLine(_ line: String, key: String) -> String {

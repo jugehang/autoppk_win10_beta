@@ -6196,6 +6196,19 @@ final class WorkbenchStore: ObservableObject {
                 // Stable session id so DeepSeek keeps the prompt-cache alive (~1h) across iterations.
                 let automationSessionId = UUID().uuidString
                 var forceEscalation = false
+                var inheritedHandoffMode = automationUseIVAnchor
+                    && ivHandoff != nil
+                    && selectedMode == .selectedRun
+                if selectedMode == .selectedRun,
+                   let handoffText = ivHandoff?.modText {
+                    let upper = handoffText.uppercased()
+                    if upper.contains("IV-ANCHOR HANDOFF")
+                        || upper.contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
+                        || upper.contains("INHERITED IV THETA/OMEGA ARE FIXED") {
+                        inheritedHandoffMode = true
+                    }
+                }
+                var releaseInheritedFixes = false
                 var previousRunWasFailure = false
                 var consecutiveLLMFailures = 0
                 let maxEvaluations = 100
@@ -6374,75 +6387,99 @@ final class WorkbenchStore: ObservableObject {
                             assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompAcceptNotSC, sourceRun, String(runInfo.compartments), reason, String(runInfo.compartments))))
                             forceEscalation = false
                             // Fall through — proposeOptimizedModel will repair at same compartment
-                        } else {
-                        // Prevent premature acceptance: AUTO-REVISE if the next compartment level has NOT been tested.
-                        let preventAccept = shouldPreventAcceptance(runID: sourceRun, decision: decision, modelRuns: modelRuns, profile: profile)
-                        if preventAccept {
-                            let runInfo = compartmentInfoForRun(sourceRun)
-                            let nextComp = runInfo.compartments + 1
-                            runner.append("AI said ACCEPT but next compartment not yet tested — auto-overriding to REVISE. Current: \(runInfo.compartments)-comp. Must also test \(nextComp)-comp before acceptance.")
-                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompRequireCompare, sourceRun, String(runInfo.compartments), String(nextComp), String(nextComp))))
-                            forceEscalation = true  // signal to proposeOptimizedModel
-                            // Force continue — skip the accept break
-                        } else {
-                            // FINAL INTEGRITY CHECK (CODE-ENFORCED, not prompt): before Phase 1 can
-                            // complete, EVERY compartment count that has ANY run in this project MUST
-                            // have at least one STABLE + CONVERGED (S+C) model. A compartment count
-                            // with only failed/unconverged runs cannot be used to justify selection
-                            // and the base model MUST NOT be finalized.
-                            let existingComps = Set(modelRuns.map { compartmentInfoForRun($0).compartments })
-                            let compsMissingSC = existingComps.filter { comp in
-                                modelRuns
-                                    .filter { compartmentInfoForRun($0).compartments == comp }
-                                    .allSatisfy { !isModelStable(runID: $0) }
-                            }.sorted()
-                            if !compsMissingSC.isEmpty {
-                                let list = compsMissingSC.map { "\($0)-comp" }.joined(separator: ", ")
-                                runner.append("⚠️ Phase 1 integrity check FAILED: compartment count(s) \(list) have runs but NONE achieved S+C (stable + converged). Cannot finalize base model yet — continuing exploration within \(list).")
-                                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompIntegrityFail, list)))
+                        } else if inheritedHandoffMode {
+                            let handoffModURL = projectURL.appendingPathComponent("run\(sourceRun).mod")
+                            let handoffModText = (try? String(contentsOf: handoffModURL, encoding: .utf8)) ?? ""
+                            let hasInheritedFixes = LLMCommandService.hasInheritedStructuralFixes(handoffModText)
+                            if hasInheritedFixes {
+                                releaseInheritedFixes = true
                                 forceEscalation = false
-                                // Do NOT set accepted=true; fall through to keep iterating at current level.
+                                runner.append("Inherited handoff run\(sourceRun) accepted. Releasing all inherited structural FIXes before finalizing the mixed-dataset base model.")
+                                assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                                    "run\(sourceRun) 已作为母本子模型被接受。现在把继承来的结构参数 FIX 全部放开，重新估计后再确认基模。",
+                                    "run\(sourceRun) accepted as the inherited handoff model. Releasing all inherited structural FIXes for re-estimation before finalizing the base model."
+                                )))
                             } else {
-                            // Base model accepted — PAUSE and ask user for confirmation.
-                            // IMPORTANT: enforce the significance-based compartment rule. The AI's
-                            // raw "ACCEPT" run may be a more complex model that is NOT significantly
-                            // better than a simpler one. The final base model must be the SIMPLEST
-                            // model that is not significantly worse than any more complex model.
-                            accepted = true
-                            let phase1Choices = modelRuns.enumerated().map { index, runID in
-                                automationRunChoice(runID: runID, previousRun: index > 0 ? modelRuns[index - 1] : nil)
-                            }
-                            acceptedRun = selectBestBaseModel(choices: phase1Choices)?.runID ?? sourceRun
-                            duDuMood = .excited
-                            let summary = phaseOneSummary(runs: modelRuns, acceptedRun: acceptedRun ?? sourceRun)
-                            // ── High-compartment decision dialog ──
-                            // When the best base model is 3-comp with high RSE on remaining
-                            // peripheral parameters, offer the user a choice.
-                            let bestRunID = acceptedRun ?? sourceRun
-                            let bestComp = compartmentInfoForRun(bestRunID).compartments
-                            let hasHighRSE = hasHighResidualRSE(runID: bestRunID, threshold: 50.0)
-                            if bestComp >= 3 && hasHighRSE {
+                                accepted = true
+                                acceptedRun = sourceRun
+                                duDuMood = .excited
+                                let summary = phaseOneSummary(runs: modelRuns, acceptedRun: acceptedRun ?? sourceRun)
+                                let bestRunID = acceptedRun ?? sourceRun
+                                let bestComp = compartmentInfoForRun(bestRunID).compartments
+                                let hasHighRSE = hasHighResidualRSE(runID: bestRunID, threshold: 50.0)
+                                if bestComp >= 3 && hasHighRSE {
+                                    beginBenchmarkBaseWaitIfNeeded()
+                                    isAutoModeling = false
+                                    automationStep = "Compartment decision needed"
+                                    compDecisionAcceptedRun = bestRunID
+                                    compDecisionInfo = summary + "\n\n" + String.safeFormat(L10n.statusCompDecisionRSE, String(bestComp))
+                                    isCompDecisionPresented = true
+                                    break
+                                }
+                                runner.append("=== PHASE 1 COMPLETE ===\n\(summary)")
+                                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
                                 beginBenchmarkBaseWaitIfNeeded()
                                 isAutoModeling = false
-                                automationStep = "Compartment decision needed"
-                                compDecisionAcceptedRun = bestRunID
-                                compDecisionInfo = summary + "\n\n" + String.safeFormat(L10n.statusCompDecisionRSE, String(bestComp))
-                                isCompDecisionPresented = true
+                                automationStep = "Phase 1 complete — awaiting confirmation"
+                                baseModelConfirmSummary = summary
+                                baseModelConfirmRunID = bestRunID
+                                markAIModel(runID: bestRunID)
+                                isBaseModelConfirmPresented = true
                                 break
                             }
-                            runner.append("=== PHASE 1 COMPLETE ===\n\(summary)")
-                            assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
-                            // Pause and show confirmation dialog
-                            beginBenchmarkBaseWaitIfNeeded()
-                            isAutoModeling = false
-                            automationStep = "Phase 1 complete — awaiting confirmation"
-                            baseModelConfirmSummary = summary
-                            baseModelConfirmRunID = bestRunID
-                            markAIModel(runID: bestRunID)
-                            isBaseModelConfirmPresented = true
-                            break
+                        } else {
+                            // Prevent premature acceptance: AUTO-REVISE if the next compartment level has NOT been tested.
+                            let preventAccept = shouldPreventAcceptance(runID: sourceRun, decision: decision, modelRuns: modelRuns, profile: profile)
+                            if preventAccept {
+                                let runInfo = compartmentInfoForRun(sourceRun)
+                                let nextComp = runInfo.compartments + 1
+                                runner.append("AI said ACCEPT but next compartment not yet tested — auto-overriding to REVISE. Current: \(runInfo.compartments)-comp. Must also test \(nextComp)-comp before acceptance.")
+                                assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompRequireCompare, sourceRun, String(runInfo.compartments), String(nextComp), String(nextComp))))
+                                forceEscalation = true  // signal to proposeOptimizedModel
+                            } else {
+                                let existingComps = Set(modelRuns.map { compartmentInfoForRun($0).compartments })
+                                let compsMissingSC = existingComps.filter { comp in
+                                    modelRuns
+                                        .filter { compartmentInfoForRun($0).compartments == comp }
+                                        .allSatisfy { !isModelStable(runID: $0) }
+                                }.sorted()
+                                if !compsMissingSC.isEmpty {
+                                    let list = compsMissingSC.map { "\($0)-comp" }.joined(separator: ", ")
+                                    runner.append("⚠️ Phase 1 integrity check FAILED: compartment count(s) \(list) have runs but NONE achieved S+C (stable + converged). Cannot finalize base model yet — continuing exploration within \(list).")
+                                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompIntegrityFail, list)))
+                                    forceEscalation = false
+                                } else {
+                                    accepted = true
+                                    let phase1Choices = modelRuns.enumerated().map { index, runID in
+                                        automationRunChoice(runID: runID, previousRun: index > 0 ? modelRuns[index - 1] : nil)
+                                    }
+                                    acceptedRun = selectBestBaseModel(choices: phase1Choices)?.runID ?? sourceRun
+                                    duDuMood = .excited
+                                    let summary = phaseOneSummary(runs: modelRuns, acceptedRun: acceptedRun ?? sourceRun)
+                                    let bestRunID = acceptedRun ?? sourceRun
+                                    let bestComp = compartmentInfoForRun(bestRunID).compartments
+                                    let hasHighRSE = hasHighResidualRSE(runID: bestRunID, threshold: 50.0)
+                                    if bestComp >= 3 && hasHighRSE {
+                                        beginBenchmarkBaseWaitIfNeeded()
+                                        isAutoModeling = false
+                                        automationStep = "Compartment decision needed"
+                                        compDecisionAcceptedRun = bestRunID
+                                        compDecisionInfo = summary + "\n\n" + String.safeFormat(L10n.statusCompDecisionRSE, String(bestComp))
+                                        isCompDecisionPresented = true
+                                        break
+                                    }
+                                    runner.append("=== PHASE 1 COMPLETE ===\n\(summary)")
+                                    assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
+                                    beginBenchmarkBaseWaitIfNeeded()
+                                    isAutoModeling = false
+                                    automationStep = "Phase 1 complete — awaiting confirmation"
+                                    baseModelConfirmSummary = summary
+                                    baseModelConfirmRunID = bestRunID
+                                    markAIModel(runID: bestRunID)
+                                    isBaseModelConfirmPresented = true
+                                    break
+                                }
                             }
-                        }
                         }
                     }
 
@@ -6480,7 +6517,7 @@ final class WorkbenchStore: ObservableObject {
                     // 如果残差项 %RSE > 100%，强制在当前房室层修复残差，不允许升室。
                     // 实施方式：直接修改源 .mod 文件，给对应 THETA 加上 FIX 关键字。
                     // AI 在 proposeOptimizedModel 中读取该文件时，看到的是已 FIX 的版本。
-                    if !covariatePhase && hasHighResidualRSE(runID: sourceRun, threshold: 100.0) {
+                    if !covariatePhase && !inheritedHandoffMode && hasHighResidualRSE(runID: sourceRun, threshold: 100.0) {
                         forceSameCompartment = true
                         forceEscalation = false
                         let sourceMod = projectURL.appendingPathComponent("run\(sourceRun).mod")
@@ -6506,6 +6543,7 @@ final class WorkbenchStore: ObservableObject {
                         isCovariatePhase: covariatePhase,
                         forceCompartmentEscalation: forceEscalation,
                         forceSameCompartment: forceSameCompartment,
+                        forceReleaseInheritedFixes: releaseInheritedFixes,
                         apiKey: llmAPIKey,
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
@@ -6524,8 +6562,10 @@ final class WorkbenchStore: ObservableObject {
                         dataFile: activeDataFile
                     )
                     let sourceCompartment = compartmentInfoForRun(sourceRun).compartments
-                    if LLMCommandService.detectCompartmentCount(draftedModel) < sourceCompartment {
-                        runner.append("AI attempted to downgrade run\(nextRun) below run\(sourceRun) (\(sourceCompartment)-comp); using same-compartment fallback.")
+                    let draftedCompartment = LLMCommandService.detectCompartmentCount(draftedModel)
+                    if draftedCompartment < sourceCompartment
+                        || (inheritedHandoffMode && draftedCompartment > sourceCompartment) {
+                        runner.append("AI attempted to change compartment count for run\(nextRun) (\(sourceCompartment)-comp); using same-compartment fallback.")
                         let sourceURL = projectURL.appendingPathComponent("run\(sourceRun).mod")
                         let raw = (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? ""
                         let fallback = raw
@@ -6542,6 +6582,10 @@ final class WorkbenchStore: ObservableObject {
                             projectURL: projectURL,
                             dataFile: activeDataFile
                         )
+                    }
+                    if releaseInheritedFixes {
+                        draftedModel = LLMCommandService.releasingIVAnchorHandoffFixes(draftedModel)
+                        runner.append("Released inherited structural FIXes in run\(nextRun).mod; parameters will be re-estimated on the full mixed dataset.")
                     }
                     draftedModel = normalizeTypicalValueNaming(draftedModel)
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
@@ -6577,6 +6621,7 @@ final class WorkbenchStore: ObservableObject {
                     previousForComparison = sourceRun
                     sourceRun = nextRun
                     modelRuns.append(nextRun)
+                    releaseInheritedFixes = false
                     refreshWorkspace()
                 }
 
