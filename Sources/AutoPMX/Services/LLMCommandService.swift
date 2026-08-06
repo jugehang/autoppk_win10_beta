@@ -2983,9 +2983,10 @@ struct LLMCommandService {
     /// Residual error must NOT be inherited as fixed, because the mixed full dataset can
     /// change assay/route-specific residual behavior.
     static func enforceIVAnchorHandoffFixes(_ modText: String) -> String {
-        let fixedThetas = Set(["CL", "V2", "Q", "V3"])
+        let fixesReleased = modText.uppercased().contains("AUTOPMX INHERITED FIXES RELEASED")
+        let fixedThetas: Set<String> = fixesReleased ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
         let residualThetas = Set(["PROP.RE", "ADD.RE"])
-        let fixedOmegas = Set(["CL", "V2"])
+        let fixedOmegas: Set<String> = fixesReleased ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
         var result: [String] = []
         var inTheta = false
         var inOmega = false
@@ -3087,6 +3088,7 @@ struct LLMCommandService {
         var result: [String] = []
         var inTheta = false
         var inOmega = false
+        var changed = false
 
         for line in modText.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3121,14 +3123,31 @@ struct LLMCommandService {
             if structuralParams.contains(key), upper.contains("FIX") {
                 if inTheta {
                     result.append(releasingFixedThetaLine(line))
+                    changed = true
                 } else {
                     result.append(releasingFixedOmegaLine(line))
+                    changed = true
                 }
                 continue
             }
             result.append(line)
         }
-        return result.joined(separator: "\n")
+        var output = result.joined(separator: "\n")
+        guard changed else { return output }
+
+        let marker = ";; AutoPMX inherited FIXes released; structural parameters estimated on full dataset"
+        if !output.uppercased().contains("AUTOPMX INHERITED FIXES RELEASED") {
+            var lines = output.components(separatedBy: "\n")
+            if let problemIndex = lines.firstIndex(where: {
+                $0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("$PROBLEM")
+            }) {
+                lines.insert(marker, at: problemIndex + 1)
+            } else {
+                lines.insert(marker, at: 0)
+            }
+            output = lines.joined(separator: "\n")
+        }
+        return output
     }
 
     private static func releasingFixedThetaLine(_ line: String) -> String {
