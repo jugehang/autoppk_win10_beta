@@ -1804,6 +1804,9 @@ struct LLMCommandService {
         Do NOT compare or add higher compartments, and do NOT change route/compartment count.
         Your ONLY task: remove FIX from every inherited structural THETA/OMEGA parameter
         (CL/V/V1/V2/Q/Q2/Q3/V3), keep KA/F1 and residual error estimated, and do not add covariates.
+        Do NOT add, remove, or fix IIV. Preserve the source model's ETA architecture exactly;
+        for example keep KA=TVKA*EXP(ETA(1)) and its IIV KA entry. Q/V3 stay without ETA if they
+        had no ETA in run\(sourceRun).
         The model can then re-estimate the inherited parameters freely on the full mixed dataset.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         """ : "")}
@@ -3169,8 +3172,8 @@ struct LLMCommandService {
         var result: [String] = []
         var inPK = false
         var inOmega = false
-        let paramPattern = #"^\s*([A-Z][A-Z0-9_]*)\s*=\s*TV[A-Z][A-Z0-9_]*\s*\*\s*EXP\s*\(\s*ETA"#
-        let paramRegex = try? NSRegularExpression(pattern: paramPattern, options: [.caseInsensitive])
+        let bareParamPattern = #"^\s*([A-Z][A-Z0-9_]*)\s*=\s*TV[A-Z][A-Z0-9_]*"#
+        let bareParamRegex = try? NSRegularExpression(pattern: bareParamPattern, options: [.caseInsensitive])
 
         for line in modText.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3195,21 +3198,28 @@ struct LLMCommandService {
             }
 
             if inPK {
-                if let paramRegex {
+                if let bareParamRegex {
                     let nsRange = NSRange(line.startIndex..., in: line)
-                    let param: String?
-                    if let match = paramRegex.firstMatch(in: line, options: [], range: nsRange),
+                    let hasETA = line.uppercased().contains("EXP(ETA")
+                    if let match = bareParamRegex.firstMatch(in: line, options: [], range: nsRange),
                        match.numberOfRanges > 1,
                        let paramRange = Range(match.range(at: 1), in: line) {
-                        param = String(line[paramRange]).uppercased()
-                    } else {
-                        param = nil
-                    }
-                    if let param, !sourceIIV.contains(param) {
+                        let param = String(line[paramRange]).uppercased()
                         let indent = String(line.prefix { $0 == " " || $0 == "\t" })
-                        result.append("\(indent)\(param)=TV\(param)")
-                        continue
+                        if sourceIIV.contains(param) {
+                            if hasETA {
+                                result.append(line)
+                            } else {
+                                result.append("\(indent)\(param)=TV\(param)*EXP(ETA(99))")
+                            }
+                            continue
+                        } else if hasETA {
+                            result.append("\(indent)\(param)=TV\(param)")
+                            continue
+                        }
                     }
+                    result.append(line)
+                    continue
                 }
                 result.append(line)
                 continue
