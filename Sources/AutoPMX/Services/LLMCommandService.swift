@@ -1804,9 +1804,9 @@ struct LLMCommandService {
         Do NOT compare or add higher compartments, and do NOT change route/compartment count.
         Your ONLY task: remove FIX from every inherited structural THETA/OMEGA parameter
         (CL/V/V1/V2/Q/Q2/Q3/V3), keep KA/F1 and residual error estimated, and do not add covariates.
-        Do NOT add, remove, or fix IIV. Preserve the source model's ETA architecture exactly;
-        for example keep KA=TVKA*EXP(ETA(1)) and its IIV KA entry. Q/V3 stay without ETA if they
-        had no ETA in run\(sourceRun).
+        Do NOT add, remove, or fix IIV. Preserve the source model's ETA/OMEGA architecture exactly:
+        if a parameter has ETA in run\(sourceRun), keep that ETA; if it has no ETA, keep it bare.
+        The deterministic release step will automatically restore or trim any missing/extra IIV.
         The model can then re-estimate the inherited parameters freely on the full mixed dataset.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         """ : "")}
