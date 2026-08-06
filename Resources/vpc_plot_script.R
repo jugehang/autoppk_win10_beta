@@ -35,10 +35,17 @@ if (file.exists(config_file)) {
 group_factor <- proj_cfg$grouping$factor
 group_labels <- proj_cfg$grouping$labels
 group_labels_vec <- unlist(group_labels)
+format_strat_label <- function(ids) {
+  ids <- as.character(ids)
+  if (length(group_labels_vec) == 0) return(ids)
+  mapped <- unname(group_labels_vec[ids])
+  out <- ifelse(is.na(mapped), ids, as.character(mapped))
+  as.character(out)
+}
 
 # --- 3. 解析 .mod 获取原始数据散点 [cite: 110, 118] ---
-mod_lines <- readLines(mod_file)
-data_line <- mod_lines[grep("(?i)^\\$DATA", mod_lines)][1]
+mod_lines <- readLines(mod_file, warn = FALSE)
+data_line <- mod_lines[grep("^\\$DATA", mod_lines, ignore.case = TRUE)][1]
 raw_data_path <- str_match(data_line, "(?i)^\\$DATA\\s+([^\\s,]+)")[2]
 raw_data_path <- gsub("[\"']", "", raw_data_path)
 
@@ -48,17 +55,64 @@ raw_obs_data <- read.csv(raw_data_path, check.names = FALSE, stringsAsFactors = 
 raw_obs_clean <- robust_clean_names(raw_obs_data) %>%
   mutate(
     TIME_VAL = as.numeric(as.character(!!sym(intersect(colnames(.), c("TIME", "TAD"))[1]))),
-    DV_VAL   = as.numeric(as.character(!!sym(intersect(colnames(.), c("DV", "CONC"))[1]))),
-    STRAT_ID = as.character(as.numeric(!!sym(group_factor)))
+    DV_VAL   = as.numeric(as.character(!!sym(intersect(colnames(.), c("DV", "CONC"))[1])))
   ) %>%
-  filter(!is.na(DV_VAL), DV_VAL > 0) %>%
-  mutate(STRAT_LABEL = if (length(group_labels_vec) > 0) group_labels_vec[STRAT_ID] else STRAT_ID)
+  filter(!is.na(DV_VAL), DV_VAL > 0)
+
+# 使用 PsN 实际分层列，缺失时再从 $INPUT / 配置里挑选可用列。
+input_line <- mod_lines[grep("^\\$INPUT", mod_lines, ignore.case = TRUE)][1]
+input_tokens <- if (!is.na(input_line)) strsplit(gsub("(?i)^\\$INPUT\\s+", "", input_line), "\\s+")[[1]] else character(0)
+input_cols <- setdiff(toupper(sub("=.*", "", input_tokens)), c("C", "INPUT"))
+
+configured_group <- c(
+  if (!is.null(proj_cfg$psn_settings$vpc_stratify)) as.character(proj_cfg$psn_settings$vpc_stratify),
+  if (!is.null(proj_cfg$psn_settings$stratify_var)) as.character(proj_cfg$psn_settings$stratify_var),
+  if (!is.null(proj_cfg$grouping$factor)) as.character(proj_cfg$grouping$factor),
+  "STUDY"
+)
+priority_group <- c("ROUTE", "SEX", "STUDY", "STUDYID", "STUDYNO", "ARM",
+                    "DOSE", "TRT", "RACE", "REGION", "ADA", "TYPE", "CMT", "EVID")
+pick_group <- function(candidates, cols) {
+  hit <- candidates[toupper(candidates) %in% cols]
+  if (length(hit) > 0) toupper(hit[1]) else NA_character_
+}
+
+lines <- readLines(vpc_res_path, warn = FALSE)
+strata_headers <- grep("VPC results strata", lines, ignore.case = TRUE, value = TRUE)
+group_factor <- NA_character_
+if (length(strata_headers) > 0) {
+  m <- str_match(strata_headers[1], "strata\\s+([A-Za-z0-9_]+)\\s*=")
+  if (!is.na(m[2])) group_factor <- toupper(m[2])
+}
+if (is.na(group_factor) || !(group_factor %in% input_cols)) {
+  group_factor <- pick_group(configured_group, input_cols)
+}
+if (is.na(group_factor)) {
+  group_factor <- pick_group(priority_group, input_cols)
+}
+if (is.na(group_factor)) {
+  message("⚠️ 模型 $INPUT 中没有可用分层列，VPC 将按 Overall 绘制。")
+} else {
+  message(paste0(">>> VPC 分层变量: ", group_factor))
+}
+
+if (!is.na(group_factor) && !(group_factor %in% colnames(raw_obs_clean))) {
+  message("⚠️ 模型声明的分层列未出现在原始数据中，VPC 将按 Overall 绘制。")
+  group_factor <- NA_character_
+}
+
+if (is.na(group_factor)) {
+  raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = "Overall")
+} else {
+  raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = as.character(!!sym(group_factor)))
+}
+raw_obs_clean <- raw_obs_clean %>%
+  mutate(STRAT_LABEL = format_strat_label(STRAT_ID))
 
 # --- 4. 深度解析 vpc_results.csv (统计线) [cite: 110, 114] ---
-lines <- readLines(vpc_res_path)
 header_indices <- grep("median.idv", lines)
-strata_pattern <- paste0("strata\\s+", group_factor, "\\s*=\\s*([0-9.]+)")
-strata_indices <- grep(strata_pattern, lines, ignore.case = TRUE)
+strata_pattern <- if (!is.na(group_factor)) paste0("strata\\s+", group_factor, "\\s*=\\s*([0-9.]+)") else NULL
+strata_indices <- if (!is.null(strata_pattern)) grep(strata_pattern, lines, ignore.case = TRUE) else integer(0)
 # 核心修正：锁定第一个诊断信息位置，解决 6 elements 警告
 diag_indices <- grep("Diagnostics VPC", lines)
 global_end <- if(length(diag_indices) > 0) diag_indices[1] else length(lines)
@@ -70,7 +124,7 @@ for (i in seq_along(header_indices)) {
 
   prev_strata_ln <- tail(strata_indices[strata_indices < start_ln], 1)
   current_id <- if (length(prev_strata_ln) > 0) {
-    as.character(as.numeric(str_match(lines[prev_strata_ln], strata_pattern)[2]))
+    as.character(str_match(lines[prev_strata_ln], strata_pattern)[2])
   } else "Overall"
 
   block <- read.csv(text = lines[start_ln:(next_ln-1)], header = TRUE, check.names = FALSE)
@@ -89,7 +143,7 @@ for (i in seq_along(header_indices)) {
       STRAT_ID = current_id
     ) %>%
     filter(!is.na(bin_mid)) %>%
-    mutate(STRAT_LABEL = if (length(group_labels_vec) > 0) group_labels_vec[STRAT_ID] else STRAT_ID)
+    mutate(STRAT_LABEL = format_strat_label(STRAT_ID))
   all_strata_stats[[i]] <- stratum_clean
 }
 vpc_stats <- bind_rows(all_strata_stats)

@@ -10154,6 +10154,7 @@ final class WorkbenchStore: ObservableObject {
         guard let parentRunID = inheritedHandoffParentRunID(from: modText),
               runMinimizationOK(parentRunID),
               runCovarianceOK(parentRunID),
+              isInheritedHandoffModel(parentRunID),
               LLMCommandService.hasInheritedStructuralFixes(modText) else {
             return modText
         }
@@ -10165,6 +10166,17 @@ final class WorkbenchStore: ObservableObject {
         text = LLMCommandService.normalizingTableRecords(text, runID: runID)
         runner.append("Auto-released inherited structural FIXes in run\(runID).mod from S+C parent run\(parentRunID).")
         return text
+    }
+
+    private func isInheritedHandoffModel(_ runID: String) -> Bool {
+        guard let text = try? String(contentsOf: projectURL.appendingPathComponent("run\(runID).mod"), encoding: .utf8) else {
+            return false
+        }
+        let upper = text.uppercased()
+        return upper.contains("IV-ANCHOR HANDOFF")
+            || upper.contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
+            || upper.contains("INHERITED IV THETA/OMEGA ARE FIXED")
+            || upper.contains("AUTOPMX INHERITED FIXES RELEASED")
     }
 
     private func inheritedHandoffParentRunID(from modText: String) -> String? {

@@ -1756,8 +1756,9 @@ struct LLMCommandService {
             structural THETA/OMEGA entries are intentionally FIXED so the first full-dataset model can
             estimate residual error and KA (and F1 when both IV and SC routes exist) before releasing
             the structural parameters.
-            - If run\(sourceRun) achieved S+C: release exactly ONE inherited THETA or OMEGA FIX in
-              run\(nextRun), starting with CL or the central volume. Keep KA/F1 estimated.
+            - If run\(sourceRun) achieved S+C: release ALL inherited THETA/OMEGA FIXes in
+              run\(nextRun) at once (CL/V/V1/V2/Q/Q2/Q3/V3). Keep KA/F1 estimated.
+              Preserve the source model's ETA/OMEGA architecture exactly: do not add or remove IIV.
             - Residual error (Prop.RE/Add.RE) must NOT be fixed in a mixed full-dataset handoff model.
             - If run\(sourceRun) is NOT S+C: keep the inherited structural FIXes unchanged and repair
               only residual error/KA/F1 or the control stream. Do NOT release more structural parameters
@@ -2999,9 +3000,15 @@ struct LLMCommandService {
     /// change assay/route-specific residual behavior.
     static func enforceIVAnchorHandoffFixes(_ modText: String) -> String {
         let fixesReleased = modText.uppercased().contains("AUTOPMX INHERITED FIXES RELEASED")
-        let fixedThetas: Set<String> = fixesReleased ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
+        let upperText = modText.uppercased()
+        let releaseIntent = fixesReleased
+            || upperText.contains("RELEASE ALL INHERITED")
+            || upperText.contains("RELEASING ALL INHERITED")
+            || upperText.contains("HANDOFF RELEASE")
+            || upperText.contains("FIXES RELEASED")
+        let fixedThetas: Set<String> = releaseIntent ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
         let residualThetas = Set(["PROP.RE", "ADD.RE"])
-        let fixedOmegas: Set<String> = fixesReleased ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
+        let fixedOmegas: Set<String> = releaseIntent ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
         var result: [String] = []
         var inTheta = false
         var inOmega = false
@@ -3103,7 +3110,6 @@ struct LLMCommandService {
         var result: [String] = []
         var inTheta = false
         var inOmega = false
-        var changed = false
 
         for line in modText.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3138,17 +3144,14 @@ struct LLMCommandService {
             if structuralParams.contains(key), upper.contains("FIX") {
                 if inTheta {
                     result.append(releasingFixedThetaLine(line))
-                    changed = true
                 } else {
                     result.append(releasingFixedOmegaLine(line))
-                    changed = true
                 }
                 continue
             }
             result.append(line)
         }
         var output = result.joined(separator: "\n")
-        guard changed else { return output }
 
         let marker = ";; AutoPMX inherited FIXes released; structural parameters estimated on full dataset"
         if !output.uppercased().contains("AUTOPMX INHERITED FIXES RELEASED") {
