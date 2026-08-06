@@ -5687,8 +5687,7 @@ final class WorkbenchStore: ObservableObject {
 
         var ivHandoffSourceProjectURL: URL?
         var ivHandoff: (asset: ProjectAsset, modText: String, rows: [ParameterEstimateRow], compartments: Int)?
-        if automationUseIVAnchor,
-           selectedMode == .selectedRun,
+        if selectedMode == .selectedRun,
            !selectedRunID.isEmpty,
            let asset = modelAssetForRun(selectedRunID) {
             let modText = (try? String(contentsOf: asset.url, encoding: .utf8)) ?? ""
@@ -5751,7 +5750,7 @@ final class WorkbenchStore: ObservableObject {
                     )
                     copyModelOutputs(runID: selectedRunID, from: sourceURL, to: projectURL)
                     refreshWorkspace()
-                    runner.append("IV anchor parent run\(selectedRunID).mod copied into the full-dataset project.")
+                    runner.append("Selected parent run\(selectedRunID).mod copied into the AutoModel project.")
                 }
                 assistantMessages.append(AssistantMessage(role: .system, text: L10n.ctCleanProjectCreated))
             } catch {
