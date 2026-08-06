@@ -1754,6 +1754,16 @@ struct LLMCommandService {
         \(compWarning)
         \(handoffReleaseBlock)
 
+        ━━━ SOURCE MODEL ANALYSIS CHECKLIST ━━━
+        Before editing, compare run\(sourceRun).mod with the actual dataset:
+        - Check ADVAN/TRANS, CMT numbering, ROUTE, DUR/RATE, S1/S2.
+        - Do NOT blindly carry D1/D2 from the mother model when route/CMT changed.
+        - For extravascular ADVAN2/4/12: CMT=1 is depot, CMT=2 is central, CMT=3+ are peripheral.
+        - SC first-order dosing to CMT=1 must NOT use D1 unless SC dosing records carry DUR/RATE.
+        - IV infusion delivered directly to central CMT=2 with DUR must use D2=DUR (with tiny fallback).
+        - Preserve parent THETA/OMEGA/IIV unless this run's single intended change requires it.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
         ━━━ SOURCE CITATION ━━━
         At the bottom of the .mod file AFTER $TABLE, add a comment block:
         ; --- AutoPMX Decision Rationale ---
@@ -2346,6 +2356,9 @@ struct LLMCommandService {
         - If the source model failed NONMEM/PsN/NMTRAN, repair the failing control-stream block first. Do not add model complexity until the model compiles and produces usable NONMEM output.
         - Use the AutoPMX PopPK model library as the syntax source. Do not invent a new NONMEM skeleton.
         - Keep combined proportional + additive residual error unless explicitly instructed otherwise.
+        - Before editing, check the source model's ADVAN/TRANS, CMT numbering, D1/D2, and S1/S2 against
+          the dataset. Do not carry D1/D2 blindly from an IV mother into an extravascular child.
+          SC first-order CMT=1 must not use D1; IV infusion to central CMT=2 with DUR should use D2.
 
         Source model:
         \(sourceText)
@@ -2354,6 +2367,75 @@ struct LLMCommandService {
         let (raw, usage) = try await sendChatPrompt(
             url: url, model: model, prompt: prompt,
             systemPrompt: systemPrompt,
+            temperature: 0.1, timeout: 300, apiKey: apiKey, sessionId: sessionId,
+            apiFormat: apiFormat
+        )
+        return (try cleanControlStream(raw, projectURL: projectURL, dataFile: dataFile), usage)
+    }
+
+    /// Ask DuDu to think through the IV-anchor -> full-dataset handoff instead of
+    /// blindly using the deterministic template. The deterministic draft is still
+    /// provided as a syntax baseline and as a fallback when the LLM call fails.
+    static func generateFullDatasetHandoffModel(
+        baseURL: String,
+        model: String,
+        projectURL: URL,
+        runID: String,
+        parentRunID: String,
+        dataFile: String,
+        rules: String,
+        deterministicDraft: String,
+        parentModText: String,
+        hasIV: Bool,
+        hasExtravascular: Bool,
+        apiKey: String = "",
+        sessionId: String? = nil,
+        apiFormat: APIFormat = .openAICompatible
+    ) async throws -> (text: String, usage: TokenUsage?) {
+        let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
+        let inputRecord = inputRecordFromDataset(projectURL: projectURL, dataFile: dataFile) ?? defaultInputRecord
+        let modelLibrary = modelLibraryText(projectURL: projectURL)
+        let staticCtx = canonicalRuleContext(rules: rules, modelLibrary: modelLibrary)
+
+        let prompt = """
+        You are an expert NONMEM pharmacometrician converting an IV mother model into the first
+        full-dataset extravascular handoff model.
+
+        Task:
+        Create run\(runID).mod based on run\(parentRunID).mod and the dataset below. Return ONLY
+        the complete .mod file. No markdown, no explanation.
+
+        Dataset route evidence:
+        - Contains IV dosing: \(hasIV ? "YES" : "NO")
+        - Contains SC/extravascular dosing: \(hasExtravascular ? "YES" : "NO")
+
+        HARD REQUIREMENTS:
+        1. Read the mother model first, then the deterministic draft. Preserve the mother model's
+           exact THETA values and OMEGA/IIV structure. Do not replace inherited values with defaults.
+        2. Convert IV compartment numbering to the extravascular ADVAN family:
+           ADVAN2/4/12 -> depot CMT=1, central CMT=2, peripheral CMT=3 (2-comp) or CMT=4 (3-comp).
+        3. Keep inherited IV THETA/OMEGA entries FIXED initially. Estimate KA first, and add F1 only
+           when both IV and SC/extravascular routes exist.
+        4. SC first-order dosing to CMT=1 must NOT use D1 just because DUR exists in the dataset.
+        5. IV infusion delivered directly to central CMT=2 with DUR must use:
+           IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR
+           IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001
+        6. Use S2 from the deterministic draft, not S1.
+        7. Do not add covariates, extra compartments, or extra IIV beyond the mother model plus KA/F1.
+        8. $TABLE must mirror $INPUT and $PK exactly, with file names run\(runID).
+        9. CSV header order is locked. Use exactly: $INPUT \(inputRecord)
+        10. Use exactly: $DATA \(dataFile) IGNORE=C
+
+        Mother model run\(parentRunID).mod:
+        \(parentModText.prefix(18_000))
+
+        Deterministic draft run\(runID).mod (use as syntax baseline, correct it if needed):
+        \(deterministicDraft.prefix(18_000))
+        """
+
+        let (raw, usage) = try await sendChatPrompt(
+            url: url, model: model, prompt: prompt,
+            systemPrompt: staticCtx,
             temperature: 0.1, timeout: 300, apiKey: apiKey, sessionId: sessionId,
             apiFormat: apiFormat
         )

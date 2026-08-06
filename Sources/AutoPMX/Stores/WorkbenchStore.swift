@@ -6086,7 +6086,7 @@ final class WorkbenchStore: ObservableObject {
                     automationStep = "AI writing full-dataset handoff run\(childID).mod"
                     addThinkingStep("Building full-dataset model from IV anchor run\(parentRunID)", type: .working)
 
-                    let handoffModel = LLMCommandService.fullDatasetIVHandoffModel(
+                    let deterministicHandoff = LLMCommandService.fullDatasetIVHandoffModel(
                         childRunID: childID,
                         parentRunID: parentRunID,
                         projectURL: projectURL,
@@ -6103,8 +6103,38 @@ final class WorkbenchStore: ObservableObject {
                         s2for2CompExpression: derivedS2for2CompExpression
                     )
 
-                    var handoffText = LLMCommandService.sanitizeControlStream(
-                        handoffModel,
+                    var handoffText: String
+                    do {
+                        let (aiHandoff, handoffUsage) = try await LLMCommandService.generateFullDatasetHandoffModel(
+                            baseURL: llmBaseURL,
+                            model: llmModel,
+                            projectURL: projectURL,
+                            runID: childID,
+                            parentRunID: parentRunID,
+                            dataFile: activeDataFile,
+                            rules: rules,
+                            deterministicDraft: deterministicHandoff,
+                            parentModText: handoff.modText,
+                            hasIV: hasIV,
+                            hasExtravascular: hasExtravascular,
+                            apiKey: llmAPIKey,
+                            apiFormat: activeAPIFormat
+                        )
+                        recordUsage(handoffUsage)
+                        handoffText = aiHandoff
+                        runner.append("DuDu reviewed IV-anchor handoff and drafted run\(childID).mod")
+                    } catch {
+                        let nsError = error as NSError
+                        if error is CancellationError ||
+                            (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) {
+                            throw CancellationError()
+                        }
+                        runner.append("AI handoff rewrite failed; using deterministic template: \(error.localizedDescription.prefix(120))")
+                        handoffText = deterministicHandoff
+                    }
+
+                    handoffText = LLMCommandService.sanitizeControlStream(
+                        handoffText,
                         projectURL: projectURL,
                         dataFile: activeDataFile
                     )
