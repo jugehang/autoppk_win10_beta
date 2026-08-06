@@ -949,6 +949,25 @@ struct LLMCommandService {
               Run002+: 2-comp oral (KA, CL, V2, Q, V3) — ONLY if GOF supports
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             """
+        case "Mixed":
+            routeGuidance = """
+            Mixed IV + SC/extravascular administration detected from the ROUTE column.
+            This dataset needs a depot compartment for SC dosing and a central compartment
+            for IV dosing. Start from the extravascular template so SC records use CMT=1
+            (depot) and IV records can dose directly to the central compartment.
+            """
+            routeHardRule = """
+            ━━━ ROUTE LOCK: MIXED IV + SC/EXTRAVASCULAR ━━━
+            YOU ARE BUILDING A FULL-DATASET MODEL WITH BOTH IV AND SC/EXTRAVASCULAR ROUTES.
+            - ALLOWED templates: extravascular_1c_advan2_trans2 →
+              extravascular_2c_advan4_trans4 → extravascular_3c_advan12_trans4.
+            - FORBIDDEN: ADVAN1, ADVAN3, ADVAN11 (IV-only), and any S1-only central scaling.
+            - Depot = CMT=1, Central = CMT=2 (use S2=\(s2Expression) / S2=\(s2for2CompExpression)).
+            - If you are continuing from an IV mother model, keep the IV THETA/OMEGA estimates
+              as starting values, add KA, add F1 when both IV and SC exist, and renumber the
+              central/peripheral compartments for the extravascular ADVAN family.
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            """
         default:
             routeGuidance = """
             Route is uncertain. Start from template: \(recommendedTemplate), unless the data preview clearly supports another library template.
@@ -2643,6 +2662,9 @@ struct LLMCommandService {
         case "Oral":
             return "extravascular_1c_advan2_trans2"
         case "Mixed":
+            if profile.hasOral && (profile.hasIVBolus || profile.hasIVInfusion) {
+                return "extravascular_1c_advan2_trans2"
+            }
             return "custom_linear_1c_des"
         default:
             return "iv_bolus_1c_advan1_trans2"
@@ -2831,6 +2853,7 @@ struct LLMCommandService {
         let durIdx = headers.firstIndex(of: "DUR")
         let doseIdx = headers.firstIndex(of: "DOSE")
         let evidIdx = headers.firstIndex(of: "EVID")
+        let routeIdx = headers.firstIndex(of: "ROUTE")
 
         var subjectIDs = Set<String>()
         var covariateSubjects = Set<String>()  // track which subjects we've extracted covariates from
@@ -2890,22 +2913,57 @@ struct LLMCommandService {
             let rateVal = doubleValue(at: rateIdx) ?? 0
             let durVal = doubleValue(at: durIdx) ?? 0
             let doseVal = doubleValue(at: doseIdx) ?? amtVal
+            let routeVal = stringValue(at: routeIdx)?
+                .uppercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            // Only classify route from actual dosing events (EVID=1 or 4).
-            // do NOT treat CMT=2 from observation records as oral —
-            // in 2-cpt IV datasets, CMT=2 is a peripheral compartment.
             let isDosingEvent = (evidVal == 1 || evidVal == 4)
             if isDosingEvent || amtVal > 0 {
                 if doseVal > 0 { doseValues.insert(doseVal) }
-                if cmtVal == 1 {
-                    if rateVal > 0 || durVal > 0 {
-                        hasIVInfusion = true
-                    } else if amtVal > 0 {
-                        hasIVBolus = true
+                if !routeVal.isEmpty {
+                    let isIVRoute = routeVal.contains("IV")
+                        || routeVal.contains("INTRAVENOUS")
+                        || routeVal.contains("INFUS")
+                        || routeVal.contains("BOLUS")
+                    let isExtravascularRoute = routeVal.contains("SC")
+                        || routeVal.contains("SUBQ")
+                        || routeVal.contains("SUBCUT")
+                        || routeVal.contains("ORAL")
+                        || routeVal.contains("PO")
+                        || routeVal.contains("EXTRAVASCULAR")
+                        || routeVal.contains("IM ")
+                        || routeVal.hasPrefix("IM")
+                        || routeVal == "IM"
+
+                    if isIVRoute {
+                        if rateVal > 0 || durVal > 0 || routeVal.contains("INFUS") {
+                            hasIVInfusion = true
+                        } else {
+                            hasIVBolus = true
+                        }
+                    } else if isExtravascularRoute {
+                        hasOral = true
+                    } else if cmtVal == 1 {
+                        if rateVal > 0 || durVal > 0 {
+                            hasIVInfusion = true
+                        } else if amtVal > 0 {
+                            hasIVBolus = true
+                        }
+                    } else if cmtVal == 2 && amtVal > 0 && isDosingEvent {
+                        hasOral = true
                     }
-                } else if cmtVal == 2 && amtVal > 0 && isDosingEvent {
-                    // Only flag as oral when CMT=2 is an explicit dosing event (depot)
-                    hasOral = true
+                } else {
+                    // Fallback only when the dataset has no ROUTE column.
+                    // CMT=1 is IV in classic datasets, but CMT=2 may be a depot for SC/oral.
+                    if cmtVal == 1 {
+                        if rateVal > 0 || durVal > 0 {
+                            hasIVInfusion = true
+                        } else if amtVal > 0 {
+                            hasIVBolus = true
+                        }
+                    } else if cmtVal == 2 && amtVal > 0 && isDosingEvent {
+                        hasOral = true
+                    }
                 }
             }
         }

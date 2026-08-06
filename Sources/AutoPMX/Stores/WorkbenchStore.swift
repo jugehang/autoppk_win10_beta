@@ -3375,7 +3375,6 @@ final class WorkbenchStore: ObservableObject {
     private func shouldAskForIVAnchor() -> Bool {
         guard automationStartMode == .selectedRun,
               !automationStartRunID.isEmpty,
-              automationDataFile != dataFile,
               LLMCommandService.analyzeDataset(projectURL: projectURL, dataFile: automationDataFile).hasOral,
               let modText = try? String(contentsOf:
                   projectURL.appendingPathComponent("run\(automationStartRunID).mod"),
