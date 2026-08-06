@@ -933,7 +933,9 @@ struct LLMCommandService {
             """
         case "Oral":
             routeGuidance = """
-            Oral/extravascular administration detected (CMT=2 with AMT>0).
+            Oral/extravascular administration detected from ROUTE and/or depot->central CMT structure.
+            Standard extravascular NONMEM uses CMT=1 for the depot dose and CMT=2 for the central
+            observation, so do NOT treat CMT=1 dosing as direct delivery to the central compartment.
             Start from template: \(recommendedTemplate).
             If the CMT convention is nonstandard, use the custom DES template rather than inventing ADVAN syntax.
             """
@@ -974,10 +976,14 @@ struct LLMCommandService {
             """
             routeHardRule = """
             ━━━ ROUTE: UNCERTAIN ━━━
-            Determine route from CMT and AMT columns before writing $SUBROUTINES.
-            - If CMT=1 with AMT>0 and no RATE/DUR → IV Bolus
-            - If CMT=1 with RATE>0 or DUR>0 → IV Infusion
-            - If CMT=2 with AMT>0 → Oral
+            Determine route from ROUTE, CMT, RATE/DUR, and the first-dose C-T profile before writing $SUBROUTINES.
+            - If ROUTE is present, trust ROUTE as the highest-priority signal.
+            - If dosing CMT=2 with AMT>0 → Oral/extravascular (nonstandard CMT).
+            - If dosing CMT=1 with RATE>0 or DUR>0 → IV Infusion.
+            - If dosing CMT=1, no RATE/DUR, and observations use CMT>=2 without any CMT=1 observation
+              → depot + central (Oral/extravascular), not IV bolus.
+            - If dosing CMT=1 and observations include CMT=1 → IV Bolus.
+            - If still ambiguous, inspect whether early concentrations rise after dosing before choosing.
             ━━━━━━━━━━━━━━━━━━━━
             """
         }
@@ -2861,6 +2867,8 @@ struct LLMCommandService {
         var hasIVBolus = false
         var hasIVInfusion = false
         var hasOral = false
+        var dosingCmtValues = Set<Int>()
+        var observedCmtValues = Set<Int>()
         var minTime = Double.infinity
         var maxTime = -Double.infinity
         // Covariate statistics
@@ -2919,6 +2927,7 @@ struct LLMCommandService {
 
             let isDosingEvent = (evidVal == 1 || evidVal == 4)
             if isDosingEvent || amtVal > 0 {
+                if cmtVal > 0 { dosingCmtValues.insert(cmtVal) }
                 if doseVal > 0 { doseValues.insert(doseVal) }
                 if !routeVal.isEmpty {
                     let isIVRoute = routeVal.contains("IV")
@@ -2965,6 +2974,21 @@ struct LLMCommandService {
                         hasOral = true
                     }
                 }
+            } else if cmtVal > 0 {
+                observedCmtValues.insert(cmtVal)
+            }
+        }
+
+        // CMT-based fallback for non-IV data. Standard extravascular NONMEM uses
+        // CMT=1 for the depot dose and CMT=2 for the central observation, so a
+        // CMT=2 dose is also a valid nonstandard signal.
+        if !hasOral && !hasIVBolus && !hasIVInfusion {
+            if dosingCmtValues.contains(2) {
+                hasOral = true
+            } else if dosingCmtValues.contains(1),
+                      observedCmtValues.contains(2),
+                      !observedCmtValues.contains(1) {
+                hasOral = true
             }
         }
 

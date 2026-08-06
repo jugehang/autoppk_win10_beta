@@ -95,6 +95,8 @@ has_cmt  <- "CMT"  %in% names(d)
 has_mdv  <- "MDV"  %in% names(d)
 has_ada  <- "ADA"  %in% names(d)  # Anti-drug antibody flag
 has_route <- "ROUTE" %in% names(d)
+has_rate  <- "RATE" %in% names(d)
+has_dur   <- "DUR" %in% names(d)
 
 # ---- 3. Extract ACTUAL dose per observation (true dose normalization) ----
 # KEY: dose normalization divides each individual's DV by THAT individual's
@@ -132,9 +134,12 @@ if (is.null(dose_src)) {
   # Fallback: derive actual dose per subject from dosing records (AMT preferred).
   if (has_evid) {
     dose_rows <- d %>% filter(!is.na(EVID) & EVID %in% c(1, 4)) %>% filter(!is.na(.data[[dose_col]]))
-  } else if (has_cmt) {
-    dose_rows <- d %>% filter(!is.na(CMT) & CMT == 1) %>% filter(!is.na(.data[[dose_col]]))
-  } else {
+} else if (has_amt) {
+    dose_rows <- d %>% filter(!is.na(.data[[dose_col]]) & .data[[dose_col]] > 0)
+} else if (has_cmt) {
+    dose_rows <- d %>% filter(!is.na(CMT) & CMT %in% c(1, 2)) %>%
+      filter(!is.na(.data[[dose_col]]) & .data[[dose_col]] > 0)
+} else {
     dose_rows <- d %>% filter(!is.na(.data[[dose_col]]) & .data[[dose_col]] > 0)
   }
   if (nrow(dose_rows) == 0) {
@@ -903,18 +908,45 @@ route_info <- "Unknown"
 if (has_route) {
   route_vals <- unique(d$ROUTE[!is.na(d$ROUTE) & trimws(as.character(d$ROUTE)) != ""])
   route_info <- if (length(route_vals) > 0) paste(route_vals, collapse = "+") else "Unknown"
-} else if (has_evid) {
-  dosing <- d %>% filter(!is.na(EVID) & EVID %in% c(1, 4) & !is.na(AMT) & AMT > 0)
-  if (nrow(dosing) > 0) {
-    if (has_cmt && any(dosing$CMT == 2, na.rm = TRUE)) {
-      route_info <- "Extravascular"
-    } else {
-      route_info <- "IV Infusion"
-    }
+}
+
+if (route_info == "Unknown") {
+  if (has_evid) {
+    dosing <- d %>% filter(!is.na(EVID) & EVID %in% c(1, 4) & !is.na(AMT) & AMT > 0)
+  } else if (has_amt) {
+    dosing <- d %>% filter(!is.na(AMT) & AMT > 0)
+  } else if (has_cmt) {
+    dosing <- d %>% filter(!is.na(CMT) & !is.na(AMT) & AMT > 0)
+  } else {
+    dosing <- data.frame()
   }
-} else if (has_cmt) {
-  if (any(d$CMT == 2, na.rm = TRUE)) route_info <- "Extravascular"
-  else route_info <- "IV Infusion"
+
+  obs_rows <- if (has_evid) {
+    d %>% filter(is.na(EVID) | EVID == 0)
+  } else if (has_mdv) {
+    d %>% filter(!is.na(MDV) & MDV == 0)
+  } else {
+    d %>% filter(!is.na(DV))
+  }
+
+  if (has_cmt && nrow(dosing) > 0) {
+    if (any(dosing$CMT == 2, na.rm = TRUE)) {
+      route_info <- "Extravascular"
+    } else if (nrow(obs_rows) > 0 &&
+               any(obs_rows$CMT == 2, na.rm = TRUE) &&
+               !any(obs_rows$CMT == 1, na.rm = TRUE)) {
+      route_info <- "Extravascular"
+    } else if (any(dosing$CMT == 1, na.rm = TRUE)) {
+      dose_rows_cmt1 <- dosing %>% filter(!is.na(CMT) & CMT == 1)
+      has_infusion <- (has_rate && any(dose_rows_cmt1$RATE > 0, na.rm = TRUE)) ||
+                      (has_dur && any(dose_rows_cmt1$DUR > 0, na.rm = TRUE))
+      route_info <- if (isTRUE(has_infusion)) "IV Infusion" else "IV Bolus"
+    } else {
+      route_info <- "Unknown"
+    }
+  } else if (nrow(dosing) > 0) {
+    route_info <- "IV Bolus"
+  }
 }
 
 # ---- 10b. Absorption lag detection (skip for IV routes) ----
