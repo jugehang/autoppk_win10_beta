@@ -1762,6 +1762,7 @@ struct LLMCommandService {
         - SC first-order dosing to CMT=1 must NOT use D1 unless SC dosing records carry DUR/RATE.
         - IV infusion delivered directly to central CMT=2 with DUR must use D2=DUR (with tiny fallback).
         - Preserve parent THETA/OMEGA/IIV unless this run's single intended change requires it.
+        - NEVER paste dataset rows into the .mod. Use $DATA to reference the CSV file.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         ━━━ SOURCE CITATION ━━━
@@ -2363,6 +2364,7 @@ struct LLMCommandService {
         - Before editing, check the source model's ADVAN/TRANS, CMT numbering, D1/D2, and S1/S2 against
           the dataset. Do not carry D1/D2 blindly from an IV mother into an extravascular child.
           SC first-order CMT=1 must not use D1; IV infusion to central CMT=2 with DUR should use D2.
+        - NEVER paste dataset rows into the .mod. The CSV is loaded through $DATA, not embedded after $INPUT.
         - ETA numbering must remain contiguous. If an IIV is fixed/removed, either keep ETA with
           0 FIX or remove the OMEGA row and renumber all ETA references (PK, OMEGA, tables).
 
@@ -2431,6 +2433,7 @@ struct LLMCommandService {
         8. $TABLE must mirror $INPUT and $PK exactly, with file names run\(runID).
         9. CSV header order is locked. Use exactly: $INPUT \(inputRecord)
         10. Use exactly: $DATA \(dataFile) IGNORE=C
+        11. NEVER paste dataset rows into the .mod. The data file is referenced by $DATA; do not append CSV rows after $INPUT.
 
         Mother model run\(parentRunID).mod:
         \(parentModText.prefix(18_000))
@@ -2600,6 +2603,17 @@ struct LLMCommandService {
                 }
                 if isLikelyInlineDataRow(trimmed) {
                     continue
+                }
+                let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+                if tokens.count >= 2 {
+                    let first = tokens[0]
+                    let numericCount = tokens.filter { token in
+                        token == "." || Double(token) != nil
+                    }.count
+                    if first == "." || Double(first) != nil ||
+                        numericCount >= max(2, tokens.count / 2) {
+                        continue
+                    }
                 }
             }
             output.append(line)
