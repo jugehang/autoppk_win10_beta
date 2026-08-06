@@ -662,6 +662,7 @@ enum L10n {
     // CT & Auto messages
     static var ctAnalysisComplete: String { t("ct.analysisComplete") }
     static var ctCtPlot: String { t("ct.ctPlot") }
+    static var ctFacetPlot: String { t("ct.facetPlot") }
     static var ctIVroute: String { t("ct.IVroute") }
     static var ctAbsorptionLag: String { t("ct.absorptionLag") }
     static var ctMultiCompartment: String { t("ct.multiCompartment") }
@@ -1359,6 +1360,7 @@ enum L10n {
     // C-T Curve / dataset analysis / auto messages
     "ct.analysisComplete": [.zhCN: "📊 数据分析完成！\n\n%@", .en: "📊 Data analysis complete!\n\n%@"],
     "ct.ctPlot": [.zhCN: "📊 Dose-Normalized C-T Plot: file://%@", .en: "📊 Dose-Normalized C-T Plot: file://%@"],
+    "ct.facetPlot": [.zhCN: "📊 C-T 分面图（%@）: file://%@", .en: "📊 C-T Facet by %@: file://%@"],
     "ct.IVroute": [.zhCN: "💉 静脉给药 — 无需考察吸收过程，跳过吸收滞后分析。", .en: "💉 IV administration — no absorption phase to evaluate, skipping lag analysis."],
     "ct.absorptionLag": [.zhCN: "📈 C-T 分析：检测到吸收滞后（Tlag ≈ %@）。\n\n%@", .en: "📈 C-T analysis: absorption lag detected (Tlag ≈ %@).\n\n%@"],
     "ct.multiCompartment": [.zhCN: "🏗️ 半对数曲线形态提示多房室动力学：多处消除相呈现不同斜率，数据支持 2-房室或 3-房室模型。", .en: "🏗️ Semi-log plot suggests multi-compartment kinetics: multiple elimination phases with different slopes, supporting 2- or 3-compartment models."],

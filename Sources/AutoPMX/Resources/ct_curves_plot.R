@@ -45,6 +45,7 @@ dose_col <- if (has_dose) "DOSE" else if (has_amt) "AMT" else NULL
 # EVID / MDV availability
 has_evid <- "EVID" %in% names(d)
 has_mdv  <- "MDV"  %in% names(d)
+has_route <- "ROUTE" %in% names(d)
 
 # ---- 2b. Defensive numeric coercion ----
 # NONMEM-style CSVs can be read with a column as character/factor when ANY row
@@ -227,6 +228,75 @@ if (!is.null(dose_col) && !all(is.na(d_obs$DOSE_ACTUAL))) {
              label = "No DOSE/AMT column found\nDose-normalized plot not available",
              size = 5, hjust = 0.5) +
     theme_void()
+}
+
+# ---- 8b. Route / categorical faceted C-T plots ----
+facet_candidates <- c("ROUTE", "SEX", "STUDY", "ADA", "BQL", "TYPE",
+                      "RACE", "GROUP", "COHORT", "TREATMENT")
+valid_facets <- intersect(facet_candidates, names(d_obs))
+valid_facets <- valid_facets[sapply(valid_facets, function(col) {
+  vals <- d_obs[[col]]
+  vals <- vals[!is.na(vals) & trimws(as.character(vals)) != ""]
+  length(unique(vals)) >= 2 && length(vals) >= 10
+})]
+if (length(valid_facets) > 6) valid_facets <- valid_facets[1:6]
+
+has_norm_plot <- !is.null(dose_col) && !all(is.na(d_obs$DOSE_ACTUAL))
+
+for (facet_col in valid_facets) {
+  p_pop_facet <- ggplot(d_obs,
+    aes(x = TIME, y = DV, color = DOSE_GROUP, group = DOSE_GROUP)) +
+    geom_point(alpha = 0.25, size = 1) +
+    stat_summary(fun = median, geom = "line", linewidth = 1.2) +
+    facet_wrap(as.formula(paste("~", facet_col)), scales = "free_y") +
+    scale_y_log10(
+      labels = function(x) format(x, scientific = FALSE, digits = 3, trim = TRUE),
+      breaks = trans_breaks("log10", function(x) 10^x)
+    ) +
+    scale_color_manual(values = dose_colors, name = "Dose") +
+    scale_fill_manual(values = dose_colors, name = "Dose") +
+    labs(
+      title = paste("Population C-T by", facet_col),
+      subtitle = paste0("N = ", n_subjects, " subjects  |  Median"),
+      x = "Time",
+      y = "Concentration"
+    ) +
+    theme_bw(base_size = 11) +
+    theme(panel.grid.minor = element_blank(), legend.position = "bottom")
+
+  facet_plots <- list(p_pop_facet)
+  if (has_norm_plot) {
+    d_norm_facet <- d_obs %>%
+      mutate(DV_NORM = DV / DOSE_ACTUAL) %>%
+      filter(DV_NORM > 0 & !is.na(DV_NORM))
+    p_norm_facet <- ggplot(d_norm_facet,
+      aes(x = TIME, y = DV_NORM, color = DOSE_GROUP, group = DOSE_GROUP)) +
+      geom_point(alpha = 0.25, size = 1) +
+      stat_summary(fun = median, geom = "line", linewidth = 1.2) +
+      facet_wrap(as.formula(paste("~", facet_col)), scales = "free_y") +
+      scale_y_log10(
+        labels = function(x) format(x, scientific = FALSE, digits = 3, trim = TRUE),
+        breaks = trans_breaks("log10", function(x) 10^x)
+      ) +
+      scale_color_manual(values = dose_colors, name = "Dose") +
+      scale_fill_manual(values = dose_colors, name = "Dose") +
+      labs(
+        title = paste("Dose-Normalized C-T by", facet_col),
+        subtitle = paste0("N = ", n_subjects, " subjects  |  Median"),
+        x = "Time",
+        y = "Dose-Normalized Concentration"
+      ) +
+      theme_bw(base_size = 11) +
+      theme(panel.grid.minor = element_blank(), legend.position = "bottom")
+    facet_plots[[2]] <- p_norm_facet
+  }
+
+  out_facet <- paste0(out_prefix, "_by_", tolower(gsub("[^A-Za-z0-9]+", "_", facet_col)), ".png")
+  png(out_facet, width = 14, height = if (length(facet_plots) > 1) 10 else 6,
+      units = "in", res = 150)
+  do.call(grid.arrange, c(facet_plots, ncol = 1))
+  dev.off()
+  cat(sprintf(">>> Faceted C-T plot saved: %s\n", out_facet))
 }
 
 # ---- 9. Save combined plot ----

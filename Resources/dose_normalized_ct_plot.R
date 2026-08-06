@@ -94,6 +94,7 @@ has_evid <- "EVID" %in% names(d)
 has_cmt  <- "CMT"  %in% names(d)
 has_mdv  <- "MDV"  %in% names(d)
 has_ada  <- "ADA"  %in% names(d)  # Anti-drug antibody flag
+has_route <- "ROUTE" %in% names(d)
 
 # ---- 3. Extract ACTUAL dose per observation (true dose normalization) ----
 # KEY: dose normalization divides each individual's DV by THAT individual's
@@ -488,6 +489,47 @@ if (has_ada) {
   }
 }
 
+# ---- 7b. Route / categorical faceted C-T plots ----
+facet_candidates <- c("ROUTE", "SEX", "STUDY", "ADA", "BQL", "TYPE",
+                      "RACE", "GROUP", "COHORT", "TREATMENT")
+available_facets <- intersect(facet_candidates, names(d_obs_plot))
+available_facets <- available_facets[sapply(available_facets, function(col) {
+  vals <- d_obs_plot[[col]]
+  vals <- vals[!is.na(vals) & trimws(as.character(vals)) != ""]
+  length(unique(vals)) >= 2 && length(vals) >= 10
+})]
+if (length(available_facets) > 6) available_facets <- available_facets[1:6]
+
+for (facet_col in available_facets) {
+  p_facet <- ggplot(d_obs_plot,
+    aes(x = TIME, y = DV_NORM, color = DOSE_GROUP, group = DOSE_GROUP)) +
+    geom_point(alpha = 0.8, size = 0.8, color = "black", show.legend = FALSE) +
+    stat_summary(fun = median, geom = "line", linewidth = 0.8, alpha = 0.8) +
+    facet_wrap(as.formula(paste("~", facet_col)), scales = "free_y") +
+    scale_y_log10(
+      labels = function(x) format(x, scientific = FALSE, digits = 3, trim = TRUE),
+      breaks = scales::trans_breaks("log10", function(x) 10^x)
+    ) +
+    scale_color_manual(values = nature_colors, name = "Dose") +
+    scale_fill_manual(values = nature_colors, name = "Dose") +
+    labs(
+      x = paste0("Time (", time_unit, ")"),
+      y = paste0("Dose-Normalized Conc. (", conc_unit, "/", dose_unit, ")"),
+      title = paste("Dose-Normalized C-T by", facet_col),
+      subtitle = paste0("Data: ", basename(csv_file),
+                        "  |  N = ", length(unique(d_obs_plot$ID)), " subjects")
+    ) +
+    theme_bw(base_size = 12) +
+    theme(
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom",
+      strip.text = element_text(face = "bold", size = 10)
+    )
+  out_facet <- paste0(out_prefix, "_by_", tolower(gsub("[^A-Za-z0-9]+", "_", facet_col)), ".png")
+  ggsave(out_facet, p_facet, width = 12, height = 6, dpi = 150, bg = "white")
+  cat(sprintf(">>> Plot saved: %s\n", out_facet))
+}
+
 # ---- 8. Save plot ----
 out_png <- paste0(out_prefix, "_dose_norm_ct.png")
 ggsave(out_png, gg, width = 10, height = 6, dpi = 150, bg = "white")
@@ -858,7 +900,10 @@ if (n_groups >= 2) {
 
 # ---- 10. Route detection ----
 route_info <- "Unknown"
-if (has_evid) {
+if (has_route) {
+  route_vals <- unique(d$ROUTE[!is.na(d$ROUTE) & trimws(as.character(d$ROUTE)) != ""])
+  route_info <- if (length(route_vals) > 0) paste(route_vals, collapse = "+") else "Unknown"
+} else if (has_evid) {
   dosing <- d %>% filter(!is.na(EVID) & EVID %in% c(1, 4) & !is.na(AMT) & AMT > 0)
   if (nrow(dosing) > 0) {
     if (has_cmt && any(dosing$CMT == 2, na.rm = TRUE)) {
@@ -875,7 +920,9 @@ if (has_evid) {
 # ---- 10b. Absorption lag detection (skip for IV routes) ----
 # For intravenous administration, there is no absorption process, so lag/absorption
 # detection is not applicable. Only extravascular (e.g. oral, SC) routes are evaluated.
-if (route_info %in% c("IV Infusion")) {
+is_iv_only <- grepl("IV|BOLUS|INFUS|INTRAVENOUS", toupper(route_info)) &&
+              !grepl("SC|ORAL|EXTRAVASCULAR|PO|SUBQ", toupper(route_info))
+if (is_iv_only) {
   lag_result <- list(
     has_lag = FALSE,
     lag_time = 0,

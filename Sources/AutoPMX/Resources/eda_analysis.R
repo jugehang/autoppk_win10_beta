@@ -201,6 +201,23 @@ if (nrow(d_obs) > 0) {
     p_spag <- p_spag + scale_y_log10()
   }
   plot_list[["spaghetti"]] <- p_spag
+
+  # Facet C-T by route and categorical variables when available.
+  facet_candidates <- c("ROUTE", "SEX", "STUDY", "ADA", "BQL", "TYPE",
+                        "RACE", "GROUP", "COHORT", "TREATMENT")
+  valid_facets <- intersect(facet_candidates, names(d_obs))
+  valid_facets <- valid_facets[sapply(valid_facets, function(col) {
+    vals <- d_obs[[col]]
+    vals <- vals[!is.na(vals) & trimws(as.character(vals)) != ""]
+    length(unique(vals)) >= 2 && length(vals) >= 10
+  })]
+  if (length(valid_facets) > 6) valid_facets <- valid_facets[1:6]
+  for (col in valid_facets) {
+    p_facet <- p_spag +
+      facet_wrap(as.formula(paste("~", col)), scales = "free_y") +
+      labs(title = paste("Concentration-Time by", col))
+    plot_list[[paste0("ct_by_", col)]] <- p_facet
+  }
 }
 
 # 7d. Correlation heatmap (numeric covariates only)

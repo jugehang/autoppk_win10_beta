@@ -5844,6 +5844,7 @@ final class WorkbenchStore: ObservableObject {
                         if FileManager.default.fileExists(atPath: firstDnImg) {
                             assistantMessages.append(AssistantMessage(role: .system, text: "📊 First-Dose Dose-Normalized C-T Plot: file://\(firstDnImg)"))
                         }
+                        appendCTFacetMessages(fileName: activeDataFile)
                         // Absorption lag verdict (skipped for IV routes — no absorption process)
                         let isIV = lagInfo.route.hasPrefix("IV")
                         if isIV {
@@ -6619,7 +6620,28 @@ final class WorkbenchStore: ObservableObject {
             return
         }
         let resolvedData = dataFile ?? (automationDataFile.isEmpty ? self.dataFile : automationDataFile)
-        runCommandAndRefresh(pythonBridgeCommandForDataset(task: "ct-curves", dataFile: resolvedData))
+        let command = pythonBridgeCommandForDataset(task: "ct-curves", dataFile: resolvedData)
+        Task {
+            _ = await runner.runAndWait(command: command, in: projectURL)
+            refreshWorkspace()
+            appendCTFacetMessages(fileName: resolvedData, prefix: "CT_")
+        }
+    }
+
+    private func appendCTFacetMessages(fileName: String, prefix: String = "") {
+        let stem = (fileName as NSString).lastPathComponent.replacingOccurrences(of: ".csv", with: "")
+        let facetColumns = ["ROUTE", "SEX", "STUDY", "ADA", "BQL", "TYPE",
+                            "RACE", "GROUP", "COHORT", "TREATMENT"]
+        for facet in facetColumns {
+            let facetFile = "\(prefix)\(stem)_by_\(facet.lowercased()).png"
+            let facetPath = projectURL.appendingPathComponent(facetFile).path
+            if FileManager.default.fileExists(atPath: facetPath) {
+                assistantMessages.append(AssistantMessage(
+                    role: .system,
+                    text: String.safeFormat(L10n.ctFacetPlot, facet, facetPath)
+                ))
+            }
+        }
     }
 
     func runDiagnostics() {
