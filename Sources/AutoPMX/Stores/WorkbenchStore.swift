@@ -3284,7 +3284,7 @@ final class WorkbenchStore: ObservableObject {
 
     /// The personality block to inject into the system prompt, combining preset + custom + learned style
     private var activePersonalityBlock: String {
-        let langDirective = AppLanguage.current() == .en
+        let langDirective = LanguageStore.shared.language == .en
             ? "\n\nLanguage directive: ALWAYS reply in English. The user has set the app language to English, so use English for all responses. Do NOT reply in Chinese."
             : "\n\nLanguage directive: ALWAYS reply in Chinese (中文). Use Chinese for all responses unless the user explicitly uses English."
         return duDuPersonality.systemPersonalityBlock(
@@ -4821,7 +4821,10 @@ final class WorkbenchStore: ObservableObject {
                         }
                     }
                     runner.append("⚠️ SCM run\(nextRun).mod 预检未通过，数据行已强制清理。继续运行。")
-                    assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(nextRun).mod 预检未通过但数据行已清理，继续运行NONMEM…"))
+                    assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                        "run\(nextRun).mod 预检未通过但数据行已清理，继续运行NONMEM…",
+                        "run\(nextRun).mod passed preflight after clearing data rows; continuing NONMEM…"
+                    )))
                 }
             }
             let exit = await runner.runAndWait(command: psnRunCommand(runID: nextRun), in: projectURL)
@@ -5616,7 +5619,10 @@ final class WorkbenchStore: ObservableObject {
                                 }
                             }
                             runner.append("⚠️ run\(nextRun).mod 预检未通过，数据行已强制清理。DuDu继续…")
-                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(nextRun).mod 预检未通过，DuDu继续修复…"))
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                                "run\(nextRun).mod 预检未通过，DuDu继续修复…",
+                                "run\(nextRun).mod did not pass preflight; DuDu will repair it…"
+                            )))
                         }
                     }
                     previousForComparison = sourceRun
@@ -5773,7 +5779,10 @@ final class WorkbenchStore: ObservableObject {
                 assistantMessages.append(AssistantMessage(role: .system, text: L10n.ctCleanProjectCreated))
             } catch {
                 runner.append("Failed to create AutoModel project: \(error.localizedDescription)")
-                assistantMessages.append(AssistantMessage(role: .system, text: "Failed to create AutoModel project: \(error.localizedDescription)"))
+                assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                    "创建 AutoModel 项目失败：\(error.localizedDescription)",
+                    "Failed to create AutoModel project: \(error.localizedDescription)"
+                )))
                 return
             }
         }
@@ -6050,7 +6059,10 @@ final class WorkbenchStore: ObservableObject {
                                 }
                             }
                             runner.append("⚠️ run001.mod 初始模型预检未通过，数据行已强制清理。DuDu继续建模。")
-                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run001.mod 初始模型预检未通过，DuDu继续修复…\n\n\(validation.output)"))
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                                "run001.mod 初始模型预检未通过，DuDu继续修复…\n\n\(validation.output)",
+                                "run001.mod initial preflight failed; DuDu will repair it…\n\n\(validation.output)"
+                            )))
                         }
                     }
 
@@ -6156,7 +6168,10 @@ final class WorkbenchStore: ObservableObject {
                                 }
                             }
                             runner.append("⚠️ run\(childID).mod handoff预检未通过，数据行已强制清理。DuDu将在后续迭代中修复结构问题。")
-                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(childID).mod 预检未通过但数据行已清理，DuDu继续修复中…\n\n\(validation.output)"))
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                                "run\(childID).mod 预检未通过但数据行已清理，DuDu继续修复中…\n\n\(validation.output)",
+                                "run\(childID).mod preflight did not pass after clearing data rows; DuDu will repair it…\n\n\(validation.output)"
+                            )))
                         }
                     }
 
@@ -6166,7 +6181,10 @@ final class WorkbenchStore: ObservableObject {
                     nextRunNumber = -1
                     useChildRunIDs = true
                     runner.append("IV anchor handoff: run\(parentRunID) is the parent; first full-dataset model run\(childID) inherits IV estimates and adds \(includeF1 ? "KA + F1" : "KA").")
-                    assistantMessages.append(AssistantMessage(role: .system, text: "已按 IV 母本 run\(parentRunID) 生成全数据集首个模型 run\(childID)：房室结构继承母本，SC 增加 Depot 后中央室已重新编号，IV 参数估算值先固定，\(includeF1 ? "单独估算 KA 和 F1" : "单独估算 KA")。"))
+                    assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                        "已按 IV 母本 run\(parentRunID) 生成全数据集首个模型 run\(childID)：房室结构继承母本，SC 增加 Depot 后中央室已重新编号，IV 参数估算值先固定，\(includeF1 ? "单独估算 KA 和 F1" : "单独估算 KA")。",
+                        "Created full-dataset handoff run\(childID) from IV parent run\(parentRunID): inherited compartment structure, renumbered central compartment for SC depot, kept IV estimates fixed, estimating \(includeF1 ? "KA and F1" : "KA") first."
+                    )))
                     updateLastThinkingStep(type: .done, detail: "run\(childID).mod — \(handoff.compartments)-comp extravascular handoff")
                     refreshWorkspace()
                 }
@@ -6550,7 +6568,10 @@ final class WorkbenchStore: ObservableObject {
                                 }
                             }
                             runner.append("⚠️ run\(nextRun).mod 候选模型预检未通过，数据行已强制清理，LLM将在下一轮修复。")
-                            assistantMessages.append(AssistantMessage(role: .assistant, text: "run\(nextRun).mod 预检未通过，DuDu继续修复…"))
+                            assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                                "run\(nextRun).mod 预检未通过，DuDu继续修复…",
+                                "run\(nextRun).mod did not pass preflight; DuDu will repair it…"
+                            )))
                         }
                     }
                     previousForComparison = sourceRun
@@ -6609,7 +6630,10 @@ final class WorkbenchStore: ObservableObject {
                 }
                 let details = datasetError.output
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let message = "驱动模型 run\(datasetError.runID).mod 校验未通过。数据行已强制清理，请检查以下结构问题：\n\n\(details)"
+                let message = localized(
+                    "驱动模型 run\(datasetError.runID).mod 校验未通过。数据行已强制清理，请检查以下结构问题：\n\n\(details)",
+                    "Driver model run\(datasetError.runID).mod did not pass validation. Data rows were force-cleared; check the structural issues below:\n\n\(details)"
+                )
                 runner.append(message)
                 assistantMessages.append(AssistantMessage(role: .assistant, text: message))
                 refreshWorkspace()
@@ -7184,7 +7208,10 @@ final class WorkbenchStore: ObservableObject {
             runner.append("Final PopPK PDF conversion failed: \(error.localizedDescription)")
         }
 
-        assistantMessages.append(AssistantMessage(role: .system, text: "✅ 最终 PopPK 报告已生成：\(reportURL.lastPathComponent) / \(pdfURL.lastPathComponent)"))
+        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+            "✅ 最终 PopPK 报告已生成：\(reportURL.lastPathComponent) / \(pdfURL.lastPathComponent)",
+            "✅ Final PopPK report generated: \(reportURL.lastPathComponent) / \(pdfURL.lastPathComponent)"
+        )))
         refreshWorkspace()
     }
 
@@ -7197,7 +7224,10 @@ final class WorkbenchStore: ObservableObject {
         }
         activateRun(runID)
         runner.append("=== ETA covariate screening for run\(runID) ===")
-        assistantMessages.append(AssistantMessage(role: .system, text: "🔬 正在为 run\(runID) 生成 ETA vs 协变量预筛选..."))
+        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+            "🔬 正在为 run\(runID) 生成 ETA vs 协变量预筛选...",
+            "🔬 Generating ETA vs covariate prescreening for run\(runID)..."
+        )))
         Task {
             defer {
                 refreshWorkspace()
@@ -7205,7 +7235,10 @@ final class WorkbenchStore: ObservableObject {
             }
             guard await ensureETATable(runID: runID) else {
                 runner.append("ETA covariate screening failed: could not generate ETA table.")
-                assistantMessages.append(AssistantMessage(role: .assistant, text: "ETA 预筛选失败：无法生成 ETA 表。"))
+                assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                    "ETA 预筛选失败：无法生成 ETA 表。",
+                    "ETA prescreening failed: could not generate the ETA table."
+                )))
                 return
             }
 
@@ -7218,7 +7251,10 @@ final class WorkbenchStore: ObservableObject {
             let exit = await runner.runAndWait(command: command, in: projectURL)
             if exit != 0 {
                 runner.append("ETA covariate screening R script failed (exit \(exit)).")
-                assistantMessages.append(AssistantMessage(role: .assistant, text: "ETA 预筛选 R 脚本失败，请查看 Run Log。"))
+                assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                    "ETA 预筛选 R 脚本失败，请查看 Run Log。",
+                    "ETA prescreening R script failed; check the Run Log."
+                )))
                 return
             }
 
@@ -7226,7 +7262,10 @@ final class WorkbenchStore: ObservableObject {
             let summary = (try? String(contentsOf: summaryURL, encoding: .utf8)) ?? "No summary file generated."
             updateETAScreeningRecommendation(runID: runID, summary: summary)
             runner.append("ETA covariate screening summary:\n\(summary)")
-            assistantMessages.append(AssistantMessage(role: .system, text: "📊 ETA 协变量预筛选完成。正在请 DuDu 判断 SCM 是否继续考察这些协变量..."))
+            assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                "📊 ETA 协变量预筛选完成。正在请 DuDu 判断 SCM 是否继续考察这些协变量...",
+                "📊 ETA covariate prescreening complete. DuDu is deciding which covariates SCM should test..."
+            )))
             await recommendSCMCovariates(runID: runID, summary: summary)
         }
     }
@@ -7520,7 +7559,10 @@ final class WorkbenchStore: ObservableObject {
             runner.append("DuDu SCM covariate recommendation complete.")
         } catch {
             runner.append("DuDu SCM covariate recommendation failed: \(error.localizedDescription)")
-            assistantMessages.append(AssistantMessage(role: .assistant, text: "DuDu 无法生成协变量建议，请直接查看 Run Log 中的 ETA 预筛选表。"))
+            assistantMessages.append(AssistantMessage(role: .assistant, text: localized(
+                "DuDu 无法生成协变量建议，请直接查看 Run Log 中的 ETA 预筛选表。",
+                "DuDu could not generate covariate recommendations; check the ETA prescreening table in the Run Log."
+            )))
         }
     }
 
@@ -7610,7 +7652,10 @@ final class WorkbenchStore: ObservableObject {
                     scmFinalModelPreviousRun = runID
                     markAIModel(runID: finalRun)
                     showSCMFinalModelConfirm = true
-                    assistantMessages.append(AssistantMessage(role: .system, text: "SCM replication 已完成。是否以 run\(finalRun) 作为最终模型，继续验证并输出报告？"))
+                    assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                        "SCM replication 已完成。是否以 run\(finalRun) 作为最终模型，继续验证并输出报告？",
+                        "SCM replication complete. Use run\(finalRun) as the final model for validation and report output?"
+                    )))
                 } else {
                     automationStep = "Idle"
                 }
@@ -7652,7 +7697,10 @@ final class WorkbenchStore: ObservableObject {
             return
         }
         runner.append("Base model confirmed: run\(runID). Running ETA vs covariate exploratory screening before SCM.")
-        assistantMessages.append(AssistantMessage(role: .system, text: "Base model 已确认：run\(runID)。先进行 ETA 协变量预筛选，完成后自动打开 SCM 设置。"))
+        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+            "Base model 已确认：run\(runID)。先进行 ETA 协变量预筛选，完成后自动打开 SCM 设置。",
+            "Base model confirmed: run\(runID). Running ETA covariate prescreening first, then opening SCM settings."
+        )))
         runETACovariateScreening(for: runID) { [weak self] in
             self?.presentSCMDialog(runID: runID)
         }
@@ -7697,7 +7745,10 @@ final class WorkbenchStore: ObservableObject {
         guard !runID.isEmpty else { return }
         markAIModel(runID: runID)
         runner.append("SCM replication complete. Starting final model validation and report output for run\(runID).")
-        assistantMessages.append(AssistantMessage(role: .system, text: "🚀 正在以 run\(runID) 作为最终模型，继续执行验证、Bootstrap 和报告输出。"))
+        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+            "🚀 正在以 run\(runID) 作为最终模型，继续执行验证、Bootstrap 和报告输出。",
+            "🚀 Using run\(runID) as the final model. Running validation, Bootstrap, and report output."
+        )))
         startFinalModelPackage(for: runID, previousRun: previousRun)
     }
 
@@ -7706,7 +7757,10 @@ final class WorkbenchStore: ObservableObject {
         scmFinalModelRunID = ""
         scmFinalModelPreviousRun = ""
         runner.append("SCM replication finished; final model validation skipped.")
-        assistantMessages.append(AssistantMessage(role: .system, text: "SCM replication 已完成。未继续最终模型验证和报告输出。"))
+        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+            "SCM replication 已完成。未继续最终模型验证和报告输出。",
+            "SCM replication complete. Final model validation and report output were skipped."
+        )))
     }
 
     func confirmSCMRun() {
@@ -9847,6 +9901,10 @@ final class WorkbenchStore: ObservableObject {
         }
     }
 
+    private func localized(_ zh: String, _ en: String) -> String {
+        LanguageStore.shared.language == .en ? en : zh
+    }
+
     private func validateModel(_ runID: String) async -> (passed: Bool, output: String) {
         let modURL = projectURL.appendingPathComponent("run\(runID).mod")
         if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
@@ -9870,6 +9928,7 @@ final class WorkbenchStore: ObservableObject {
 
         let python = resolvedPython()
         let bridge = resolveBridgeScript()
+        runner.append("MOD check: validating run\(runID).mod against dataset and NONMEM rules...")
         let validatorCmd = [
             shellQuote(python),
             shellQuote(bridge),
@@ -9884,6 +9943,9 @@ final class WorkbenchStore: ObservableObject {
         ].joined(separator: " ")
 
         let result = await runner.runAndWaitWithOutput(command: validatorCmd, in: projectURL)
+        if result.exitCode == 0 {
+            runner.append("MOD check passed: run\(runID).mod")
+        }
         return (result.exitCode == 0, result.output)
     }
 

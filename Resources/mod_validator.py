@@ -104,6 +104,375 @@ def _all_section_texts(text: str, label: str) -> List[str]:
     return [text[s:e] for lbl, s, e in _section_boundaries(text) if lbl == label]
 
 
+def _normalized_parameter_name(raw: str) -> str:
+    """Normalize a THETA/OMEGA label to a comparable parameter name."""
+    name = raw.strip().upper()
+    if name.startswith("IIV "):
+        name = name[4:].strip()
+    if name.startswith("TV"):
+        name = name[2:]
+    name = re.sub(r"\s*\(.*\)\s*$", "", name)
+    return name.strip()
+
+
+def _pk_param_names(text: str) -> List[str]:
+    """Return upper-case PK parameters defined from THETA or TV typical values."""
+    pk_section = _section_text(text, "$PK") or ""
+    names: List[str] = []
+    for match in re.finditer(
+        r"\b([A-Z][A-Z0-9_]*)\s*=\s*(?:TV[A-Z][A-Z0-9_]*|THETA\s*\(|(?:[A-Z0-9_]*\s*\*\s*)?EXP\s*\(\s*ETA)",
+        pk_section,
+        re.IGNORECASE,
+    ):
+        name = match.group(1).upper()
+        if name not in names and not name.startswith("TV"):
+            names.append(name)
+    return names
+
+
+def _input_tokens(text: str) -> List[str]:
+    input_section = _section_text(text, "$INPUT")
+    if not input_section:
+        return []
+    tokens = re.split(r"\s+", input_section.strip())
+    return [
+        token.split("=", 1)[0].upper()
+        for token in tokens
+        if token.upper() != "$INPUT"
+    ]
+
+
+def check_content_before_problem(lines: list, text: str) -> List[ValidationIssue]:
+    """Reject non-comment content that appears before $PROBLEM."""
+    issues: List[ValidationIssue] = []
+    problem_index = None
+    for idx, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.strip()
+        if stripped.upper().startswith("$PROBLEM") or stripped.upper().startswith("$PROB "):
+            problem_index = idx
+            break
+
+    if problem_index is None:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="Header",
+            line_number=0,
+            message="No $PROBLEM record found; model should start with $PROBLEM",
+            fix_hint="Prepend $PROBLEM with a brief run/model description",
+            auto_fixable=True,
+        ))
+        return issues
+
+    for idx, raw_line in enumerate(lines[:problem_index - 1], start=1):
+        stripped = raw_line.strip()
+        if stripped and not stripped.startswith(";"):
+            issues.append(ValidationIssue(
+                severity="error",
+                section="Header",
+                line_number=idx,
+                message="Unexpected content before $PROBLEM (possible leaked OMEGA/CSV rows)",
+                fix_hint="Remove all non-comment content before $PROBLEM",
+                auto_fixable=True,
+            ))
+    return issues
+
+
+def check_section_order(text: str) -> List[ValidationIssue]:
+    """Verify $PROBLEM → $INPUT → $DATA → ... → $TABLE order."""
+    issues: List[ValidationIssue] = []
+    canonical = [
+        "$PROBLEM",
+        "$INPUT",
+        "$DATA",
+        "$SUBROUTINES",
+        "$MODEL",
+        "$PK",
+        "$DES",
+        "$ERROR",
+        "$THETA",
+        "$OMEGA",
+        "$SIGMA",
+        "$ESTIMATION",
+        "$COVARIANCE",
+        "$TABLE",
+    ]
+
+    def normalize_label(label: str) -> str:
+        if label == "$EST":
+            return "$ESTIMATION"
+        if label == "$COV":
+            return "$COVARIANCE"
+        return label
+
+    positions: Dict[str, int] = {}
+    for lbl, start, _ in _section_boundaries(text):
+        label = normalize_label(lbl)
+        positions.setdefault(label, _line_number(text, start))
+
+    seen: Set[str] = set()
+    for label in canonical:
+        if label not in positions:
+            continue
+        for earlier in canonical:
+            if earlier == label:
+                break
+            if earlier in positions and positions[earlier] > positions[label]:
+                if label not in seen:
+                    issues.append(ValidationIssue(
+                        severity="error",
+                        section=label,
+                        line_number=positions[label],
+                        message=f"{label} appears before {earlier}; section order is wrong",
+                        fix_hint="Rebuild the control stream in canonical NONMEM section order",
+                        auto_fixable=True,
+                    ))
+                    seen.add(label)
+
+    return issues
+
+
+def check_pk_theta_omega_labels(text: str) -> List[ValidationIssue]:
+    """Check OMEGA labels against PK ETA parameters and flag TV-prefixed labels."""
+    issues: List[ValidationIssue] = []
+    omega_sections = _all_section_texts(text, "$OMEGA")
+    if not omega_sections:
+        return issues
+
+    omega_labels: Dict[str, int] = {}
+    for section in omega_sections:
+        for line_num, line in enumerate(section.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped or stripped.upper().startswith("$OMEGA") or stripped.upper().startswith("BLOCK"):
+                continue
+            if ";" not in line:
+                continue
+            label_raw = line.split(";", 1)[1]
+            label = _normalized_parameter_name(label_raw)
+            if not label:
+                continue
+            absolute_line = _line_number(text, text.find(section)) + line_num - 1
+            raw_upper = label_raw.strip().upper()
+            if raw_upper.startswith("IIV TV") or raw_upper.startswith("TV"):
+                issues.append(ValidationIssue(
+                    severity="error",
+                    section="$OMEGA",
+                    line_number=absolute_line,
+                    message=f"OMEGA label '{label_raw.strip()}' should not start with TV; use IIV {label}",
+                    fix_hint="Strip the TV prefix from OMEGA labels",
+                    auto_fixable=True,
+                ))
+            if label in omega_labels:
+                issues.append(ValidationIssue(
+                    severity="error",
+                    section="$OMEGA",
+                    line_number=absolute_line,
+                    message=f"Duplicate OMEGA label '{label}'",
+                    fix_hint="Keep one OMEGA entry per PK parameter",
+                    auto_fixable=True,
+                ))
+            omega_labels[label] = absolute_line
+
+    pk_section = _section_text(text, "$PK") or ""
+    eta_to_param: Dict[int, str] = {}
+    for match in re.finditer(
+        r"\b([A-Z][A-Z0-9_]*)\s*=.*?EXP\s*\(\s*ETA\s*\(\s*(\d+)\s*\)",
+        pk_section,
+        re.IGNORECASE,
+    ):
+        param = match.group(1).upper()
+        eta = int(match.group(2))
+        eta_to_param.setdefault(eta, param)
+
+    for eta in sorted(eta_to_param):
+        expected = eta_to_param[eta]
+        if expected not in omega_labels:
+            # Unlabeled OMEGA blocks are still accepted; only flag when labels
+            # exist for other parameters, because the model is then inconsistent.
+            if omega_labels:
+                issues.append(ValidationIssue(
+                    severity="warning",
+                    section="$OMEGA",
+                    line_number=0,
+                    message=f"ETA({eta}) uses '{expected}' but no matching OMEGA label was found",
+                    fix_hint=f"Label the OMEGA entry for ETA({eta}) as IIV {expected}",
+                    auto_fixable=True,
+                ))
+    return issues
+
+
+def check_subroutine_route(text: str) -> List[ValidationIssue]:
+    """Check ADVAN family against KA/S1/S2 usage in $PK."""
+    issues: List[ValidationIssue] = []
+    subroutine_section = _section_text(text, "$SUBROUTINES")
+    if not subroutine_section:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$SUBROUTINES",
+            line_number=0,
+            message="No $SUBROUTINES record found",
+            fix_hint="Add $SUBROUTINES with the correct ADVAN/TRANS for the route",
+            auto_fixable=False,
+        ))
+        return issues
+
+    subroutine_line = _line_number(text, text.find("$SUBROUTINES"))
+    advan_match = re.search(r"ADVAN\s*(\d+)", subroutine_section, re.IGNORECASE)
+    advan = int(advan_match.group(1)) if advan_match else 0
+    pk_section = _section_text(text, "$PK") or ""
+    has_ka = bool(re.search(r"\bKA\s*=", pk_section, re.IGNORECASE))
+    has_real_ka = bool(
+        re.search(r"\bKA\s*=\s*(?:TVKA|[A-Z0-9_]*\s*\*\s*EXP)", pk_section, re.IGNORECASE)
+    )
+    has_s1 = bool(re.search(r"\bS1\s*=", pk_section, re.IGNORECASE))
+    has_s2 = bool(re.search(r"\bS2\s*=", pk_section, re.IGNORECASE))
+    is_iv = advan in (1, 3, 11)
+    is_extra = advan in (2, 4, 12)
+
+    if is_iv and has_real_ka:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$SUBROUTINES",
+            line_number=subroutine_line,
+            message=f"ADVAN{advan} is IV-only but $PK contains a real KA absorption term",
+            fix_hint="Switch to an extravascular ADVAN (ADVAN2/4/12) or remove KA",
+            auto_fixable=False,
+        ))
+    if is_extra and not has_ka:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$SUBROUTINES",
+            line_number=subroutine_line,
+            message=f"ADVAN{advan} is extravascular but $PK has no KA absorption parameter",
+            fix_hint="Add KA or switch to an IV ADVAN (ADVAN1/3/11)",
+            auto_fixable=False,
+        ))
+    if is_extra and has_s1 and not has_s2:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$PK",
+            line_number=_line_number(text, text.find("$PK")),
+            message=f"ADVAN{advan} extravascular model uses S1 but no S2 scaling",
+            fix_hint="Use S2=... as the last $PK line for extravascular models",
+            auto_fixable=False,
+        ))
+    if is_iv and has_s2 and not has_s1:
+        issues.append(ValidationIssue(
+            severity="error",
+            section="$PK",
+            line_number=_line_number(text, text.find("$PK")),
+            message=f"ADVAN{advan} IV model uses S2 but no S1 scaling",
+            fix_hint="Use S1=... as the last $PK line for IV models",
+            auto_fixable=False,
+        ))
+    return issues
+
+
+def check_table_content(text: str, run_id: str) -> List[ValidationIssue]:
+    """Ensure TABLE records only reference known input/PK/ETA tokens."""
+    issues: List[ValidationIssue] = []
+    input_cols = set(_input_tokens(text))
+    pk_params = set(_pk_param_names(text))
+    eta_terms = set()
+    for match in re.finditer(r"\bETA\s*\(\s*(\d+)\s*\)", text, re.IGNORECASE):
+        eta_terms.add(f"ETA{match.group(1)}")
+
+    core_sdtab = {"ID", "TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES", "STUDY"}
+    ignored_keywords = {
+        "$TABLE", "ID", "ONEHEADER", "NOPRINT", "NOAPPEND", "FIRSTONLY", "FORMAT",
+    }
+
+    for table_start, table_block in _all_table_blocks(text):
+        line_number = _line_number(text, table_start)
+        upper = table_block.upper()
+        is_sdtab = "FILE=SDTAB" in upper or "FILE= SDTAB" in upper
+        is_eta_table = ("FILE=RUN" in upper and ".ETA" in upper) or "FILE=000" in upper
+        is_patab = "FILE=PATAB" in upper
+        allowed: Optional[Set[str]] = None
+        if is_sdtab:
+            allowed = core_sdtab | input_cols
+        elif is_patab:
+            allowed = {"ID"} | pk_params | eta_terms
+        elif is_eta_table:
+            allowed = {"ID"} | eta_terms
+
+        if allowed is None:
+            continue
+        tokens = re.split(r"\s+", table_block.strip())
+        for token in tokens:
+            bare = token.strip(",;").upper()
+            if not bare or bare in ignored_keywords:
+                continue
+            if bare.startswith("FILE=") or bare.startswith("FORMAT="):
+                continue
+            if bare not in allowed:
+                issues.append(ValidationIssue(
+                    severity="warning",
+                    section="$TABLE",
+                    line_number=line_number,
+                    message=f"Table token '{bare}' is not an input/PK/ETA item",
+                    fix_hint="Rebuild $TABLE records from the actual $INPUT, $PK and ETA list",
+                    auto_fixable=True,
+                ))
+                break
+    return issues
+
+
+def _all_table_blocks(text: str) -> List[tuple]:
+    blocks: List[tuple] = []
+    offset = 0
+    while True:
+        match = re.search(r"(?im)^\s*\$TABLE", text[offset:])
+        if not match:
+            break
+        start = offset + match.start()
+        end = text.find("\n$", start + 1)
+        if end < 0:
+            end = len(text)
+        blocks.append((start, text[start:end]))
+        offset = end + 1
+    return blocks
+
+
+def check_iiv_initial_values(text: str) -> List[ValidationIssue]:
+    """Warn when all estimated OMEGA initials are identical."""
+    issues: List[ValidationIssue] = []
+    omega_sections = _all_section_texts(text, "$OMEGA")
+    values: List[tuple] = []  # (line_number, value, raw_line)
+    for section in omega_sections:
+        base_line = _line_number(text, text.find(section))
+        in_block = False
+        for offset, line in enumerate(section.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped or stripped.upper().startswith("$OMEGA"):
+                continue
+            if stripped.upper().startswith("BLOCK"):
+                in_block = True
+                continue
+            if in_block:
+                continue
+            value_token = stripped.split(";", 1)[0].strip().split()[0] if stripped.split(";", 1)[0].strip() else ""
+            try:
+                value = float(value_token)
+            except ValueError:
+                continue
+            if value > 0:
+                values.append((base_line + offset - 1, value, stripped))
+
+    if len(values) >= 2:
+        positive_values = {round(value, 8) for _, value, _ in values}
+        if len(positive_values) == 1:
+            first_line = values[0][0]
+            issues.append(ValidationIssue(
+                severity="error",
+                section="$OMEGA",
+                line_number=first_line,
+                message="All estimated IIV initial values are identical; this can destabilize the covariance step",
+                fix_hint="Give each positive OMEGA a slightly different initial value",
+                auto_fixable=True,
+            ))
+    return issues
+
+
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
@@ -597,15 +966,21 @@ def validate_mod(
 
     # Run all checks
     check_fns = [
+        check_content_before_problem,
+        lambda l, t: check_section_order(t),
         check_input_comment_column,
         check_inline_dataset_rows,
         lambda l, t: check_input_matches_csv(l, t, csv_path),
         check_theta_omega_count,
+        lambda l, t: check_pk_theta_omega_labels(t),
+        lambda l, t: check_subroutine_route(t),
         lambda l, t: check_data_path(t, project_dir),
         lambda l, t: check_sigma_placement(t),
         lambda l, t: check_table_files(t, run_id),
+        lambda l, t: check_table_content(t, run_id),
         lambda l, t: check_residual_error_model(t),
         lambda l, t: check_common_typos(t),
+        lambda l, t: check_iiv_initial_values(t),
     ]
 
     all_issues: List[ValidationIssue] = []

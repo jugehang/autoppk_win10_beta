@@ -191,7 +191,7 @@ def rebuild_mod(sections: SectionMap,
     """
     ORDER = ["$PROBLEM", "$INPUT", "$DATA", "$SUBROUTINES", "$MODEL",
              "$PK", "$DES", "$ERROR", "$THETA", "$OMEGA", "$SIGMA",
-             "$ESTIMATION", "$COVARIANCE", "$COV", "$TABLE"]
+             "$ESTIMATION", "$EST", "$COVARIANCE", "$COV", "$TABLE"]
 
     present = [l for l in ORDER if l in sections]
     # Add any extra sections not in ORDER
@@ -550,6 +550,110 @@ def action_add_iiv(sections: SectionMap, params: Dict[str, Any]) -> SectionMap:
     return sections
 
 
+def action_diversify_iiv(sections: SectionMap, params: Dict[str, Any]) -> SectionMap:
+    """Perturb identical positive OMEGA initials to help covariance stability."""
+    omega_sec = sections.get("$OMEGA", "")
+    lines = omega_sec.splitlines()
+    positive_rows: List[tuple] = []
+    in_block = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.upper().startswith("$OMEGA"):
+            continue
+        if stripped.upper().startswith("BLOCK"):
+            in_block = True
+            continue
+        if in_block:
+            continue
+        value_part = stripped.split(";", 1)[0].strip()
+        if not value_part:
+            continue
+        value_token = value_part.split()[0]
+        try:
+            value = float(value_token)
+        except ValueError:
+            continue
+        if value > 0:
+            positive_rows.append((index, value))
+
+    if len(positive_rows) < 2:
+        return sections
+    if len({round(value, 8) for _, value in positive_rows}) > 1:
+        return sections
+
+    base = positive_rows[0][1]
+    factors = (1.0, 1.2, 0.8, 1.4, 0.6, 1.6, 0.9, 1.1)
+    for offset, (line_index, _) in enumerate(positive_rows):
+        new_value = base * factors[offset % len(factors)]
+        new_token = f"{new_value:.6g}"
+        parts = lines[line_index].split(None, 1)
+        if parts:
+            lines[line_index] = new_token + ((" " + parts[1]) if len(parts) > 1 else "")
+
+    sections["$OMEGA"] = "\n".join(lines)
+    return sections
+
+
+def action_fix_table_content(sections: SectionMap, params: Dict[str, Any]) -> SectionMap:
+    """Rebuild $TABLE records from actual $INPUT, $PK and ETA references."""
+    run_id = str(params.get("run_id", extract_run_id(rebuild_mod(sections)) or "001"))
+    input_sec = sections.get("$INPUT", "")
+    input_tokens_raw = re.findall(r"\b[A-Z][A-Z0-9_]*\b", input_sec)
+    input_tokens = [
+        token.upper()
+        for token in input_tokens_raw
+        if token.upper() not in ("INPUT", "C")
+    ]
+
+    pk_sec = sections.get("$PK", "")
+    pk_params: List[str] = []
+    for match in re.finditer(r"\bTV([A-Z][A-Z0-9_]*)\s*=\s*THETA", pk_sec, re.IGNORECASE):
+        param = match.group(1).upper()
+        if param not in pk_params:
+            pk_params.append(param)
+    for match in re.finditer(
+        r"\b([A-Z][A-Z0-9_]*)\s*=\s*(?:TV[A-Z][A-Z0-9_]*|THETA\s*\()",
+        pk_sec,
+        re.IGNORECASE,
+    ):
+        param = match.group(1).upper()
+        if param not in pk_params and not param.startswith("TV"):
+            pk_params.append(param)
+
+    eta_count = find_eta_count(rebuild_mod(sections))
+    eta_terms = " ".join(f"ETA{index}" for index in range(1, eta_count + 1))
+
+    sdtab_tokens: List[str] = []
+    for token in ["TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES"] + input_tokens:
+        if token not in sdtab_tokens:
+            sdtab_tokens.append(token)
+    if "ID" in sdtab_tokens:
+        sdtab_tokens.remove("ID")
+    if "STUDY" not in sdtab_tokens and "STUDY" in input_tokens:
+        sdtab_tokens.append("STUDY")
+
+    cat_cols = [
+        token for token in input_tokens
+        if token in ("SEX", "STUDY", "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV")
+    ]
+    cont_cols = [
+        token for token in input_tokens
+        if token in ("WT", "AGE", "DOSE", "AMT", "RATE", "DUR")
+    ]
+    cat_cols = [token for token in cat_cols if token != "ID"]
+    cont_cols = [token for token in cont_cols if token != "ID"]
+
+    params_text = " ".join(pk_params) if pk_params else "CL V"
+    table_block = f"""$TABLE ID {" ".join(sdtab_tokens)} ONEHEADER NOPRINT NOAPPEND FILE=sdtab{run_id} FORMAT=s1PE14.7
+$TABLE ID {params_text}{(" " + eta_terms) if eta_terms else ""} NOPRINT NOAPPEND ONEHEADER FILE=patab{run_id}
+$TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE=run{run_id}.ETA
+$TABLE ID {" ".join(cat_cols)} FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab{run_id}
+$TABLE ID {" ".join(cont_cols)} FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab{run_id}"""
+    sections["$TABLE"] = table_block
+    return sections
+
+
 def action_fix_residual_error(sections: SectionMap, params: Dict[str, Any]) -> SectionMap:
     """Fix $ERROR block to combined proportional + additive form."""
     error_sec = sections.get("$ERROR", "")
@@ -592,7 +696,9 @@ ACTION_REGISTRY = {
     "fix_input": action_fix_input,
     "fix_data": action_fix_data,
     "fix_table_ids": action_fix_table_ids,
+    "fix_table_content": action_fix_table_content,
     "fix_theta_boundaries": action_fix_theta_boundaries,
+    "diversify_iiv": action_diversify_iiv,
     "add_covariate": action_add_covariate,
     "swap_template": action_swap_template,
     "add_iiv": action_add_iiv,

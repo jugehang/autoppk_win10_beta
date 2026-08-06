@@ -999,6 +999,7 @@ struct LLMCommandService {
         You are an expert NONMEM pharmacometrician building PopPK models for monoclonal antibodies.
         Create the FIRST control stream run\(runID).mod for an automated stepwise model-building project.
         Return ONLY the complete .mod file. No markdown, no explanation outside the file.
+        \(Self.responseLanguageDirective)
 
         PROJECT UNITS (from user configuration):
           Dose unit: \(doseUnit)   |   AMT unit: \(amtUnit)   |   Conc. unit: \(concUnit)   |   Time unit: \(timeUnit)
@@ -1297,6 +1298,7 @@ struct LLMCommandService {
         You are a PopPK model evaluation AI following FDA guidance. Decide whether the current model should be ACCEPTed as final or REVISEd.
 
         Start with exactly one word: ACCEPT or REVISE.
+        \(Self.responseLanguageDirective)
 
         ━━━ SELF-CHECK BEFORE ANY ACCEPT (MANDATORY) ━━━
         Before you are allowed to output ACCEPT, you MUST verify ALL of the following and state the result in your reasoning:
@@ -1754,6 +1756,7 @@ struct LLMCommandService {
         You are an expert NONMEM pharmacometrician evolving a PopPK model step by step.
         Create run\(nextRun).mod by applying EXACTLY ONE specific improvement to run\(sourceRun).mod.
         Return ONLY the complete .mod file. No markdown, no explanation.
+        \(Self.responseLanguageDirective)
 
         ━━━ 🔴 ABSOLUTE PROHIBITION: NEVER PASTE DATASET ROWS 🔴 ━━━
         The CSV dataset rows (lines starting with . or numbers) MUST NEVER appear in the
@@ -2359,6 +2362,7 @@ struct LLMCommandService {
         You are AutoPMX automated PopPK modeler.
         Create the next NONMEM control stream based on run\(sourceRun).mod.
         Return the complete .mod file only, no Markdown.
+        \(Self.responseLanguageDirective)
 
         Goal:
         - Improve a mAb PopPK model conservatively.
@@ -2423,6 +2427,7 @@ struct LLMCommandService {
         Task:
         Create run\(runID).mod based on run\(parentRunID).mod and the dataset below. Return ONLY
         the complete .mod file. No markdown, no explanation.
+        \(Self.responseLanguageDirective)
 
         Dataset route evidence:
         - Contains IV dosing: \(hasIV ? "YES" : "NO")
@@ -3044,6 +3049,12 @@ struct LLMCommandService {
         - Default residual model: IPRED=F; W=SQRT((THETA(k)*IPRED)**2 + THETA(k+1)**2); Y=IPRED+W*EPS(1); $SIGMA 1 FIX.
         ⚠ S1/S2 SCALING NOTE: The /1000 factor is only correct when AMT/DV units require it (e.g. mg+ng/mL). When using mg+µg/mL (or units where mg/L=µg/mL numerically), use S1=V / S2=V instead. For AMT=µg + DV=µg/mL, use V*1000; for AMT=µg + DV=ng/mL or µg/L, use V. The correct expression for your dataset is specified in the PROJECT UNITS section above.
         """
+    }
+
+    private static var responseLanguageDirective: String {
+        LanguageStore.shared.language == .en
+            ? "RESPONSE LANGUAGE: Write all narrative, reasoning, and report content in English. Use English for any visible text."
+            : "RESPONSE LANGUAGE: Write all narrative, reasoning, and report content in Chinese (中文). Use Chinese for any visible text."
     }
 
     private static func defaultProfile(hasWT: Bool = false, hasAGE: Bool = false, hasSEX: Bool = false,
@@ -4012,6 +4023,7 @@ struct LLMCommandService {
         if omegaLines.isEmpty {
             omegaLines = existingLines
         }
+        omegaLines = diversifiedIIVInitials(omegaLines)
 
         inOmega = false
         var result: [String] = []
@@ -4052,6 +4064,40 @@ struct LLMCommandService {
             result.append(contentsOf: omegaLines)
         }
         return result.joined(separator: "\n")
+    }
+
+    /// Perturb identical positive OMEGA initials so covariance estimation is less
+    /// likely to hit singular/near-singular curvature.
+    private static func diversifiedIIVInitials(_ omegaLines: [String]) -> [String] {
+        var positiveIndices: [Int] = []
+        var positiveValues: [Double] = []
+        for (index, line) in omegaLines.enumerated() {
+            let upper = line.uppercased()
+            guard !upper.contains("FIX") else { continue }
+            let valuePrefix = line.components(separatedBy: ";").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let valueToken = valuePrefix.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+            guard let value = Double(valueToken), value > 0 else { continue }
+            positiveIndices.append(index)
+            positiveValues.append(value)
+        }
+        guard positiveValues.count >= 2 else { return omegaLines }
+        let uniqueValues = Set(positiveValues.map { ($0 * 1_000_000).rounded() / 1_000_000 })
+        guard uniqueValues.count == 1 else { return omegaLines }
+
+        let factors: [Double] = [1.0, 1.2, 0.8, 1.4, 0.6, 1.6, 0.9, 1.1]
+        let base = positiveValues[0]
+        var updated = omegaLines
+        for (offset, lineIndex) in positiveIndices.enumerated() {
+            let newValue = base * factors[offset % factors.count]
+            let newToken = String(format: "%.6g", newValue)
+            let line = omegaLines[lineIndex]
+            guard let valueRange = line.range(of: #"[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"#, options: .regularExpression) else {
+                continue
+            }
+            updated[lineIndex] = line.replacingCharacters(in: valueRange, with: newToken)
+        }
+        return updated
     }
 
     private static func iivParametersByEtaIndex(from modText: String) -> [Int: String] {
@@ -4487,6 +4533,7 @@ struct LLMCommandService {
         You are an expert NONMEM pharmacometrician reproducing a PsN SCM stepwise covariate selection.
 
         Create run\(nextRun).mod by editing run\(sourceRun).mod. This is step \(stepType) of the replication.
+        \(Self.responseLanguageDirective)
 
         ━━━ NON-NEGOTIABLE COVARIATE NAMING CONTRACT ━━━
         - NEVER reassign a dataset column (WT, AGE, SEX, STUDY, ...) on the left side of "=".

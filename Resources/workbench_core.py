@@ -570,9 +570,21 @@ class TaskRunner:
             params={"run_id": run_id},
         ))
 
+        # 3b. Rebuild table content from actual $INPUT/$PK/ETA references.
+        modifications.append(Modification(
+            action="fix_table_content",
+            params={"run_id": run_id},
+        ))
+
         # 4. Fix THETA boundary format
         modifications.append(Modification(
             action="fix_theta_boundaries",
+            params={},
+        ))
+
+        # 5. Avoid identical positive IIV initials (covariance stability).
+        modifications.append(Modification(
+            action="diversify_iiv",
             params={},
         ))
 
