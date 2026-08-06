@@ -3374,14 +3374,20 @@ struct LLMCommandService {
 
         func addStructural(key: String, sourceKey: String, unit: String, defaultValue: Double) {
             let value = thetaMap[sourceKey] ?? defaultValue
-            let omega = omegaMap[sourceKey] ?? 0.04
+            let inheritedOmega = omegaMap[sourceKey]
+            let hasIIV = inheritedOmega != nil && inheritedOmega! > 0
             thetaLines.append("(0, \(fmt(value))) FIX ; \(key) (\(unit))")
-            omegaLines.append("\(fmt(omega)) FIX ; IIV \(key)")
             pkLines.append("TV\(key)=THETA(\(thetaIndex))")
-            pkLines.append("\(key)=TV\(key)*EXP(ETA(\(etaIndex)))")
+            if hasIIV {
+                let omega = inheritedOmega ?? 0.04
+                omegaLines.append("\(fmt(omega)) FIX ; IIV \(key)")
+                pkLines.append("\(key)=TV\(key)*EXP(ETA(\(etaIndex)))")
+                etaIndex += 1
+            } else {
+                pkLines.append("\(key)=TV\(key)")
+            }
             tableParams.append(key)
             thetaIndex += 1
-            etaIndex += 1
         }
 
         addStructural(key: "CL", sourceKey: "CL", unit: derivedCLUnit, defaultValue: 0.2)
@@ -3425,6 +3431,12 @@ struct LLMCommandService {
                     ])
                 }
                 if durationCMTs.contains(2) {
+                    durationLines.append(contentsOf: [
+                        "IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR",
+                        "IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001"
+                    ])
+                } else if hasIV {
+                    // Robust fallback for mixed IV + SC: central CMT=2 carries the IV infusion.
                     durationLines.append(contentsOf: [
                         "IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR",
                         "IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001"
@@ -3502,7 +3514,7 @@ struct LLMCommandService {
     }
 
     private static func normalizedParameterKey(_ raw: String) -> String {
-        var upper = raw.uppercased()
+        var upper = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if upper.hasPrefix("IIV ") {
             upper = String(upper.dropFirst(4))
         }
