@@ -6380,7 +6380,8 @@ final class WorkbenchStore: ObservableObject {
                     // mixed dataset. Do this even when the evaluation AI says REVISE, because the
                     // handoff is intentionally constrained until this release round succeeds.
                     let stableHandoffWithInheritedFixes = inheritedHandoffMode
-                        && isModelStable(runID: sourceRun)
+                        && runMinimizationOK(sourceRun)
+                        && runCovarianceOK(sourceRun)
                         && LLMCommandService.hasInheritedStructuralFixes(
                             (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
                         )
@@ -6535,6 +6536,20 @@ final class WorkbenchStore: ObservableObject {
                         }
                     }
 
+                    // Second safety net: if this is an inherited handoff that reached S+C but still
+                    // carries inherited structural FIXes, force the next model to release them.
+                    if inheritedHandoffMode,
+                       !releaseInheritedFixes,
+                       runMinimizationOK(sourceRun),
+                       runCovarianceOK(sourceRun),
+                       LLMCommandService.hasInheritedStructuralFixes(
+                           (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
+                       ) {
+                        releaseInheritedFixes = true
+                        forceEscalation = false
+                        runner.append("Inherited handoff run\(sourceRun) is S+C; scheduling release of all inherited structural FIXes.")
+                    }
+
                     // [硬性规定] 每次写下一份模型前，检查前一次运行的残差 RSE。
                     // 如果残差项 %RSE > 100%，强制在当前房室层修复残差，不允许升室。
                     // 实施方式：直接修改源 .mod 文件，给对应 THETA 加上 FIX 关键字。
@@ -6606,7 +6621,14 @@ final class WorkbenchStore: ObservableObject {
                         )
                     }
                     if releaseInheritedFixes {
+                        let sourceReleaseText = (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
                         draftedModel = LLMCommandService.releasingIVAnchorHandoffFixes(draftedModel)
+                        if !sourceReleaseText.isEmpty {
+                            draftedModel = LLMCommandService.trimmingAddedIIVForHandoffRelease(
+                                draftedModel,
+                                sourceModText: sourceReleaseText
+                            )
+                        }
                         runner.append("Released inherited structural FIXes in run\(nextRun).mod; parameters will be re-estimated on the full mixed dataset.")
                     }
                     draftedModel = normalizeTypicalValueNaming(draftedModel)

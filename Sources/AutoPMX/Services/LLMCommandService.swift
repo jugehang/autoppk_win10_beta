@@ -3162,6 +3162,78 @@ struct LLMCommandService {
         return output
     }
 
+    static func trimmingAddedIIVForHandoffRelease(_ modText: String, sourceModText: String) -> String {
+        let sourceIIV = Set(iivParametersByEtaIndex(from: sourceModText).values)
+        guard !sourceIIV.isEmpty else { return modText }
+
+        var result: [String] = []
+        var inPK = false
+        var inOmega = false
+        let paramPattern = #"^\s*([A-Z][A-Z0-9_]*)\s*=\s*TV[A-Z][A-Z0-9_]*\s*\*\s*EXP\s*\(\s*ETA"#
+        let paramRegex = try? NSRegularExpression(pattern: paramPattern, options: [.caseInsensitive])
+
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$PK") {
+                inPK = true
+                inOmega = false
+                result.append(line)
+                continue
+            }
+            if upper.hasPrefix("$OMEGA") {
+                inPK = false
+                inOmega = true
+                result.append(line)
+                continue
+            }
+            if (inPK || inOmega) && trimmed.hasPrefix("$") {
+                inPK = false
+                inOmega = false
+                result.append(line)
+                continue
+            }
+
+            if inPK {
+                if let paramRegex {
+                    let nsRange = NSRange(line.startIndex..., in: line)
+                    let param: String?
+                    if let match = paramRegex.firstMatch(in: line, options: [], range: nsRange),
+                       match.numberOfRanges > 1,
+                       let paramRange = Range(match.range(at: 1), in: line) {
+                        param = String(line[paramRange]).uppercased()
+                    } else {
+                        param = nil
+                    }
+                    if let param, !sourceIIV.contains(param) {
+                        let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+                        result.append("\(indent)\(param)=TV\(param)")
+                        continue
+                    }
+                }
+                result.append(line)
+                continue
+            }
+
+            if inOmega {
+                let comment = line.components(separatedBy: ";").dropFirst()
+                    .joined(separator: ";")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !comment.isEmpty {
+                    let key = normalizedParameterKey(comment)
+                    if !sourceIIV.contains(key) {
+                        continue
+                    }
+                }
+                result.append(line)
+                continue
+            }
+
+            result.append(line)
+        }
+        return result.joined(separator: "\n")
+    }
+
     private static func releasingFixedThetaLine(_ line: String) -> String {
         let comment = line.components(separatedBy: ";").dropFirst()
             .joined(separator: ";")
