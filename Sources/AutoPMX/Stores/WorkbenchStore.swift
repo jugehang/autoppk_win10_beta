@@ -5579,6 +5579,7 @@ final class WorkbenchStore: ObservableObject {
                     let nextRun = nextChildRunID(parent: sourceRun)
                     automationStep = "AI screening covariate for run\(nextRun)"
                     let optSkillCtx = PPKSkillStore.shared.contextBlock(for: ["modeling", "covariate", "optimization"])
+
                     let (nextModel, optUsage) = try await LLMCommandService.proposeOptimizedModel(
                         baseURL: llmBaseURL, model: llmModel, projectURL: projectURL,
                         sourceRun: sourceRun, nextRun: nextRun,
@@ -6580,6 +6581,15 @@ final class WorkbenchStore: ObservableObject {
                         }
                     }
 
+                    let releaseSourceText = (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
+                    let forceReleaseThisRound = releaseInheritedFixes
+                        || (LLMCommandService.hasInheritedStructuralFixes(releaseSourceText)
+                            && runMinimizationOK(sourceRun)
+                            && runCovarianceOK(sourceRun))
+                    if forceReleaseThisRound {
+                        forceEscalation = false
+                    }
+
                     let (nextModel, optUsage) = try await LLMCommandService.proposeOptimizedModel(
                         baseURL: llmBaseURL,
                         model: llmModel,
@@ -6591,7 +6601,7 @@ final class WorkbenchStore: ObservableObject {
                         isCovariatePhase: covariatePhase,
                         forceCompartmentEscalation: forceEscalation,
                         forceSameCompartment: forceSameCompartment,
-                        forceReleaseInheritedFixes: releaseInheritedFixes,
+                        forceReleaseInheritedFixes: forceReleaseThisRound,
                         apiKey: llmAPIKey,
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
@@ -6631,13 +6641,12 @@ final class WorkbenchStore: ObservableObject {
                             dataFile: activeDataFile
                         )
                     }
-                    if releaseInheritedFixes {
-                        let sourceReleaseText = (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
+                    if forceReleaseThisRound {
                         draftedModel = LLMCommandService.releasingIVAnchorHandoffFixes(draftedModel)
-                        if !sourceReleaseText.isEmpty {
+                        if !releaseSourceText.isEmpty {
                             draftedModel = LLMCommandService.trimmingAddedIIVForHandoffRelease(
                                 draftedModel,
-                                sourceModText: sourceReleaseText
+                                sourceModText: releaseSourceText
                             )
                         }
                         runner.append("Released inherited structural FIXes in run\(nextRun).mod; parameters will be re-estimated on the full mixed dataset.")
