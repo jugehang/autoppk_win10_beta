@@ -9822,10 +9822,21 @@ final class WorkbenchStore: ObservableObject {
     private func validateModel(_ runID: String) async -> (passed: Bool, output: String) {
         let modURL = projectURL.appendingPathComponent("run\(runID).mod")
         if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
-            let sanitized = LLMCommandService.stripInlineDatasetRows(modText)
+            var sanitized = LLMCommandService.sanitizeControlStream(
+                modText,
+                projectURL: projectURL,
+                dataFile: dataFile
+            )
+            sanitized = correctS1Scaling(sanitized)
+            sanitized = LLMCommandService.applyingIVInfusionDurationFix(sanitized)
+            sanitized = LLMCommandService.normalizingTableRecords(sanitized, runID: runID)
+            if sanitized.uppercased().contains("IV-ANCHOR HANDOFF")
+                || sanitized.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED") {
+                sanitized = LLMCommandService.enforceIVAnchorHandoffFixes(sanitized)
+            }
             if sanitized != modText {
                 try? sanitized.write(to: modURL, atomically: true, encoding: .utf8)
-                runner.append("Removed inline dataset rows from run\(runID).mod")
+                runner.append("AutoPMX normalized run\(runID).mod before preflight validation.")
             }
         }
 
@@ -9865,26 +9876,54 @@ final class WorkbenchStore: ObservableObject {
         ].joined(separator: " ")
 
         let result = await runner.runAndWaitWithOutput(command: fixCmd, in: projectURL)
-        if result.exitCode == 0 {
-            let modURL = projectURL.appendingPathComponent("run\(runID).mod")
-            if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
-                let sanitized = LLMCommandService.stripInlineDatasetRows(modText)
-                var fixed = correctS1Scaling(sanitized)
-                if !isModelRunSuccessful(runID: runID) {
-                    fixed = LLMCommandService.applyingNCAInitialValues(
-                        fixed,
-                        projectURL: projectURL,
-                        dataFile: dataFile
-                    )
-                }
-                fixed = LLMCommandService.applyingIVInfusionDurationFix(fixed)
-                fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
-                if fixed != modText {
-                    try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
-                }
+        let output = result.output
+        let modURL = projectURL.appendingPathComponent("run\(runID).mod")
+        if let modText = try? String(contentsOf: modURL, encoding: .utf8) {
+            var fixed = LLMCommandService.sanitizeControlStream(
+                modText,
+                projectURL: projectURL,
+                dataFile: dataFile
+            )
+            fixed = correctS1Scaling(fixed)
+            let isIVAnchorHandoff = fixed.uppercased().contains("IV-ANCHOR HANDOFF")
+                || fixed.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED")
+            if !isModelRunSuccessful(runID: runID) && !isIVAnchorHandoff {
+                fixed = LLMCommandService.applyingNCAInitialValues(
+                    fixed,
+                    projectURL: projectURL,
+                    dataFile: dataFile
+                )
+            }
+            fixed = LLMCommandService.applyingIVInfusionDurationFix(fixed)
+            fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
+            if isIVAnchorHandoff {
+                fixed = LLMCommandService.enforceIVAnchorHandoffFixes(fixed)
+            }
+            if fixed != modText {
+                try? fixed.write(to: modURL, atomically: true, encoding: .utf8)
+                runner.append("AutoPMX applied deterministic preflight repair to run\(runID).mod")
             }
         }
-        return (result.exitCode == 0, result.output)
+
+        if result.exitCode == 0 {
+            return (true, output)
+        }
+
+        let validation = await validateModel(runID)
+        if validation.passed {
+            PPKSkillStore.shared.addLesson(
+                category: .modelStructure,
+                title: "Rebuild OMEGA to match PK ETA references",
+                problem: "Preflight found OMEGA count/order mismatch with $PK ETA references.",
+                solution: "Strip content before $PROBLEM, renumber ETA references contiguously, and rebuild $OMEGA in PK ETA order before writing the model.",
+                sourceRun: runID,
+                severity: .medium,
+                tags: ["preflight", "omega", "eta", "auto-repair"]
+            )
+            runner.append("Preflight repair resolved by AutoPMX deterministic rules; skill lesson saved.")
+            return (true, output + "\n[AutoPMX] Deterministic repair resolved preflight errors.")
+        }
+        return (false, output + "\n\n" + validation.output)
     }
 
     private func savePinnedAssets() {

@@ -2539,7 +2539,7 @@ struct LLMCommandService {
     }
 
     private static func cleanControlStream(_ content: String, projectURL: URL? = nil, dataFile: String? = nil) throws -> String {
-        var cleaned = content
+        var cleaned = trimmingBeforeProblem(content)
             .replacingOccurrences(of: "```nonmem", with: "")
             .replacingOccurrences(of: "```nmtran", with: "")
             .replacingOccurrences(of: "```", with: "")
@@ -2637,8 +2637,26 @@ struct LLMCommandService {
         do {
             return try cleanControlStream(content, projectURL: projectURL, dataFile: dataFile)
         } catch {
-            return stripInlineDatasetRows(content)
+            return trimmingBeforeProblem(stripInlineDatasetRows(content))
         }
+    }
+
+    private static func trimmingBeforeProblem(_ content: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?m)^\s*\$PROBLEM\b"#,
+            options: [.caseInsensitive]
+        ) else {
+            return content
+        }
+        let ns = content as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: content, options: [], range: range) else {
+            return content
+        }
+        guard let problemRange = Range(match.range, in: content) else {
+            return content
+        }
+        return String(content[problemRange.lowerBound...])
     }
 
     private static func isLikelyInlineDataRow(_ line: String) -> Bool {
@@ -3795,7 +3813,7 @@ struct LLMCommandService {
     /// Rebuild the standard NONMEM table records from the actual $INPUT and $PK
     /// content so table headers always match the dataset columns and model parameters.
     static func normalizingTableRecords(_ modText: String, runID: String) -> String {
-        let normalizedText = synchronizingOmegaBlock(renumberingEtaIndices(modText))
+        let normalizedText = synchronizingOmegaBlock(renumberingEtaIndices(trimmingBeforeProblem(modText)))
         let inputTokens = inputTokens(from: normalizedText)
         let pkParams = pkParameterNames(from: normalizedText)
         let etaTerms = etaTermNames(from: normalizedText)
