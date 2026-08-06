@@ -4,6 +4,7 @@ import os
 import shutil
 import json
 import re
+import csv
 from pathlib import Path
 
 # =================================================================
@@ -64,6 +65,7 @@ class DuxactPopMaster:
         psn_cfg = self.config.get("psn_settings", {})
         samples = psn_cfg.get("vpc_samples", 500)
         stratify_var = self._vpc_stratify_var()
+        no_of_strata = self._vpc_no_of_strata(stratify_var)
 
         # 2. 目录清理
         if os.path.exists(self.vpc_dir):
@@ -86,6 +88,8 @@ class DuxactPopMaster:
         ]
         if stratify_var:
             cmd.insert(4, f"-stratify_on={stratify_var}")
+        if no_of_strata:
+            cmd.append(f"-no_of_strata={no_of_strata}")
 
         logger.info(f"🚀 任务下发指令: {' '.join(cmd)}")
         print(f"\n{'=' * 25} PsN 实时进度控制台 {'=' * 25}")
@@ -120,16 +124,59 @@ class DuxactPopMaster:
             grouping.get("factor"),
             "STUDY",
         ]
+
+        def resolve(candidate):
+            if not candidate:
+                return None
+            parts = [part.strip().upper() for part in str(candidate).split(",") if part.strip()]
+            if parts and all(part in input_cols for part in parts):
+                return ",".join(parts)
+            return None
+
         for candidate in configured:
-            if candidate and str(candidate).upper() in input_cols:
-                return str(candidate).upper()
+            resolved = resolve(candidate)
+            if resolved:
+                return resolved
+
         priority = (
             "DOSE", "STUDY", "STUDYID", "STUDYNO", "ARM",
             "ROUTE", "TRT", "RACE", "REGION", "SEX", "ADA", "TYPE", "CMT", "EVID",
         )
-        for candidate in priority:
-            if candidate in input_cols:
-                return candidate
+        primary = next((candidate for candidate in priority if candidate in input_cols), None)
+        if not primary:
+            return None
+        parts = [primary]
+        if primary != "ROUTE" and "ROUTE" in input_cols:
+            parts.append("ROUTE")
+        elif primary == "ROUTE" and "DOSE" in input_cols:
+            parts.append("DOSE")
+        return ",".join(parts)
+
+    def _vpc_no_of_strata(self, stratify_var):
+        """Cap large nominal VPC strata, e.g. many unique dose levels."""
+        if not stratify_var:
+            return None
+        primary = stratify_var.split(",")[0].strip().upper()
+        max_strata = int(self.config.get("psn_settings", {}).get("vpc_max_strata", 6))
+        data_file = self.config.get("data_file", "")
+        data_path = Path(data_file)
+        if not data_path.exists():
+            data_path = Path.cwd() / data_file if data_file else None
+        if not data_path or not data_path.exists():
+            return None
+        try:
+            with data_path.open(newline="", encoding="utf-8", errors="ignore") as handle:
+                reader = csv.DictReader(handle)
+                headers = [str(name).strip().strip('"').upper() for name in (reader.fieldnames or [])]
+                if primary not in headers:
+                    return None
+                actual = next(name for name in (reader.fieldnames or [])
+                              if str(name).strip().strip('"').upper() == primary)
+                values = {row.get(actual) for row in reader if row.get(actual) not in (None, "")}
+            if len(values) > max_strata:
+                return max_strata
+        except Exception:
+            return None
         return None
 
     def _model_input_columns(self):

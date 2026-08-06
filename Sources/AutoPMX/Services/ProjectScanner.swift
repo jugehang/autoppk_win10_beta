@@ -472,7 +472,15 @@ struct ProjectScanner {
                 }
                 var psnSettings = config["psn_settings"] as? [String: Any] ?? [:]
                 psnSettings["stratify_var"] = factor
-                psnSettings["vpc_stratify"] = factor
+                let vpcStratify: String
+                if columns.contains("ROUTE"), factor != "ROUTE" {
+                    vpcStratify = "\(factor),ROUTE"
+                } else if factor == "ROUTE", columns.contains("DOSE") {
+                    vpcStratify = "ROUTE,DOSE"
+                } else {
+                    vpcStratify = factor
+                }
+                psnSettings["vpc_stratify"] = vpcStratify
                 config["psn_settings"] = psnSettings
             }
         }

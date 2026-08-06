@@ -36,28 +36,84 @@ configured_factor <- proj_cfg$grouping$factor
 group_factor <- configured_factor
 group_labels <- proj_cfg$grouping$labels
 group_labels_vec <- unlist(group_labels)
+resolve_actual_col <- function(df, wanted) {
+  upper <- toupper(colnames(df))
+  idx <- match(toupper(wanted), upper)
+  if (is.na(idx)) NA_character_ else colnames(df)[idx]
+}
+
+route_label <- function(values) {
+  values <- as.character(values)
+  out <- values
+  out[values %in% c("1", "IV", "IV INFUSION", "INTRAVENOUS", "I.V.")] <- "IV"
+  out[values %in% c("2", "SC", "SQ", "SUBCUTANEOUS", "S.C.")] <- "SC"
+  out[values %in% c("3", "ORAL", "PO")] <- "Oral"
+  out
+}
+
+dose_unit_text <- function() {
+  unit <- "mg"
+  if (!is.null(proj_cfg$units$dose)) unit <- as.character(proj_cfg$units$dose)
+  data_key <- basename(raw_data_path)
+  if (!is.null(proj_cfg$units_data[[data_key]]$dose)) {
+    unit <- as.character(proj_cfg$units_data[[data_key]]$dose)
+  }
+  unit
+}
+
+dose_label <- function(values) {
+  values <- unique(as.character(values[!is.na(values) & values != ""]))
+  if (length(values) == 0) return("Overall")
+  nums <- suppressWarnings(as.numeric(values))
+  if (!any(is.na(nums))) {
+    fmt_num <- function(x) format(x, scientific = FALSE, trim = TRUE, drop0trailing = TRUE)
+    if (length(nums) > 1) {
+      return(paste0("Dose ", fmt_num(min(nums)), "-", fmt_num(max(nums)), " ", dose_unit_text()))
+    }
+    return(paste0("Dose ", fmt_num(nums[1]), " ", dose_unit_text()))
+  }
+  paste0("Dose ", paste(values, collapse = "/"), " ", dose_unit_text())
+}
+
 label_stratum <- function(values, factor) {
   values <- as.character(values)
-  if (factor == "ROUTE") {
-    out <- ifelse(values == "1", "IV",
-                  ifelse(values == "2", "SC", paste0("Route ", values)))
-    return(out)
-  }
-  if (factor == "DOSE") {
-    dose_unit <- "mg"
-    if (!is.null(proj_cfg$units$dose)) dose_unit <- as.character(proj_cfg$units$dose)
-    data_key <- basename(raw_data_path)
-    if (!is.null(proj_cfg$units_data[[data_key]]$dose)) {
-      dose_unit <- as.character(proj_cfg$units_data[[data_key]]$dose)
-    }
-    return(ifelse(is.na(values), "Overall", paste0("Dose ", values, " ", dose_unit)))
-  }
-  if (length(group_labels_vec) > 0 && identical(factor, configured_factor)) {
+  factor <- toupper(factor)
+  if (factor == "ROUTE") return(route_label(values))
+  if (factor == "DOSE") return(dose_label(values))
+  if (length(group_labels_vec) > 0 && toupper(configured_factor) == factor) {
     mapped <- unname(group_labels_vec[values])
     out <- ifelse(is.na(mapped), values, as.character(mapped))
     return(as.character(out))
   }
   values
+}
+
+build_strata_label <- function(primary_factor, primary_values,
+                               secondary_factor = NA_character_,
+                               secondary_values = NULL) {
+  primary_factor <- toupper(primary_factor)
+  secondary_factor <- if (is.na(secondary_factor)) NA_character_ else toupper(secondary_factor)
+  primary_values <- unique(as.character(primary_values[!is.na(primary_values) & primary_values != ""]))
+  if (length(primary_values) == 0) return("Overall")
+
+  if (primary_factor == "DOSE") {
+    label <- dose_label(primary_values)
+    if (!is.na(secondary_factor) && secondary_factor == "ROUTE" && !is.null(secondary_values)) {
+      routes <- sort(unique(route_label(secondary_values)))
+      label <- paste0(label, " (", paste(routes, collapse = "+"), ")")
+    }
+    return(label)
+  }
+
+  if (primary_factor == "ROUTE") {
+    label <- paste(sort(unique(route_label(primary_values))), collapse = "+")
+    if (!is.na(secondary_factor) && secondary_factor == "DOSE" && !is.null(secondary_values)) {
+      label <- paste0(label, " (", dose_label(secondary_values), ")")
+    }
+    return(label)
+  }
+
+  label_stratum(primary_values, primary_factor)
 }
 
 # --- 3. 解析 .mod 获取原始数据散点 [cite: 110, 118] ---
@@ -69,10 +125,15 @@ raw_data_path <- gsub("[\"']", "", raw_data_path)
 message(paste0(">>> 🚀 正在读取原始数据集散点: ", raw_data_path))
 
 raw_obs_data <- read.csv(raw_data_path, check.names = FALSE, stringsAsFactors = FALSE)
-raw_obs_clean <- robust_clean_names(raw_obs_data) %>%
+raw_obs_clean <- robust_clean_names(raw_obs_data)
+time_col <- resolve_actual_col(raw_obs_clean, "TIME")
+if (is.na(time_col)) time_col <- resolve_actual_col(raw_obs_clean, "TAD")
+dv_col <- resolve_actual_col(raw_obs_clean, "DV")
+if (is.na(dv_col)) dv_col <- resolve_actual_col(raw_obs_clean, "CONC")
+raw_obs_clean <- raw_obs_clean %>%
   mutate(
-    TIME_VAL = as.numeric(as.character(!!sym(intersect(colnames(.), c("TIME", "TAD"))[1]))),
-    DV_VAL   = as.numeric(as.character(!!sym(intersect(colnames(.), c("DV", "CONC"))[1])))
+    TIME_VAL = as.numeric(as.character(!!sym(time_col))),
+    DV_VAL   = as.numeric(as.character(!!sym(dv_col)))
   ) %>%
   filter(!is.na(DV_VAL), DV_VAL > 0)
 
@@ -90,56 +151,114 @@ configured_group <- c(
 priority_group <- c("DOSE", "STUDY", "STUDYID", "STUDYNO", "ARM",
                     "ROUTE", "TRT", "RACE", "REGION", "SEX", "ADA", "TYPE", "CMT", "EVID")
 pick_group <- function(candidates, cols) {
-  hit <- candidates[toupper(candidates) %in% cols]
+  parts <- trimws(unlist(strsplit(as.character(candidates), ",")))
+  hit <- parts[toupper(parts) %in% cols]
   if (length(hit) > 0) toupper(hit[1]) else NA_character_
 }
 
 lines <- readLines(vpc_res_path, warn = FALSE)
 strata_headers <- grep("VPC results strata", lines, ignore.case = TRUE, value = TRUE)
+group_factor_upper <- NA_character_
 group_factor <- NA_character_
 if (length(strata_headers) > 0) {
   m <- str_match(strata_headers[1], "strata\\s+([A-Za-z0-9_]+)\\s*=")
-  if (!is.na(m[2])) group_factor <- toupper(m[2])
+  if (!is.na(m[2])) group_factor_upper <- toupper(m[2])
 }
-if (is.na(group_factor) || !(group_factor %in% input_cols)) {
-  group_factor <- pick_group(configured_group, input_cols)
+if (is.na(group_factor_upper) || !(group_factor_upper %in% input_cols)) {
+  group_factor_upper <- pick_group(configured_group, input_cols)
 }
-if (is.na(group_factor)) {
-  group_factor <- pick_group(priority_group, input_cols)
+if (is.na(group_factor_upper)) {
+  group_factor_upper <- pick_group(priority_group, input_cols)
 }
-if (is.na(group_factor)) {
+if (is.na(group_factor_upper)) {
   message("⚠️ 模型 $INPUT 中没有可用分层列，VPC 将按 Overall 绘制。")
 } else {
-  message(paste0(">>> VPC 分层变量: ", group_factor))
+  message(paste0(">>> VPC 分层变量: ", group_factor_upper))
 }
 
-if (!is.na(group_factor) && !(group_factor %in% colnames(raw_obs_clean))) {
+group_factor <- resolve_actual_col(raw_obs_clean, group_factor_upper)
+if (!is.na(group_factor_upper) && is.na(group_factor)) {
   message("⚠️ 模型声明的分层列未出现在原始数据中，VPC 将按 Overall 绘制。")
-  group_factor <- NA_character_
+  group_factor_upper <- NA_character_
 }
 
-if (is.na(group_factor)) {
+if (is.na(group_factor_upper)) {
   raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = "Overall")
 } else {
   raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = as.character(!!sym(group_factor)))
 }
 raw_obs_clean <- raw_obs_clean %>%
-  mutate(STRAT_LABEL = label_stratum(STRAT_ID, group_factor))
+  mutate(STRAT_LABEL = label_stratum(STRAT_ID, group_factor_upper))
 
-vpctab_path <- paste0("vpctab", mod_index)
+vpctab_path <- file.path(paste0("vpc_dir_", mod_index), paste0("vpctab", mod_index))
 strata_value_map <- NULL
-if (file.exists(vpctab_path) && !is.na(group_factor)) {
+strata_label_map <- NULL
+raw_label_map <- NULL
+if (file.exists(vpctab_path) && !is.na(group_factor_upper)) {
   vpctab <- read.csv(vpctab_path, check.names = FALSE, stringsAsFactors = FALSE)
-  if ("strata_no" %in% names(vpctab) && group_factor %in% names(vpctab)) {
-    map_df <- unique(vpctab[c("strata_no", group_factor)])
-    strata_value_map <- setNames(as.character(map_df[[group_factor]]),
-                                 as.character(map_df[["strata_no"]]))
+  primary_col <- resolve_actual_col(vpctab, group_factor_upper)
+  secondary_col <- if (group_factor_upper == "DOSE") {
+    resolve_actual_col(vpctab, "ROUTE")
+  } else if (group_factor_upper == "ROUTE") {
+    resolve_actual_col(vpctab, "DOSE")
+  } else {
+    NA_character_
   }
+  secondary_factor_upper <- if (group_factor_upper == "DOSE") "ROUTE" else if (group_factor_upper == "ROUTE") "DOSE" else NA_character_
+  strata_secondary <- list()
+  if (!is.na(secondary_factor_upper)) {
+    raw_id_col <- resolve_actual_col(raw_obs_clean, "ID")
+    raw_secondary_col <- resolve_actual_col(raw_obs_clean, secondary_factor_upper)
+    if (!is.na(raw_id_col) && !is.na(raw_secondary_col) && "ID" %in% names(vpctab)) {
+      raw_secondary <- unique(raw_obs_clean[c(raw_id_col, raw_secondary_col)])
+      names(raw_secondary) <- c("ID", "SECONDARY")
+      id_strata <- unique(vpctab[c("ID", "strata_no")])
+      sec_strata <- merge(id_strata, raw_secondary, by = "ID", all.x = TRUE)
+      sec_strata <- sec_strata[!is.na(sec_strata$SECONDARY) & sec_strata$SECONDARY != "", , drop = FALSE]
+      if (nrow(sec_strata) > 0) {
+        strata_secondary <- split(as.character(sec_strata$SECONDARY), as.character(sec_strata$strata_no))
+      }
+    }
+  }
+  if ("strata_no" %in% names(vpctab) && !is.na(primary_col)) {
+    keep_cols <- c("strata_no", primary_col)
+    if (!is.na(secondary_col)) keep_cols <- c(keep_cols, secondary_col)
+    map_df <- unique(vpctab[keep_cols])
+    names(map_df) <- c("strata_no", "PRIMARY", if (!is.na(secondary_col)) "SECONDARY")
+    map_df <- map_df[!is.na(map_df$PRIMARY) & map_df$PRIMARY != "", , drop = FALSE]
+    if (nrow(map_df) > 0) {
+      strata_label_map <- vapply(
+        split(map_df, as.character(map_df$strata_no)),
+        function(part) {
+          build_strata_label(
+            group_factor_upper,
+            part$PRIMARY,
+            secondary_factor_upper,
+            if (!is.null(strata_secondary[[as.character(part$strata_no[1])]])) {
+              strata_secondary[[as.character(part$strata_no[1])]]
+            } else if (!is.na(secondary_col)) {
+              part$SECONDARY
+            } else {
+              NULL
+            }
+          )
+        },
+        character(1)
+      )
+      primary_to_strata <- setNames(as.character(map_df$strata_no), as.character(map_df$PRIMARY))
+      raw_label_map <- setNames(strata_label_map[primary_to_strata], names(primary_to_strata))
+      strata_value_map <- setNames(as.character(map_df$PRIMARY), as.character(map_df$strata_no))
+    }
+  }
+}
+if (!is.null(raw_label_map)) {
+  mapped <- unname(raw_label_map[raw_obs_clean$STRAT_ID])
+  raw_obs_clean$STRAT_LABEL <- ifelse(is.na(mapped), raw_obs_clean$STRAT_LABEL, mapped)
 }
 
 # --- 4. 深度解析 vpc_results.csv (统计线) [cite: 110, 114] ---
 header_indices <- grep("median.idv", lines)
-strata_pattern <- if (!is.na(group_factor)) paste0("strata\\s+", group_factor, "\\s*=\\s*([0-9.]+)") else NULL
+strata_pattern <- if (!is.na(group_factor_upper)) paste0("strata\\s+", group_factor_upper, "\\s*=\\s*([0-9.]+)") else NULL
 strata_indices <- if (!is.null(strata_pattern)) grep(strata_pattern, lines, ignore.case = TRUE) else integer(0)
 # 核心修正：锁定第一个诊断信息位置，解决 6 elements 警告
 diag_indices <- grep("Diagnostics VPC", lines)
@@ -157,6 +276,13 @@ for (i in seq_along(header_indices)) {
   current_value <- if (!is.null(strata_value_map) && current_id %in% names(strata_value_map)) {
     unname(strata_value_map[current_id])
   } else current_id
+  current_label <- if (!is.null(strata_label_map) && current_id %in% names(strata_label_map)) {
+    unname(strata_label_map[current_id])
+  } else if (!is.null(raw_label_map) && current_id %in% names(raw_label_map)) {
+    unname(raw_label_map[current_id])
+  } else {
+    label_stratum(current_value, group_factor_upper)
+  }
 
   block <- read.csv(text = lines[start_ln:(next_ln-1)], header = TRUE, check.names = FALSE)
   block <- robust_clean_names(block)
@@ -174,10 +300,11 @@ for (i in seq_along(header_indices)) {
       STRAT_ID = current_id
     ) %>%
     filter(!is.na(bin_mid)) %>%
-    mutate(STRAT_LABEL = label_stratum(current_value, group_factor))
+    mutate(STRAT_LABEL = current_label)
   all_strata_stats[[i]] <- stratum_clean
 }
 vpc_stats <- bind_rows(all_strata_stats)
+message(paste0(">>> VPC 分层标签: ", paste(sort(unique(vpc_stats$STRAT_LABEL)), collapse = " | ")))
 
 # --- 5. 绘图 (Log10 + 6 剂量组对齐) ---
 p_vpc <- ggplot(vpc_stats, aes(x = bin_mid)) +

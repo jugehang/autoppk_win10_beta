@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import csv
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -344,17 +345,59 @@ def _vpc_stratify_var(project_dir: Path, run_id: str, cfg: Dict) -> Optional[str
         grouping.get("factor"),
         "STUDY",
     ]
+
+    def resolve(candidate) -> Optional[str]:
+        if not candidate:
+            return None
+        parts = [part.strip().upper() for part in str(candidate).split(",") if part.strip()]
+        if parts and all(part in input_cols for part in parts):
+            return ",".join(parts)
+        return None
+
     for candidate in configured:
-        if candidate and str(candidate).upper() in input_cols:
-            return str(candidate).upper()
+        resolved = resolve(candidate)
+        if resolved:
+            return resolved
 
     priority = (
         "DOSE", "STUDY", "STUDYID", "STUDYNO", "ARM",
         "ROUTE", "TRT", "RACE", "REGION", "SEX", "ADA", "TYPE", "CMT", "EVID",
     )
-    for candidate in priority:
-        if candidate in input_cols:
-            return candidate
+    primary = next((candidate for candidate in priority if candidate in input_cols), None)
+    if not primary:
+        return None
+
+    parts = [primary]
+    if primary != "ROUTE" and "ROUTE" in input_cols:
+        parts.append("ROUTE")
+    elif primary == "ROUTE" and "DOSE" in input_cols:
+        parts.append("DOSE")
+    return ",".join(parts)
+
+
+def _vpc_no_of_strata(project_dir: Path, run_id: str, cfg: Dict, stratify_var: Optional[str]) -> Optional[int]:
+    """Cap very large nominal strata (e.g. many dose levels) into readable VPC panels."""
+    if not stratify_var:
+        return None
+    primary = stratify_var.split(",")[0].strip().upper()
+    max_strata = int(cfg.get("psn_settings", {}).get("vpc_max_strata", 6))
+    data_file = cfg.get("data_file", "")
+    data_path = Path(project_dir) / data_file if data_file else None
+    if not data_path or not data_path.exists():
+        return None
+    try:
+        with data_path.open(newline="", encoding="utf-8", errors="ignore") as handle:
+            reader = csv.DictReader(handle)
+            headers = [str(name).strip().strip('"').upper() for name in (reader.fieldnames or [])]
+            if primary not in headers:
+                return None
+            actual = next(name for name in (reader.fieldnames or [])
+                          if str(name).strip().strip('"').upper() == primary)
+            values = {row.get(actual) for row in reader if row.get(actual) not in (None, "")}
+        if len(values) > max_strata:
+            return max_strata
+    except Exception:
+        return None
     return None
 
 
@@ -363,6 +406,7 @@ def psn_vpc_command(project_dir: Path, run_id: str, psn_dir: str = "") -> List[s
     psn_cfg = cfg.get("psn_settings", {})
     samples = psn_cfg.get("vpc_samples", 500)
     stratify_var = _vpc_stratify_var(project_dir, run_id, cfg)
+    no_of_strata = _vpc_no_of_strata(project_dir, run_id, cfg, stratify_var)
     command = _psn_command("vpc", psn_dir)
     cmd = [
         command,
@@ -375,6 +419,8 @@ def psn_vpc_command(project_dir: Path, run_id: str, psn_dir: str = "") -> List[s
     ]
     if stratify_var:
         cmd.insert(4, f"-stratify_on={stratify_var}")
+    if no_of_strata:
+        cmd.append(f"-no_of_strata={no_of_strata}")
     return cmd
 
 
@@ -710,13 +756,28 @@ class TaskRunner:
                     config = json.load(f)
                 current_factor = config.get("grouping", {}).get("factor", "STUDY")
                 if current_factor in columns:
+                    config.setdefault("grouping", {})["factor"] = current_factor
+                    config.setdefault("psn_settings", {})["stratify_var"] = current_factor
+                    if "ROUTE" in columns and current_factor != "ROUTE":
+                        config["psn_settings"]["vpc_stratify"] = f"{current_factor},ROUTE"
+                    elif current_factor == "ROUTE" and "DOSE" in columns:
+                        config["psn_settings"]["vpc_stratify"] = "ROUTE,DOSE"
+                    else:
+                        config["psn_settings"]["vpc_stratify"] = current_factor
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        json.dump(config, f, indent=2, ensure_ascii=False)
                     return
                 if not group_factor or group_factor == "STUDY" and "STUDY" not in columns and "DOSE" not in columns:
                     return
                 config.setdefault("grouping", {})["factor"] = group_factor
                 config["grouping"]["labels"] = {}
                 config.setdefault("psn_settings", {})["stratify_var"] = group_factor
-                config["psn_settings"]["vpc_stratify"] = group_factor
+                if "ROUTE" in columns and group_factor != "ROUTE":
+                    config["psn_settings"]["vpc_stratify"] = f"{group_factor},ROUTE"
+                elif group_factor == "ROUTE" and "DOSE" in columns:
+                    config["psn_settings"]["vpc_stratify"] = "ROUTE,DOSE"
+                else:
+                    config["psn_settings"]["vpc_stratify"] = group_factor
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=2, ensure_ascii=False)
                 self.log(f"Repaired project_config.json grouping factor: {group_factor}")
@@ -737,6 +798,11 @@ class TaskRunner:
                         break
             except Exception:
                 pass
+        vpc_stratify = group_factor
+        if "ROUTE" in columns and group_factor != "ROUTE":
+            vpc_stratify = f"{group_factor},ROUTE"
+        elif group_factor == "ROUTE" and "DOSE" in columns:
+            vpc_stratify = "ROUTE,DOSE"
         default_config = {
             "project_name": self.root.name,
             "units": {"time": "Time (h)", "conc": "Concentration"},
@@ -745,7 +811,7 @@ class TaskRunner:
                 "vpc_samples": 500,
                 "bootstrap_samples": 200,
                 "stratify_var": group_factor,
-                "vpc_stratify": group_factor,
+                "vpc_stratify": vpc_stratify,
             },
         }
         config_path.write_text(
