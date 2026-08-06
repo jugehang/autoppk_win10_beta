@@ -473,6 +473,37 @@ def check_iiv_initial_values(text: str) -> List[ValidationIssue]:
     return issues
 
 
+def check_handoff_residual_fix(text: str) -> List[ValidationIssue]:
+    """IV-anchor handoffs must not inherit fixed residual-error THETAs."""
+    upper = text.upper()
+    is_handoff = ("IV-ANCHOR HANDOFF" in upper
+                  or "INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED" in upper
+                  or "INHERITED IV THETA/OMEGA ARE FIXED" in upper)
+    if not is_handoff:
+        return []
+
+    issues: List[ValidationIssue] = []
+    theta_section = _section_text(text, "$THETA")
+    if not theta_section:
+        return issues
+
+    for line_number, line in enumerate(theta_section.splitlines(), start=1):
+        stripped = line.strip()
+        if "FIX" not in stripped.upper():
+            continue
+        if re.search(r"Prop\.?\s*RE|Add\.?\s*RE|Prop\.?\s*err|Add\.?\s*err", stripped, re.IGNORECASE):
+            absolute_line = _line_number(text, text.find(theta_section)) + line_number - 1
+            issues.append(ValidationIssue(
+                severity="error",
+                section="$THETA",
+                line_number=absolute_line,
+                message="Residual error must not be FIXed in an IV-anchor full-dataset handoff",
+                fix_hint="Remove FIX from Prop.RE/Add.RE so the mixed full dataset can estimate residual error",
+                auto_fixable=False,
+            ))
+    return issues
+
+
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
@@ -981,6 +1012,7 @@ def validate_mod(
         lambda l, t: check_residual_error_model(t),
         lambda l, t: check_common_typos(t),
         lambda l, t: check_iiv_initial_values(t),
+        lambda l, t: check_handoff_residual_fix(t),
     ]
 
     all_issues: List[ValidationIssue] = []

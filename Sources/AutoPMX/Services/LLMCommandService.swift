@@ -1734,16 +1734,20 @@ struct LLMCommandService {
         """ : ""
         let handoffReleaseBlock: String
         if String(sourceText).uppercased().contains("IV-ANCHOR HANDOFF")
+            || String(sourceText).uppercased().contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
             || String(sourceText).uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED") {
             handoffReleaseBlock = """
             ━━━ IV-ANCHOR HANDOFF RELEASE ━━━
             run\(sourceRun) is a full-dataset handoff model built from an IV anchor. The inherited IV
-            THETA/OMEGA entries are intentionally FIXED so the first full-dataset model can estimate KA
-            (and F1 when both IV and SC routes exist) before releasing the rest.
+            structural THETA/OMEGA entries are intentionally FIXED so the first full-dataset model can
+            estimate residual error and KA (and F1 when both IV and SC routes exist) before releasing
+            the structural parameters.
             - If run\(sourceRun) achieved S+C: release exactly ONE inherited THETA or OMEGA FIX in
               run\(nextRun), starting with CL or the central volume. Keep KA/F1 estimated.
-            - If run\(sourceRun) is NOT S+C: keep the inherited FIXes unchanged and repair only KA/F1 or
-              the control stream. Do NOT release more parameters until S+C is achieved.
+            - Residual error (Prop.RE/Add.RE) must NOT be fixed in a mixed full-dataset handoff model.
+            - If run\(sourceRun) is NOT S+C: keep the inherited structural FIXes unchanged and repair
+              only residual error/KA/F1 or the control stream. Do NOT release more structural parameters
+              until S+C is achieved.
             - Do NOT change route, ADVAN family, depot/central compartment numbering, or add covariates.
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -2438,8 +2442,9 @@ struct LLMCommandService {
            exact THETA values and OMEGA/IIV structure. Do not replace inherited values with defaults.
         2. Convert IV compartment numbering to the extravascular ADVAN family:
            ADVAN2/4/12 -> depot CMT=1, central CMT=2, peripheral CMT=3 (2-comp) or CMT=4 (3-comp).
-        3. Keep inherited IV THETA/OMEGA entries FIXED initially. Estimate KA first, and add F1 only
-           when both IV and SC/extravascular routes exist.
+        3. Keep inherited IV structural THETA/OMEGA entries FIXED initially. Estimate residual error
+           and KA first, and add F1 only when both IV and SC/extravascular routes exist.
+           Do NOT fix Prop.RE or Add.RE in the mixed full-dataset handoff.
         4. SC first-order dosing to CMT=1 must NOT use D1 just because DUR exists in the dataset.
         5. IV infusion delivered directly to central CMT=2 with DUR must use:
            IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR
@@ -2950,11 +2955,12 @@ struct LLMCommandService {
         return 1
     }
 
-    /// Keep inherited IV THETA/OMEGA fixed on the first full-dataset handoff model.
-    /// Only KA and F1 are estimated in that first child; CL/V2/Q/V3 and residual
-    /// components stay pinned until the handoff model has achieved S+C.
+    /// Keep inherited IV structural THETA/OMEGA fixed on the first full-dataset handoff model.
+    /// Residual error must NOT be inherited as fixed, because the mixed full dataset can
+    /// change assay/route-specific residual behavior.
     static func enforceIVAnchorHandoffFixes(_ modText: String) -> String {
-        let fixedThetas = Set(["CL", "V2", "Q", "V3", "PROP.RE", "ADD.RE"])
+        let fixedThetas = Set(["CL", "V2", "Q", "V3"])
+        let residualThetas = Set(["PROP.RE", "ADD.RE"])
         let fixedOmegas = Set(["CL", "V2"])
         var result: [String] = []
         var inTheta = false
@@ -2991,6 +2997,10 @@ struct LLMCommandService {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let key = normalizedParameterKey(comment)
             var updated = line
+            if inTheta, residualThetas.contains(key) {
+                result.append(unfixingResidualThetaLine(line, key: key))
+                continue
+            }
             if inTheta, fixedThetas.contains(key), !upper.contains("FIX") {
                 if let semicolon = updated.firstIndex(of: ";") {
                     updated.insert(contentsOf: " FIX", at: semicolon)
@@ -3008,6 +3018,25 @@ struct LLMCommandService {
             result.append(updated)
         }
         return result.joined(separator: "\n")
+    }
+
+    private static func unfixingResidualThetaLine(_ line: String, key: String) -> String {
+        let comment = line.components(separatedBy: ";").dropFirst()
+            .joined(separator: ";")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let valuePart = line.components(separatedBy: ";").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleaned = valuePart
+            .replacingOccurrences(of: #"\s*FIX\s*"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let newValue: String
+        if cleaned.contains("(") {
+            newValue = cleaned
+        } else {
+            let initial = key == "PROP.RE" ? "0.15" : "0.01"
+            newValue = "(0, \(initial))"
+        }
+        return comment.isEmpty ? newValue : "\(newValue) ; \(comment)"
     }
 
     private static func modelLibraryText(projectURL: URL, knowledgeBaseURL: URL? = nil) -> String {
@@ -3530,8 +3559,9 @@ struct LLMCommandService {
     ///
     /// The IV model is copied into the project as the parent run. This initial child
     /// keeps the IV compartment count, converts it to the extravascular ADVAN template,
-    /// inherits the IV final THETA/OMEGA estimates as FIXED starting values, and only
-    /// estimates KA (plus F1 when the full dataset contains both IV and SC dosing).
+    /// inherits the IV final structural THETA/OMEGA estimates as FIXED starting values,
+    /// estimates residual error, and only fixes KA (plus F1 when the full dataset contains
+    /// both IV and SC dosing).
     private static func infusionDurationCMTs(projectURL: URL, dataFile: String) -> Set<Int> {
         let url = dataURL(projectURL: projectURL, dataFile: dataFile)
         guard let raw = try? String(contentsOf: url, encoding: .utf8),
@@ -3654,9 +3684,9 @@ struct LLMCommandService {
         }
 
         let propThetaIndex = thetaIndex
-        thetaLines.append("(0, \(fmt(thetaMap["PROP.RE"] ?? 0.15))) FIX ; Prop.RE (sd)")
+        thetaLines.append("(0, \(fmt(thetaMap["PROP.RE"] ?? 0.15))) ; Prop.RE (sd)")
         let addThetaIndex = thetaIndex + 1
-        thetaLines.append("(0, \(fmt(thetaMap["ADD.RE"] ?? 1.0))) FIX ; Add.RE (sd)")
+        thetaLines.append("(0, \(fmt(thetaMap["ADD.RE"] ?? 1.0))) ; Add.RE (sd)")
 
         if inputRecord.components(separatedBy: .whitespaces).contains("DUR") {
             if inputRecord.components(separatedBy: .whitespaces).contains("CMT") {
@@ -3703,7 +3733,7 @@ struct LLMCommandService {
         let lines = [
             "$PROBLEM Run\(childRunID): Full dataset extravascular handoff from IV run\(parentRunID)",
             ";; AutoPMX IV-anchor handoff from run\(parentRunID).mod",
-            ";; Inherited IV THETA/OMEGA are FIXED; estimate KA\(includeF1 ? " and F1" : "") first.",
+            ";; Inherited IV structural THETA/OMEGA are FIXED; estimate residual error and KA\(includeF1 ? " and F1" : "") first.",
             "$INPUT \(inputRecord)",
             "$DATA \(dataFile) IGNORE=C",
             "$SUBROUTINES \(advan)",

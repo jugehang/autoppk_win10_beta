@@ -9917,6 +9917,7 @@ final class WorkbenchStore: ObservableObject {
             sanitized = LLMCommandService.applyingIVInfusionDurationFix(sanitized)
             sanitized = LLMCommandService.normalizingTableRecords(sanitized, runID: runID)
             if sanitized.uppercased().contains("IV-ANCHOR HANDOFF")
+                || sanitized.uppercased().contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
                 || sanitized.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED") {
                 sanitized = LLMCommandService.enforceIVAnchorHandoffFixes(sanitized)
             }
@@ -9992,6 +9993,7 @@ final class WorkbenchStore: ObservableObject {
         )
         fixed = correctS1Scaling(fixed)
         let isIVAnchorHandoff = fixed.uppercased().contains("IV-ANCHOR HANDOFF")
+            || fixed.uppercased().contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
             || fixed.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED")
         if !isModelRunSuccessful(runID: runID) && !isIVAnchorHandoff {
             fixed = LLMCommandService.applyingNCAInitialValues(
