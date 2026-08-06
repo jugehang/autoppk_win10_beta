@@ -10025,6 +10025,7 @@ final class WorkbenchStore: ObservableObject {
             sanitized = correctS1Scaling(sanitized)
             sanitized = LLMCommandService.applyingIVInfusionDurationFix(sanitized)
             sanitized = LLMCommandService.normalizingTableRecords(sanitized, runID: runID)
+            sanitized = applyingInheritedHandoffReleaseIfNeeded(sanitized, runID: runID)
             if sanitized.uppercased().contains("IV-ANCHOR HANDOFF")
                 || sanitized.uppercased().contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
                 || sanitized.uppercased().contains("INHERITED IV THETA/OMEGA ARE FIXED") {
@@ -10113,6 +10114,7 @@ final class WorkbenchStore: ObservableObject {
         }
         fixed = LLMCommandService.applyingIVInfusionDurationFix(fixed)
         fixed = LLMCommandService.normalizingTableRecords(fixed, runID: runID)
+        fixed = applyingInheritedHandoffReleaseIfNeeded(fixed, runID: runID)
         if isIVAnchorHandoff {
             fixed = LLMCommandService.enforceIVAnchorHandoffFixes(fixed)
         }
@@ -10146,6 +10148,40 @@ final class WorkbenchStore: ObservableObject {
             return (true, output + "\n[AutoPMX] Deterministic repair resolved preflight errors.")
         }
         return (false, output + "\n\n" + validation.output)
+    }
+
+    private func applyingInheritedHandoffReleaseIfNeeded(_ modText: String, runID: String) -> String {
+        guard let parentRunID = inheritedHandoffParentRunID(from: modText),
+              runMinimizationOK(parentRunID),
+              runCovarianceOK(parentRunID),
+              LLMCommandService.hasInheritedStructuralFixes(modText) else {
+            return modText
+        }
+
+        var text = LLMCommandService.releasingIVAnchorHandoffFixes(modText)
+        if let parentText = try? String(contentsOf: projectURL.appendingPathComponent("run\(parentRunID).mod"), encoding: .utf8) {
+            text = LLMCommandService.trimmingAddedIIVForHandoffRelease(text, sourceModText: parentText)
+        }
+        text = LLMCommandService.normalizingTableRecords(text, runID: runID)
+        runner.append("Auto-released inherited structural FIXes in run\(runID).mod from S+C parent run\(parentRunID).")
+        return text
+    }
+
+    private func inheritedHandoffParentRunID(from modText: String) -> String? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?:from|based on)\s+run(0*\d+)(?:\.mod)?"#,
+            options: [.caseInsensitive]
+        ) else {
+            return nil
+        }
+        let ns = modText as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: modText, options: [], range: range),
+              match.numberOfRanges > 1,
+              let valueRange = Range(match.range(at: 1), in: modText) else {
+            return nil
+        }
+        return String(modText[valueRange])
     }
 
     private func savePinnedAssets() {
