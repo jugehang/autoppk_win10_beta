@@ -6374,6 +6374,25 @@ final class WorkbenchStore: ObservableObject {
                     }
                     previousRunWasFailure = !runSuccessful
 
+                    // In inherited mother-model mode, an S+C handoff model is not the base model yet.
+                    // The known next step is to release ALL inherited structural FIXes on the full
+                    // mixed dataset. Do this even when the evaluation AI says REVISE, because the
+                    // handoff is intentionally constrained until this release round succeeds.
+                    let stableHandoffWithInheritedFixes = inheritedHandoffMode
+                        && isModelStable(runID: sourceRun)
+                        && LLMCommandService.hasInheritedStructuralFixes(
+                            (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
+                        )
+                    if stableHandoffWithInheritedFixes {
+                        releaseInheritedFixes = true
+                        forceEscalation = false
+                        runner.append("Inherited handoff run\(sourceRun) is S+C. Releasing ALL inherited structural FIXes before accepting a full-dataset base model.")
+                        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                            "run\(sourceRun) 已达到 S+C。接下来直接全部放开继承的结构参数 FIX，让 CL/V/Q 等在全数据集上重新估计。",
+                            "run\(sourceRun) reached S+C. Releasing ALL inherited structural FIXes so CL/V/Q can be re-estimated on the full dataset."
+                        )))
+                    }
+
                     if isAcceptanceDecision(decision) {
                         // RULE 0: The run being accepted MUST itself be S+C (stable + converged).
                         // No amount of higher-compartment testing justifies accepting a non-S+C run.
@@ -6392,13 +6411,7 @@ final class WorkbenchStore: ObservableObject {
                             let handoffModText = (try? String(contentsOf: handoffModURL, encoding: .utf8)) ?? ""
                             let hasInheritedFixes = LLMCommandService.hasInheritedStructuralFixes(handoffModText)
                             if hasInheritedFixes {
-                                releaseInheritedFixes = true
-                                forceEscalation = false
-                                runner.append("Inherited handoff run\(sourceRun) accepted. Releasing all inherited structural FIXes before finalizing the mixed-dataset base model.")
-                                assistantMessages.append(AssistantMessage(role: .system, text: localized(
-                                    "run\(sourceRun) 已作为母本子模型被接受。现在把继承来的结构参数 FIX 全部放开，重新估计后再确认基模。",
-                                    "run\(sourceRun) accepted as the inherited handoff model. Releasing all inherited structural FIXes for re-estimation before finalizing the base model."
-                                )))
+                                // The release was already scheduled above; fall through and draft the release model.
                             } else {
                                 accepted = true
                                 acceptedRun = sourceRun
