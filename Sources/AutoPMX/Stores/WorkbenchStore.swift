@@ -6217,6 +6217,17 @@ final class WorkbenchStore: ObservableObject {
                     automationStep = "Running NONMEM run\(sourceRun)"
                     currentRun = sourceRun
                     previousRun = previousForComparison ?? sourceRun
+                    // Re-detect inherited handoff mode every round: users often resume via
+                    // "Continue Latest" from run00601 rather than explicitly selecting it.
+                    if let currentModText = try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8) {
+                        let upper = currentModText.uppercased()
+                        if upper.contains("IV-ANCHOR HANDOFF")
+                            || upper.contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")
+                            || upper.contains("INHERITED IV THETA/OMEGA ARE FIXED")
+                            || upper.contains("AUTOPMX INHERITED FIXES RELEASED") {
+                            inheritedHandoffMode = true
+                        }
+                    }
                     commandText = psnRunCommand(runID: sourceRun)
                     refreshChecks()
                     let exit: Int32
