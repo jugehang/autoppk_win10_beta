@@ -6417,11 +6417,19 @@ final class WorkbenchStore: ObservableObject {
                                     break
                                 }
                                 runner.append("=== PHASE 1 COMPLETE ===\n\(summary)")
+                                runner.append("Inherited child base model complete: run\(sourceRun) reached S+C after releasing inherited structural FIXes.")
                                 assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
+                                assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                                    "母本子模型 run\(sourceRun) 已达到 S+C，且继承的结构参数 FIX 已全部放开。这相当于混合数据集的基模已完成，是否继续 SCM？",
+                                    "Inherited child run\(sourceRun) reached S+C with all inherited structural FIXes released. The full-dataset base model is ready. Continue with SCM?"
+                                )))
                                 beginBenchmarkBaseWaitIfNeeded()
                                 isAutoModeling = false
-                                automationStep = "Phase 1 complete — awaiting confirmation"
-                                baseModelConfirmSummary = summary
+                                automationStep = "Inherited child base model complete — awaiting SCM confirmation"
+                                baseModelConfirmSummary = summary + "\n\n" + localized(
+                                    "子模型已作为混合数据集的基模完成，下一步可以进行 SCM。",
+                                    "The inherited child model is finalized as the full-dataset base model. SCM is the next step."
+                                )
                                 baseModelConfirmRunID = bestRunID
                                 markAIModel(runID: bestRunID)
                                 isBaseModelConfirmPresented = true
