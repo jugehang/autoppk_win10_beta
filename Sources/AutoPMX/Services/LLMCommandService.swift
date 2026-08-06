@@ -1924,6 +1924,10 @@ struct LLMCommandService {
           IIV (CL, V, V1). Rationale: if central IIV is fixed, peripheral IIV loses
           all meaning — the peripheral compartment describes CENTRAL→PERIPHERAL
           distribution, which cannot be estimated if central variance is zero.
+        - ETA INDEXING IS CONTIGUOUS (HARD): Never create ETA gaps. When fixing/removing an IIV,
+          EITHER keep the ETA in $PK and set its OMEGA to 0 FIX, OR remove that OMEGA line AND
+          renumber all remaining ETA references ($PK, $OMEGA, PATAB, runXXXX.ETA) as ETA1..ETAn.
+          A model like ETA1, ETA2, ETA4, ETA5 is invalid and must not be written.
         - Chain rule (AUTOMATIC): if central CL IIV is FIXED → Q/Q2/Q3 IIV MUST also
           be FIXED (they share the same clearance pathway). If V/V1 IIV is FIXED →
           V2/V3 IIV MUST also be FIXED (volumes distribute along the same chain).
@@ -2359,6 +2363,8 @@ struct LLMCommandService {
         - Before editing, check the source model's ADVAN/TRANS, CMT numbering, D1/D2, and S1/S2 against
           the dataset. Do not carry D1/D2 blindly from an IV mother into an extravascular child.
           SC first-order CMT=1 must not use D1; IV infusion to central CMT=2 with DUR should use D2.
+        - ETA numbering must remain contiguous. If an IIV is fixed/removed, either keep ETA with
+          0 FIX or remove the OMEGA row and renumber all ETA references (PK, OMEGA, tables).
 
         Source model:
         \(sourceText)
@@ -3729,9 +3735,10 @@ struct LLMCommandService {
     /// Rebuild the standard NONMEM table records from the actual $INPUT and $PK
     /// content so table headers always match the dataset columns and model parameters.
     static func normalizingTableRecords(_ modText: String, runID: String) -> String {
-        let inputTokens = inputTokens(from: modText)
-        let pkParams = pkParameterNames(from: modText)
-        let etaTerms = etaTermNames(from: modText)
+        let normalizedText = synchronizingOmegaBlock(renumberingEtaIndices(modText))
+        let inputTokens = inputTokens(from: normalizedText)
+        let pkParams = pkParameterNames(from: normalizedText)
+        let etaTerms = etaTermNames(from: normalizedText)
 
         let categorical = ["SEX", "STUDY", "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV"]
         let continuous = ["WT", "AGE", "DOSE", "AMT", "RATE", "DUR"]
@@ -3758,7 +3765,7 @@ struct LLMCommandService {
         $TABLE ID \(contCols.joined(separator: " ")) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(runID)
         """
 
-        var lines = modText.components(separatedBy: "\n")
+        var lines = normalizedText.components(separatedBy: "\n")
         lines.removeAll { line in
             line.trimmingCharacters(in: .whitespacesAndNewlines)
                 .uppercased()
@@ -3766,6 +3773,125 @@ struct LLMCommandService {
         }
         lines.append(tableBlock)
         return lines.joined(separator: "\n")
+    }
+
+    /// Renumber ETA references so they are always contiguous (ETA1..ETAn) after an IIV
+    /// is removed. This prevents invalid models such as ETA1/ETA2/ETA4/ETA5.
+    static func renumberingEtaIndices(_ modText: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\bETA\s*\(\s*(\d+)\s*\)"#,
+            options: [.caseInsensitive]
+        ) else {
+            return modText
+        }
+
+        let ns = modText as NSString
+        let fullRange = NSRange(location: 0, length: ns.length)
+        var mapping = [Int: Int]()
+        var nextIndex = 1
+
+        regex.enumerateMatches(in: modText, options: [], range: fullRange) { match, _, _ in
+            guard let match, match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: modText),
+                  let oldIndex = Int(modText[valueRange]) else {
+                return
+            }
+            if mapping[oldIndex] == nil {
+                mapping[oldIndex] = nextIndex
+                nextIndex += 1
+            }
+        }
+
+        let sortedKeys = mapping.keys.sorted()
+        if sortedKeys.isEmpty {
+            return modText
+        }
+        let contiguous = sortedKeys == Array(1...sortedKeys.count)
+        guard !contiguous else {
+            return modText
+        }
+
+        let matches = regex.matches(in: modText, options: [], range: fullRange)
+        let mutable = NSMutableString(string: modText)
+        for match in matches.reversed() {
+            guard match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: modText),
+                  let oldIndex = Int(modText[valueRange]),
+                  let newIndex = mapping[oldIndex] else {
+                continue
+            }
+            mutable.replaceCharacters(in: match.range(at: 1), with: "\(newIndex)")
+        }
+        return mutable as String
+    }
+
+    /// Remove $OMEGA rows whose IIV label no longer appears in $PK after an IIV was
+    /// removed, so OMEGA dimensions stay aligned with the contiguous ETA references.
+    static func synchronizingOmegaBlock(_ modText: String) -> String {
+        let iivParams = iivParameterNames(from: modText)
+        var result: [String] = []
+        var inOmega = false
+
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$OMEGA") {
+                inOmega = true
+                result.append(line)
+                continue
+            }
+            if inOmega && trimmed.hasPrefix("$") {
+                inOmega = false
+                result.append(line)
+                continue
+            }
+            if inOmega {
+                let comment = line.components(separatedBy: ";").dropFirst()
+                    .joined(separator: ";")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if comment.isEmpty {
+                    result.append(line)
+                    continue
+                }
+                let key = normalizedParameterKey(comment)
+                if iivParams.contains(key) {
+                    result.append(line)
+                }
+                continue
+            }
+            result.append(line)
+        }
+        return result.joined(separator: "\n")
+    }
+
+    private static func iivParameterNames(from modText: String) -> Set<String> {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\b([A-Z][A-Z0-9_]*)\s*=.*EXP\s*\(\s*ETA"#,
+            options: [.caseInsensitive]
+        ) else {
+            return []
+        }
+        var result = Set<String>()
+        var inPK = false
+        for line in modText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$PK") {
+                inPK = true
+                continue
+            }
+            if inPK && trimmed.hasPrefix("$") {
+                break
+            }
+            guard inPK else { continue }
+            let ns = line as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            for match in regex.matches(in: line, options: [], range: range)
+                where match.numberOfRanges > 1 {
+                result.insert(ns.substring(with: match.range(at: 1)).uppercased())
+            }
+        }
+        return result
     }
 
     private static func inputTokens(from modText: String) -> [String] {
