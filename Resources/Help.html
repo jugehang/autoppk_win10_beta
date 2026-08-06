@@ -625,6 +625,24 @@ Rscript -e 'install.packages(c("ggplot2","dplyr","xpose"), repos="https://cloud.
 
 <p><span class="en">AutoPMx supports local and cloud LLM runtimes. You only need <strong>one active provider</strong>. Local options are free and offline-capable; cloud APIs are useful when local hardware is insufficient or a task needs stronger reasoning.</span><span class="zh">AutoPMx 支持本地与云端大模型。你只需要<strong>一个启用中的服务</strong>。本地方案免费且可离线使用；云端 API 适合本地硬件不足或任务需要更强推理能力时使用。</span></p>
 
+<div class="info">
+  <strong><span class="en">How to choose your LLM runtime:</span><span class="zh">如何选择大模型运行方式：</span></strong>
+  <ul>
+    <li>
+      <span class="en"><strong>Low-memory / small-RAM users:</strong> use a cloud API. Local inference keeps model weights plus context in memory and can be terminated by macOS under memory pressure, causing mid-run failures.</span>
+      <span class="zh"><strong>小内存 / 低内存用户：</strong>推荐使用云端 API。本地推理会持续占用模型权重与上下文内存，内存压力过大时可能被 macOS 强制终止，导致运行中途失败。</span>
+    </li>
+    <li>
+      <span class="en"><strong>Data-sensitive or self-hosted users:</strong> you can still use a local LLM (MLX / LM Studio / Ollama) to keep data on your machine, but expect slower inference and higher RAM usage than a cloud API.</span>
+      <span class="zh"><strong>数据敏感或需要本地部署的用户：</strong>仍可使用本地大模型（MLX / LM Studio / Ollama）让数据留在本机，但相比云端 API 会有明显的速度损失，同时需要更多内存。</span>
+    </li>
+    <li>
+      <span class="en"><strong>Language matching:</strong> switch this Help page to the same language as the AutoPMx interface. Provider names, Base URL, Model ID, and API Key are exact values, so keep them consistent with the provider row you enabled in <strong>Settings → LLM</strong> regardless of UI language.</span>
+      <span class="zh"><strong>中英文匹配：</strong>请把本帮助页面切换到与 AutoPMx 界面相同的语言。Provider 名称、Base URL、Model ID 和 API Key 都是精确值，无论界面是中文还是英文，都要与你在<strong>设置 → LLM</strong> 中启用的服务保持一致。</span>
+    </li>
+  </ul>
+</div>
+
 <h4><span class="en">Local LLM Runtimes</span><span class="zh">本地大模型运行环境</span></h4>
 
 <p><span class="en">Three local runtime options are supported. Start the server first, then configure the matching provider in AutoPMx.</span><span class="zh">支持三种本地运行环境。请先启动服务，再在 AutoPMx 中配置对应服务。</span></p>
