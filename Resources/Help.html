@@ -1183,7 +1183,7 @@ Workspace/
   <tr><th><span class="en">Pass</span><span class="zh">轮次</span></th><th><span class="en">Action</span><span class="zh">动作</span></th><th><span class="en">Guidance</span><span class="zh">依据</span></th></tr>
   <tr><td>1</td><td><span class="en">Refine structural model</span><span class="zh">精修结构模型</span></td><td><span class="en">1-comp → 2-comp if GOF/VPC shows distribution phase misspecification</span><span class="zh">若 GOF/VPC 显示分布相设定不当，则 1→2 房室</span></td></tr>
   <tr><td>2</td><td><span class="en">Refine error model</span><span class="zh">精修误差模型</span></td><td><span class="en">Combined is default; simplify only if one component is unsupported</span><span class="zh">组合误差为默认；仅当某分量不被支持时才简化</span></td></tr>
-  <tr><td>3</td><td><span class="en">Add IIV</span><span class="zh">加 IIV</span></td><td><span class="en">One parameter at a time (CL first, then V); eta-shrinkage &lt; 30%</span><span class="zh">一次一个参数（先 CL 后 V）；eta-shrinkage &lt; 30%</span></td></tr>
+  <tr><td>3</td><td><span class="en">Add IIV</span><span class="zh">加 IIV</span></td><td><span class="en">One parameter at a time (CL first, then V); judge ETA/PK precision by %RSE, boundary, covariance, and convergence</span><span class="zh">一次一个参数（先 CL 后 V）；ETA/PK 参数精度看 %RSE、边界、协方差和收敛状态</span></td></tr>
   <tr><td>4</td><td><span class="en">Screen covariates</span><span class="zh">筛选协变量</span></td><td><span class="en">WT on CL/V, then AGE, SEX, STUDY; OFV drop &gt; 3.84</span><span class="zh">WT 作用于 CL/V，再 AGE、SEX、STUDY；OFV 下降 &gt; 3.84</span></td></tr>
   <tr><td>5</td><td><span class="en">Bioavailability</span><span class="zh">生物利用度</span></td><td><span class="en">F1 only when both oral and IV data exist</span><span class="zh">仅当同时存在口服与静脉数据时才设 F1</span></td></tr>
 </table>

@@ -421,7 +421,7 @@ enum ParameterEstimateParser {
         let upper = label.uppercased()
         if upper == "OFV" || upper == "AIC" { return "Fit" }
         if upper.hasPrefix("IIV") || upper.contains("BSV") { return "IIV" }
-        if upper.contains("ERROR") || upper.contains("RESIDUAL") || upper.contains("RE") || upper.contains("SIGMA") { return "Residual" }
+        if upper.hasPrefix("PROP") || upper.hasPrefix("ADD") || upper.contains("ERROR") || upper.contains("RESIDUAL") || upper.contains("SIGMA") { return "Residual" }
         return "PK Parameter"
     }
 

@@ -169,7 +169,7 @@ make_param_table_from_ext_mod <- function(ext, mod_file){
   theta_fixed_tbl <- theta_tbl %>%
     mutate(
       NewType = case_when(
-        str_detect(Label, "Prop|Add|Residual|Error|RE") ~ "Residual Error",
+        str_detect(Label, "^(Prop|Add)\\.|Residual|Error|SIGMA") ~ "Residual Error",
         TRUE ~ "PK Parameter")) %>%
     select(Type = NewType, Label, Estimate, SE, RSE)
 

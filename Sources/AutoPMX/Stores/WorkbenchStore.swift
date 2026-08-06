@@ -8595,9 +8595,11 @@ final class WorkbenchStore: ObservableObject {
             - PK parameters (CL, V, Q, V2, KA, etc.) with estimates and %RSE
             - Which parameters improved in precision and which got worse
             - Residual error model parameters (Prop.RE, Add.RE) with estimates and %RSE, plus their ε-Shrinkage (only compare Shrinkage in the residual model section)
-            - IIV (OMEGA) estimates with η-Shrinkage, and IIV coverage (which parameters have/don't have IIV)
+            - IIV (OMEGA) estimates with %RSE, and IIV coverage (which parameters have/don't have IIV)
 
-            NOTE on Shrinkage: Shrinkage only appears in residual model (EPS(1), EPS(2)) and IIV (ETA) outputs. Only mention Shrinkage there; do not add a separate "Shrinkage" section.
+            NOTE on Shrinkage: Shrinkage is only used for residual error reporting (EPS(1), EPS(2)).
+            Do NOT use eta-shrinkage as a criterion for accepting/rejecting models or fixing/removing IIV;
+            ETA/PK precision is judged by %RSE, boundary, covariance, and convergence.
 
             ## 3. Goodness of Fit
             - OFV / AIC comparison (note ΔOFV, ΔAIC)
@@ -8607,7 +8609,7 @@ final class WorkbenchStore: ObservableObject {
             ## 4. Overall Assessment and Recommendations
             - Which model is better and why (cite specific numbers)
             - Whether the improvement is clinically meaningful
-            - Remaining concerns (boundary estimates, high RSE, excessive shrinkage, etc.)
+            - Remaining concerns (boundary estimates, high RSE, excessive residual shrinkage, etc.)
             - Next-step optimization suggestions
             """
             : """
@@ -8624,9 +8626,11 @@ final class WorkbenchStore: ObservableObject {
             - PK 参数（CL, V, Q, V2, KA 等）的估计值和 %RSE
             - 哪些参数的精度有改善，哪些变差
             - 残差模型参数（Prop.RE, Add.RE）的估计值和 %RSE，以及各自的 ε-Shrinkage（仅在残差模型部分比较 Shrinkage）
-            - IIV（OMEGA）估计值，以及对应的 η-Shrinkage，和 IIV 的覆盖范围（哪些参数有/无 IIV）
+            - IIV（OMEGA）估计值、%RSE，和 IIV 的覆盖范围（哪些参数有/无 IIV）
 
-            NOTE on Shrinkage：Shrinkage 仅出现在残差模型（EPS(1), EPS(2)）和 IIV（ETA）相关输出中。只在这些地方提及 Shrinkage，不要单独列出 "Shrinkage" 章节。
+            NOTE on Shrinkage：Shrinkage 仅用于残差模型（EPS(1), EPS(2)）的报告。
+            不要把 eta-shrinkage 作为接受/拒绝模型或固定/移除 IIV 的依据；ETA/PK 参数精度只看
+            %RSE、边界、协方差和收敛状态。
 
             ## 三、模型拟合优度
             - OFV / AIC 对比（标注 ΔOFV, ΔAIC）
@@ -8636,7 +8640,7 @@ final class WorkbenchStore: ObservableObject {
             ## 四、综合评价与建议
             - 哪个模型更优，依据是什么（引用具体数值）
             - 改进是否具有临床意义
-            - 还需关注的问题（边界估计、高 RSE、Shrinkage 过高等）
+            - 还需关注的问题（边界估计、高 RSE、残差 Shrinkage 过高等）
             - 下一步优化建议
             """)
 

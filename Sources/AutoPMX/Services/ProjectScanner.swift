@@ -149,27 +149,17 @@ struct ProjectScanner {
     static func parameterEstimates(runID: String, in projectURL: URL) -> [ParameterEstimateRow] {
         let semanticURL = projectURL.appendingPathComponent("data_run\(runID).csv")
         let epsilonShrinkage = parseEpsilonShrinkage(runID: runID, in: projectURL)
-        let etaShrinkages = parseEtaShrinkages(runID: runID, in: projectURL)
 
         if let text = try? String(contentsOf: semanticURL, encoding: .utf8) {
             var rows = ParameterEstimateParser.parseSemanticCSV(text)
             if !rows.isEmpty {
-                // Inject shrinkage into IIV and Residual group rows
+                // Inject residual epsilon-shrinkage only. ETA/PK decisions use %RSE, not eta-shrinkage.
                 rows = rows.map { row in
                     if row.group == "Residual" {
                         return ParameterEstimateRow(
                             group: row.group, name: row.name,
                             estimate: row.estimate, standardError: row.standardError,
                             shrinkage: epsilonShrinkage,
-                            estimateText: row.estimateText, standardErrorText: row.standardErrorText,
-                            rseText: row.rseText
-                        )
-                    }
-                    if row.group == "IIV", let s = etaShrinkages[row.name.uppercased()] ?? etaShrinkages["ETA" + row.name.dropFirst("ETA".count)] {
-                        return ParameterEstimateRow(
-                            group: row.group, name: row.name,
-                            estimate: row.estimate, standardError: row.standardError,
-                            shrinkage: s,
                             estimateText: row.estimateText, standardErrorText: row.standardErrorText,
                             rseText: row.rseText
                         )
@@ -188,26 +178,13 @@ struct ProjectScanner {
         let modURL = projectURL.appendingPathComponent("run\(runID).mod")
         let modText = try? String(contentsOf: modURL, encoding: .utf8)
         var rows = ParameterEstimateParser.parseExt(text, modText: modText)
-        // Inject shrinkage into IIV and Residual rows
+        // Inject residual epsilon-shrinkage only. ETA/PK decisions use %RSE, not eta-shrinkage.
         rows = rows.map { row in
             if row.group == "Residual" {
                 return ParameterEstimateRow(
                     group: row.group, name: row.name,
                     estimate: row.estimate, standardError: row.standardError,
                     shrinkage: epsilonShrinkage,
-                    estimateText: row.estimateText, standardErrorText: row.standardErrorText,
-                    rseText: row.rseText
-                )
-            }
-            if row.group == "IIV", let s = etaShrinkages[row.name.uppercased()] ?? etaShrinkages["ETA" + row.name.dropFirst("ETA".count)] {
-                // If the parameter is FIXED, SE is nil (set by parseExt), skip shrinkage too
-                if row.standardError == nil {
-                    return row
-                }
-                return ParameterEstimateRow(
-                    group: row.group, name: row.name,
-                    estimate: row.estimate, standardError: row.standardError,
-                    shrinkage: s,
                     estimateText: row.estimateText, standardErrorText: row.standardErrorText,
                     rseText: row.rseText
                 )

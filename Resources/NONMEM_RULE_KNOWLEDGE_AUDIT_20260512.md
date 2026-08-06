@@ -182,7 +182,8 @@ Current model-evaluation rules cover GOF/VPC/bootstrap/shrinkage, but automated 
 - Gradients and rounding errors.
 - Condition number / correlation matrix red flags.
 - OFV/AIC/BIC comparison.
-- Eta and epsilon shrinkage.
+- Epsilon shrinkage for residual reporting; eta shrinkage only as a covariate-screening diagnostic.
+- Eta-shrinkage must NOT be used to add, remove, fix, or accept/reject IIV; ETA/PK decisions use %RSE, boundary, covariance, and convergence.
 - ETABAR / eta distribution centered near zero.
 - Plausible parameter units and mAb half-life plausibility.
 - No unmodeled trends in CWRES/time/IPRED/covariates.
@@ -323,4 +324,3 @@ The single `poppk_rules.json` is still manageable, but for automated model gener
 ## Bottom Line
 
 The current knowledge base is enough for a prototype and guided manual modeling. For fully automated LLM-driven NONMEM model building, the most important missing layer is executable guardrails: detailed syntax rules, data/event semantics, estimation-method selection, BQL likelihood handling, and objective acceptance criteria. These should be added before trusting DuDu PMx to iterate models without human review.
-

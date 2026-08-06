@@ -1232,7 +1232,10 @@ struct LLMCommandService {
                0.08 ; IIV CL
                0.05 ; IIV V
              Each line is ONE variance. Do NOT use BLOCK(1). Values MUST be slightly different (never identical!) to avoid matrix singularity — ALWAYS perturb by at least 0.01.
-             Only in LATER runs (run002+) may you consider reducing/fixing IIV if its %RSE > 50%. High shrinkage (>30%) is only a warning that the estimate may be unreliable — it is NOT by itself a reason to fix the IIV; only %RSE > 50% triggers fixing.
+             Only in LATER runs (run002+) may you consider reducing/fixing IIV based on its %RSE > 50%
+             or repeated convergence/covariance failure or a boundary estimate. Do NOT use eta-shrinkage
+             as a reason to add, remove, fix, or accept/reject IIV. ETA and PK parameter decisions use
+             %RSE only. If a parameter has no ETA, do not report or infer any eta-shrinkage for it.
            9. $SIGMA 1 FIX for residual scale; the residual SDs are THETA labels Prop.RE (sd) and Add.RE (sd).
         10. $EST METHOD=1 INTER MAXEVAL=9999 NOABORT SIG=3 PRINT=10
         11. $COVARIANCE PRINT=E MATRIX=S
@@ -1308,7 +1311,7 @@ struct LLMCommandService {
         - Do NOT require a stable 1-compartment model or a higher-compartment comparison; the inherited compartment structure is authoritative.
         - If this run is S+C and has no syntax/NMTRAN failure or boundary estimate, answer ACCEPT so the next run can release ALL inherited structural FIXes.
         - Non-zero ETABAR for inherited fixed parameters is expected while those parameters are pinned; the release round addresses it.
-        - Do not block acceptance solely because IIV-KA shrinkage is high while structural parameters are still fixed. Re-evaluate shrinkage after the release round.
+        - Do not block acceptance solely because IIV-KA shrinkage is high while structural parameters are still fixed. Re-evaluate RSE after the release round; eta-shrinkage is not an accept/revise criterion.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         """ : "")}
 
@@ -1324,7 +1327,8 @@ struct LLMCommandService {
              with a non-empty .cov file. If the covariance step failed, REVISE.
            - BOUNDARY: no parameter may be "PARAMETER IS NEAR ITS BOUNDARY". A boundary estimate means the run is not stable.
            - PARAMETER FITTING (precision): key structural PK parameters (CL, V1, V2, Q and their IIV) must have
-             %RSE < 50% and eta-shrinkage < 30%. A run whose key parameters cannot be estimated with reasonable precision
+             %RSE < 50%. Do NOT use eta-shrinkage as an accept/revise criterion for ETA/PK parameters; use %RSE,
+             boundary, covariance, and convergence. A run whose key parameters cannot be estimated with reasonable precision
              is NOT acceptable even if it minimized and its OFV is low.
            - MODEL PERFORMANCE (fit): the run must show a credible fit — successful minimization with a finite, sensible
              OFV and low residual error. Diagnostics (GOF/VPC) ALONE are NEVER sufficient to ACCEPT; you must ALSO confirm
@@ -1365,13 +1369,14 @@ struct LLMCommandService {
         lacking S or C is INELIGIBLE regardless of its OFV.
         Comparing a simpler vs a more complex model is NOT decided by OFV alone. You MUST also compare
         PARAMETER PRECISION / BEHAVIOR of the two models:
-        - Key structural PK parameters (CL, V1, V2, Q and their IIV) must have %RSE < 50% and
-          acceptable shrinkage (< 30% eta-shrinkage). Inspect the ESTIMATION STATUS block in the Evidence.
+        - Key structural PK parameters (CL, V1, V2, Q and their IIV) must have %RSE < 50%.
+          Eta-shrinkage is NOT an accept/revise criterion for ETA/PK parameters; use %RSE, boundary,
+          covariance, and convergence. Inspect the ESTIMATION STATUS block in the Evidence.
         - A more complex model is preferred ONLY IF it is BOTH:
             (a) significantly better by ΔOFV (the rule above), AND
-            (b) its structural parameters have acceptable precision (RSE < 50%, shrinkage < 30%).
+            (b) its structural parameters have acceptable precision (RSE < 50%) and no boundary estimates.
         - If the more complex model shows WORSE parameter behavior — e.g., new compartment parameters
-          (Q, V2, Q3, V3) with RSE > 50%, high shrinkage, or estimates near a boundary — despite only a
+          (Q, V2, Q3, V3) with RSE > 50% or estimates near a boundary — despite only a
           BORDERLINE ΔOFV (≤ threshold), you MUST prefer the SIMPLER model. A numerically lower OFV from
           an imprecisely estimated complex model is NOT a real improvement.
         - Never choose a model whose key PK parameters cannot be estimated with reasonable precision,
@@ -1560,7 +1565,8 @@ struct LLMCommandService {
           - If neither component has RSE > 100% → keep combined error, proceed to step 6.
              
         6. After error model is fixed, refine IIV on existing parameters:
-           - Only remove IIV if eta-shrinkage > 30% OR RSE > 100%.
+           - Only remove IIV based on %RSE > 100%, repeated convergence/covariance failure, or a boundary
+             estimate. Do NOT use eta-shrinkage as a reason to remove IIV.
            - PROACTIVE IIV UNFIXING (CRITICAL — DO NOT SKIP):
              After a model converges successfully (minimization OK, covariance OK):
              Check $OMEGA block: if ANY peripheral parameter (Q, V2, Q3, V3) has OMEGA = 0 FIX

@@ -608,7 +608,7 @@
           "rule_id": "ME-SHRINK-001",
           "category": "Shrinkage",
           "subcategory": "Eta-Shrinkage",
-          "rule_description": "Eta-shrinkage (IIV shrinkage) should be calculated and reported. High shrinkage (e.g., >30%) may indicate that the data are not informative for estimating the random effect, and covariate relationships for that parameter may be unreliable.",
+          "rule_description": "Eta-shrinkage (IIV shrinkage) is a reporting/diagnostic metric. High shrinkage (e.g., >30%) may indicate that data are not informative for covariate screening, but it must NOT be used to add, remove, fix, or accept/reject IIV. ETA and PK parameter decisions use %RSE, boundary, covariance, and convergence; if a parameter has no ETA, do not infer eta-shrinkage for it.",
           "source": "Reporting guidelines for population pharmacokinetic analyses, Dykstra et al., 2015",
           "source_section": "Model Evaluation",
           "keywords": [
