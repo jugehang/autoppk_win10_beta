@@ -6103,41 +6103,9 @@ final class WorkbenchStore: ObservableObject {
                         s2for2CompExpression: derivedS2for2CompExpression
                     )
 
-                    var handoffText: String
-                    do {
-                        let (aiHandoff, handoffUsage) = try await LLMCommandService.generateFullDatasetHandoffModel(
-                            baseURL: llmBaseURL,
-                            model: llmModel,
-                            projectURL: projectURL,
-                            runID: childID,
-                            parentRunID: parentRunID,
-                            dataFile: activeDataFile,
-                            rules: rules,
-                            deterministicDraft: deterministicHandoff,
-                            parentModText: handoff.modText,
-                            hasIV: hasIV,
-                            hasExtravascular: hasExtravascular,
-                            apiKey: llmAPIKey,
-                            apiFormat: activeAPIFormat
-                        )
-                        recordUsage(handoffUsage)
-                        handoffText = aiHandoff
-                        runner.append("DuDu reviewed IV-anchor handoff and drafted run\(childID).mod")
-                    } catch {
-                        let nsError = error as NSError
-                        if error is CancellationError ||
-                            (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) {
-                            throw CancellationError()
-                        }
-                        runner.append("AI handoff rewrite failed; using deterministic template: \(error.localizedDescription.prefix(120))")
-                        handoffText = deterministicHandoff
-                    }
-
-                    if LLMCommandService.detectCompartmentCount(handoffText) <
-                        LLMCommandService.detectCompartmentCount(deterministicHandoff) {
-                        runner.append("AI handoff used a lower compartment count; falling back to the IV-anchor template.")
-                        handoffText = deterministicHandoff
-                    }
+                    // The deterministic IV-anchor template is authoritative. Letting the LLM
+                    // rewrite this first child repeatedly broke CMT/OMEGA/ETA/DUR invariants.
+                    var handoffText = deterministicHandoff
 
                     handoffText = LLMCommandService.sanitizeControlStream(
                         handoffText,
