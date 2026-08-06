@@ -616,20 +616,52 @@ class TaskRunner:
         )
 
     def _ensure_project_config(self) -> None:
-        """Auto-create project_config.json with sensible defaults if missing."""
+        """Auto-create or repair project_config.json grouping for the current dataset."""
         config_path = self.root / "project_config.json"
-        if config_path.exists():
-            return
-        # Detect grouping factor from $DATA file if possible
-        group_factor = "STUDY"
+
         data_file = self.settings.data_file
         data_path = self.root / data_file
+        columns: List[str] = []
         if data_path.exists():
             try:
                 import pandas as pd
                 df = pd.read_csv(data_path, nrows=1)
                 cols = [c.upper() for c in df.columns]
-                for candidate in ("STUDY", "STUDYID", "STUDYNO", "ARM", "DOSE", "TRT", "SEX", "RACE", "REGION"):
+                columns = cols
+            except Exception:
+                pass
+
+        candidates = ("STUDY", "STUDYID", "STUDYNO", "ARM", "DOSE", "TRT",
+                      "SEX", "ROUTE", "RACE", "REGION")
+        group_factor = next((c for c in candidates if c in columns), "STUDY")
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                current_factor = config.get("grouping", {}).get("factor", "STUDY")
+                if current_factor in columns:
+                    return
+                if not group_factor or group_factor == "STUDY" and "STUDY" not in columns:
+                    return
+                config.setdefault("grouping", {})["factor"] = group_factor
+                config["grouping"]["labels"] = {}
+                config.setdefault("psn_settings", {})["stratify_var"] = group_factor
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=2, ensure_ascii=False)
+                self.log(f"Repaired project_config.json grouping factor: {group_factor}")
+            except Exception:
+                return
+            return
+
+        # Create the config when missing.
+        if data_path.exists():
+            try:
+                import pandas as pd
+                df = pd.read_csv(data_path, nrows=1)
+                cols = [c.upper() for c in df.columns]
+                for candidate in ("STUDY", "STUDYID", "STUDYNO", "ARM", "DOSE", "TRT",
+                                  "SEX", "ROUTE", "RACE", "REGION"):
                     if candidate in cols:
                         group_factor = candidate
                         break

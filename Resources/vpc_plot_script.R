@@ -34,6 +34,7 @@ if (file.exists(config_file)) {
 }
 group_factor <- proj_cfg$grouping$factor
 group_labels <- proj_cfg$grouping$labels
+group_labels_vec <- unlist(group_labels)
 
 # --- 3. 解析 .mod 获取原始数据散点 [cite: 110, 118] ---
 mod_lines <- readLines(mod_file)
@@ -51,7 +52,7 @@ raw_obs_clean <- robust_clean_names(raw_obs_data) %>%
     STRAT_ID = as.character(as.numeric(!!sym(group_factor)))
   ) %>%
   filter(!is.na(DV_VAL), DV_VAL > 0) %>%
-  mutate(STRAT_LABEL = unlist(group_labels)[STRAT_ID])
+  mutate(STRAT_LABEL = if (length(group_labels_vec) > 0) group_labels_vec[STRAT_ID] else STRAT_ID)
 
 # --- 4. 深度解析 vpc_results.csv (统计线) [cite: 110, 114] ---
 lines <- readLines(vpc_res_path)
@@ -88,7 +89,7 @@ for (i in seq_along(header_indices)) {
       STRAT_ID = current_id
     ) %>%
     filter(!is.na(bin_mid)) %>%
-    mutate(STRAT_LABEL = unlist(group_labels)[STRAT_ID])
+    mutate(STRAT_LABEL = if (length(group_labels_vec) > 0) group_labels_vec[STRAT_ID] else STRAT_ID)
   all_strata_stats[[i]] <- stratum_clean
 }
 vpc_stats <- bind_rows(all_strata_stats)

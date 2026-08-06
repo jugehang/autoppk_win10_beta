@@ -44,6 +44,11 @@ This library is the syntax anchor for DuDu PMx automated model building. Local L
 | ADVAN12 | TRANSS4 | 4 cmt dep.+cent.+2 periph | Oral 3-cmt | CMT=1 | CMT=2 (S2) | CMT=3 | CMT=4 | — |
 | ADVAN13 | TRANSS1 | User-defined ODEs | Custom/explicit ODEs | — | — | — | — | — |
 
+For mixed IV infusion + SC/extravascular data, first-order SC dosing to depot CMT=1 must NOT
+receive D1 just because DUR exists in the dataset. IV infusion delivered directly to central
+CMT=2 should use D2=DUR with a tiny positive fallback. SC zero-order absorption requires an
+explicit depot-input implementation, not D1 bolted onto a first-order KA model.
+
 ## Parameter Naming Convention (STRICT)
 
 | ADVAN | Parameters in $PK | $TABLE PATAB must list |

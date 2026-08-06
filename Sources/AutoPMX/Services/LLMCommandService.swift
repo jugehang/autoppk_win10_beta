@@ -957,6 +957,8 @@ struct LLMCommandService {
             This dataset needs a depot compartment for SC dosing and a central compartment
             for IV dosing. Start from the extravascular template so SC records use CMT=1
             (depot) and IV records can dose directly to the central compartment.
+            SC first-order absorption does NOT need D1 just because DUR exists in the dataset.
+            If IV infusion is delivered directly to CMT=2, use D2=DUR for that compartment.
             """
             routeHardRule = """
             ━━━ ROUTE LOCK: MIXED IV + SC/EXTRAVASCULAR ━━━
@@ -965,6 +967,11 @@ struct LLMCommandService {
               extravascular_2c_advan4_trans4 → extravascular_3c_advan12_trans4.
             - FORBIDDEN: ADVAN1, ADVAN3, ADVAN11 (IV-only), and any S1-only central scaling.
             - Depot = CMT=1, Central = CMT=2 (use S2=\(s2Expression) / S2=\(s2for2CompExpression)).
+            - For first-order SC (CMT=1), do NOT write D1 unless the SC dosing records themselves carry DUR/RATE.
+            - For IV infusion directly to central CMT=2 with DUR, write:
+              IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR
+              IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001
+            - SC zero-order absorption needs a different depot-dosing implementation; do not approximate it with D1 on a first-order KA model.
             - If you are continuing from an IV mother model, keep the IV THETA/OMEGA estimates
               as starting values, add KA, add F1 when both IV and SC exist, and renumber the
               central/peripheral compartments for the extravascular ADVAN family.
@@ -3287,6 +3294,45 @@ struct LLMCommandService {
     /// keeps the IV compartment count, converts it to the extravascular ADVAN template,
     /// inherits the IV final THETA/OMEGA estimates as FIXED starting values, and only
     /// estimates KA (plus F1 when the full dataset contains both IV and SC dosing).
+    private static func infusionDurationCMTs(projectURL: URL, dataFile: String) -> Set<Int> {
+        let url = dataURL(projectURL: projectURL, dataFile: dataFile)
+        guard let raw = try? String(contentsOf: url, encoding: .utf8),
+              let headerLine = raw.split(separator: "\n", omittingEmptySubsequences: true).first else {
+            return []
+        }
+        let headers = parseCSVLine(String(headerLine)).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        guard let cmtIdx = headers.firstIndex(of: "CMT"),
+              let durIdx = headers.firstIndex(of: "DUR") else {
+            return []
+        }
+        let evidIdx = headers.firstIndex(of: "EVID")
+        let amtIdx = headers.firstIndex(of: "AMT")
+        var durationCMTs = Set<Int>()
+
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: true).dropFirst() {
+            let cols = parseCSVLine(String(line)).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard cols.count > max(cmtIdx, durIdx),
+                  let cmt = Int(cols[cmtIdx]), cmt > 0,
+                  let dur = Double(cols[durIdx]), dur > 0 else {
+                continue
+            }
+            let evid = evidIdx.flatMap { idx -> Int? in
+                idx < cols.count ? Int(cols[idx]) : nil
+            } ?? 0
+            let amt = amtIdx.flatMap { idx -> Double? in
+                idx < cols.count ? Double(cols[idx]) : nil
+            } ?? 0
+            if evid == 1 || evid == 4 || amt > 0 {
+                durationCMTs.insert(cmt)
+            }
+        }
+        return durationCMTs
+    }
+
     static func fullDatasetIVHandoffModel(
         childRunID: String,
         parentRunID: String,
@@ -3370,12 +3416,23 @@ struct LLMCommandService {
 
         if inputRecord.components(separatedBy: .whitespaces).contains("DUR") {
             if inputRecord.components(separatedBy: .whitespaces).contains("CMT") {
-                pkLines.insert(contentsOf: [
-                    "IF (CMT.EQ.1 .AND. DUR.GT.0) D1=DUR",
-                    "IF (CMT.EQ.1 .AND. DUR.LE.0) D1=0.0001",
-                    "IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR",
-                    "IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001"
-                ], at: 0)
+                let durationCMTs = infusionDurationCMTs(projectURL: projectURL, dataFile: dataFile)
+                var durationLines: [String] = []
+                if durationCMTs.contains(1) {
+                    durationLines.append(contentsOf: [
+                        "IF (CMT.EQ.1 .AND. DUR.GT.0) D1=DUR",
+                        "IF (CMT.EQ.1 .AND. DUR.LE.0) D1=0.0001"
+                    ])
+                }
+                if durationCMTs.contains(2) {
+                    durationLines.append(contentsOf: [
+                        "IF (CMT.EQ.2 .AND. DUR.GT.0) D2=DUR",
+                        "IF (CMT.EQ.2 .AND. DUR.LE.0) D2=0.0001"
+                    ])
+                }
+                if !durationLines.isEmpty {
+                    pkLines.insert(contentsOf: durationLines, at: 0)
+                }
             } else {
                 pkLines.insert(contentsOf: [
                     "IF (DUR.GT.0) D1=DUR",

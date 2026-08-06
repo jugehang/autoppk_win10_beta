@@ -57,16 +57,29 @@ if (length(group_labels) > 0) {
 }
 
 group_col <- config$grouping$factor
-sdtab <- raw_data %>%
-  filter(MDV != 1) %>%
-  mutate(across(everything(), ~as.numeric(as.character(.)))) %>% # 强制转数字，防止 non-numeric 报错
-  left_join(map_df, by = setNames("RAW_VALUE", group_col))
+if (!is.null(group_col) && !(group_col %in% colnames(raw_data))) {
+  fallback_candidates <- c("ROUTE", "SEX", "ADA", "STUDY", "STUDYID",
+                           "STUDYNO", "ARM", "DOSE", "TRT", "RACE", "REGION")
+  group_col <- fallback_candidates[fallback_candidates %in% colnames(raw_data)][1]
+  if (length(group_col) == 0 || is.na(group_col)) group_col <- NULL
+}
 
-# 如果没有 labels 映射，直接用分组因子值作为 GROUP
-if (length(group_labels) > 0) {
-  sdtab <- sdtab %>% mutate(GROUP = factor(LABEL, levels = unlist(group_labels)))
+sdtab <- raw_data %>% filter(MDV != 1)
+group_values <- if (!is.null(group_col)) sdtab[[group_col]] else NULL
+sdtab <- sdtab %>% mutate(across(everything(), ~as.numeric(as.character(.)))) # 强制转数字，防止 non-numeric 报错
+
+if (!is.null(group_col)) {
+  sdtab[[group_col]] <- group_values
+  use_labels <- length(group_labels) > 0 && is.numeric(group_values)
+  if (use_labels) {
+    sdtab <- sdtab %>%
+      left_join(map_df, by = setNames("RAW_VALUE", group_col)) %>%
+      mutate(GROUP = factor(LABEL, levels = unlist(group_labels)))
+  } else {
+    sdtab <- sdtab %>% mutate(GROUP = factor(.data[[group_col]]))
+  }
 } else {
-  sdtab <- sdtab %>% mutate(GROUP = factor(.data[[group_col]]))
+  sdtab <- sdtab %>% mutate(GROUP = factor("All"))
 }
 
 # 5. 绘图样式
