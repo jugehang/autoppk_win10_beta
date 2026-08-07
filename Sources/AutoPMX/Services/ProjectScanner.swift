@@ -565,11 +565,23 @@ struct ProjectScanner {
            ext == "scm" ||
            (isInSCMDir && (ext == "csv" || ext == "xml" || ext == "txt" || ext == "html")) { return .scm }
 
-        // Exploratory outputs: EDA tables/plots and pre-SCM ETA-covariate screening.
-        if upper.hasPrefix("EDA_")
+        // Exploratory outputs: EDA tables/plots, C-T exploration, and pre-SCM
+        // ETA-covariate screening.
+        let isExploratoryName = upper.hasPrefix("EDA_")
+            || upper.hasPrefix("CT_")
             || upper.hasPrefix("ETA_COVARIATE_SCREENING")
             || lowerName.hasPrefix("eta_covariate_screening")
-            || lowerName.hasPrefix("eta_cov") { return .exploratory }
+            || lowerName.hasPrefix("eta_cov")
+        let isCTExploratoryImage = ext == "png" && (
+            lowerName.contains("_ct_")
+            || lowerName.contains("_dose_norm_ct")
+            || lowerName.contains("_firstdose_ct")
+            || lowerName.contains("_ct_curves")
+            || lowerName.contains("_individual_ct")
+            || lowerName.contains("_population_ct")
+            || lowerName.contains("_by_")
+        )
+        if isExploratoryName || isCTExploratoryImage { return .exploratory }
 
         // CSV/XLSX files AND NONMEM table files all go under Data
         if ["csv", "xlsx"].contains(ext) ||
