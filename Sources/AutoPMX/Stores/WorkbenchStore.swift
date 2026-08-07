@@ -535,6 +535,7 @@ final class WorkbenchStore: ObservableObject {
     @Published var showSCMFinalModelConfirm = false
     @Published var scmFinalModelRunID = ""
     @Published var scmFinalModelPreviousRun = ""
+    @Published var scmClinicalSignificanceText = ""
     /// True while a bootstrap resampling + AI interpretation job is in flight (used to
     /// keep the floating progress popup alive when the chat panel is hidden).
     @Published var isBootstrapRunning = false
@@ -4669,8 +4670,188 @@ final class WorkbenchStore: ObservableObject {
         }
         appendSCMFinalSummary(baseText: baseText, scmFinalText: scmFinalText,
                               baseOfv: scmBaseOfv, finalOfv: scmFinalOfv)
+        let clinicalText = clinicalSignificanceAssessment(for: sourceRun, dataFile: dataFile)
+        scmClinicalSignificanceText = clinicalText
+        if !clinicalText.isEmpty {
+            runner.append(clinicalText)
+            assistantMessages.append(AssistantMessage(role: .system, text: clinicalText))
+        }
         refreshWorkspace()
         return sourceRun
+    }
+
+    private func firstCapture(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges > 1 else {
+            return nil
+        }
+        return ns.substring(with: match.range(at: 1))
+    }
+
+    private func thetaEstimatesByIndex(runID: String) -> [Int: Double] {
+        guard let text = try? String(contentsOf: projectURL.appendingPathComponent("run\(runID).ext"), encoding: .utf8) else {
+            return [:]
+        }
+        let lines = text.components(separatedBy: .newlines)
+        guard let header = lines.first(where: { $0.contains("ITERATION") && $0.contains("OBJ") }) else {
+            return [:]
+        }
+        let names = header.split(whereSeparator: \.isWhitespace).map(String.init).dropFirst()
+        guard let finalLine = lines.first(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("-1000000000")
+        }) else {
+            return [:]
+        }
+        let values = finalLine.split(whereSeparator: \.isWhitespace).map(String.init).dropFirst()
+        var result: [Int: Double] = [:]
+        for (index, rawName) in names.enumerated() {
+            let name = rawName.uppercased()
+            guard name.hasPrefix("THETA"), index < values.count, let value = Double(values[index]), value.isFinite else {
+                continue
+            }
+            let digits = String(name.dropFirst(5)).trimmingCharacters(in: CharacterSet(charactersIn: "() "))
+            guard let thetaIndex = Int(digits), thetaIndex > 0 else { continue }
+            result[thetaIndex] = value
+        }
+        return result
+    }
+
+    private func covariatePercentiles(dataFile: String) -> [String: (low: Double, high: Double, median: Double)] {
+        guard let text = try? String(contentsOf: projectURL.appendingPathComponent(dataFile), encoding: .utf8),
+              let headerLine = text.components(separatedBy: .newlines).first(where: {
+                  !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }) else {
+            return [:]
+        }
+        let headers = headerLine
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces).uppercased() }
+        var values: [String: [Double]] = [:]
+
+        for line in text.components(separatedBy: .newlines).dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let fields = trimmed.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            for (index, column) in headers.enumerated() where index < fields.count {
+                let raw = fields[index].trimmingCharacters(in: .whitespaces)
+                guard raw != ".", raw != "", let value = Double(raw), value.isFinite else { continue }
+                values[column, default: []].append(value)
+            }
+        }
+
+        func percentile(_ sorted: [Double], _ p: Double) -> Double {
+            guard !sorted.isEmpty else { return .nan }
+            let rank = max(0, min(sorted.count - 1, Int((p * Double(sorted.count)).rounded(.up)) - 1))
+            return sorted[rank]
+        }
+
+        var result: [String: (low: Double, high: Double, median: Double)] = [:]
+        for (column, rawValues) in values {
+            let sorted = rawValues.sorted()
+            result[column] = (percentile(sorted, 0.05), percentile(sorted, 0.95), percentile(sorted, 0.5))
+        }
+        return result
+    }
+
+    private func clinicalSignificanceAssessment(for runID: String, dataFile: String) -> String {
+        guard let modText = try? String(contentsOf: projectURL.appendingPathComponent("run\(runID).mod"), encoding: .utf8) else {
+            return ""
+        }
+        let pkParams = scmPKParams(from: modText)
+        let thetaMap = thetaEstimatesByIndex(runID: runID)
+        let percentiles = covariatePercentiles(dataFile: dataFile)
+        var relations: [(token: String, param: String, cov: String, thetaIndex: Int, median: Double?)] = []
+        var activeToken: String?
+
+        for line in modText.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let upper = trimmed.uppercased()
+            if upper.contains("-DEFINITION START"),
+               let token = firstCapture(in: trimmed, pattern: #"^\s*;{1,3}\s*([A-Za-z][A-Za-z0-9_]*)-DEFINITION\s+START"#) {
+                activeToken = token
+                continue
+            }
+            if upper.contains("-DEFINITION END") {
+                activeToken = nil
+                continue
+            }
+            guard let token = activeToken,
+                  let thetaIndexText = firstCapture(in: trimmed, pattern: #"THETA\s*\(\s*(\d+)\s*\)"#),
+                  let thetaIndex = Int(thetaIndexText) else {
+                continue
+            }
+            let continuousCov = firstCapture(in: trimmed, pattern: #"\(([A-Z][A-Z0-9_]*)\s*/\s*([0-9.eE+-]+)\)\s*\*\*\s*THETA"#)
+            let medianText = firstCapture(in: trimmed, pattern: #"\([A-Z][A-Z0-9_]*\s*/\s*([0-9.eE+-]+)\)"#)
+            let categoricalCov = firstCapture(in: trimmed, pattern: #"IF\s*\(\s*([A-Z][A-Z0-9_]*)\s*\.EQ\."#)
+            let covariate = continuousCov ?? categoricalCov ?? ""
+            guard !covariate.isEmpty else { continue }
+            let median = medianText.flatMap(Double.init)
+            let parameter = pkParams.first(where: { token.uppercased().hasPrefix($0.uppercased()) })
+                ?? inferParameter(from: token, covariate: covariate)
+            guard !parameter.isEmpty else { continue }
+            relations.append((token, parameter, covariate, thetaIndex, median))
+        }
+
+        guard !relations.isEmpty else {
+            return "Clinical significance assessment: no covariate relations detected in run\(runID)."
+        }
+
+        var lines = [
+            "### Clinical Significance Assessment (run\(runID))",
+            "Threshold: PK covariate effects between 0.80 and 1.25 are considered not clinically relevant.",
+            "",
+            "| PK Parameter | Covariate | THETA | Effect range | Clinically relevant? |",
+            "|---|---|---|---|---|"
+        ]
+        var nonClinicalTokens: [String] = []
+
+        for relation in relations {
+            guard let theta = thetaMap[relation.thetaIndex], theta.isFinite else { continue }
+            var ratios: [Double] = []
+            if let median = relation.median, median > 0,
+               let extremes = percentiles[relation.cov],
+               extremes.low > 0, extremes.high > 0 {
+                ratios = [
+                    pow(extremes.low / median, theta),
+                    pow(extremes.high / median, theta)
+                ]
+            } else {
+                ratios = [1 + theta]
+            }
+            guard !ratios.isEmpty, ratios.allSatisfy({ $0.isFinite && $0 > 0 }) else { continue }
+            let low = ratios.min()!
+            let high = ratios.max()!
+            let relevant = low < 0.8 || high > 1.25
+            let effectText: String
+            if abs(low - 1) < 1e-6 && abs(high - 1) < 1e-6 {
+                effectText = "~1.00"
+            } else {
+                effectText = "\(String(format: "%.2f", low))-\(String(format: "%.2f", high))"
+            }
+            lines.append("| \(relation.param) | \(relation.cov) | \(relation.thetaIndex) | \(effectText) | \(relevant ? "Yes" : "No") |")
+            if !relevant {
+                nonClinicalTokens.append("\(relation.param)\(relation.cov)")
+            }
+        }
+
+        if nonClinicalTokens.isEmpty {
+            lines.append("")
+            lines.append("All retained covariates fall outside the 0.80-1.25 no-effect window or could not be fully evaluated.")
+        } else {
+            lines.append("")
+            lines.append("**Clinical conclusion:** \(nonClinicalTokens.joined(separator: ", ")) fall within 0.80-1.25 and are not considered clinically relevant. Consider removing them before finalizing the report.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func inferParameter(from token: String, covariate: String) -> String {
+        let upperToken = token.uppercased()
+        let upperCovariate = covariate.uppercased()
+        guard upperToken.hasSuffix(upperCovariate) else { return token }
+        return String(token.dropLast(covariate.count))
     }
 
     /// Describe one relation token like "V1WT" as "在 V1 上纳入 WT" (param + covariate).
@@ -7552,6 +7733,8 @@ final class WorkbenchStore: ObservableObject {
         - Observation records: \(profile.observationCount)
         - Dose levels: \(profile.doseLevels.isEmpty ? "N/A" : profile.doseLevels.map { String($0) }.joined(separator: ", "))
         - Time range: \(String(format: "%.1f", profile.timeRangeDays.0)) - \(String(format: "%.1f", profile.timeRangeDays.1)) h
+
+        \(scmClinicalSignificanceText.isEmpty ? "" : "## Clinical Significance Assessment\n\n\(scmClinicalSignificanceText)\n")
 
         ## Final Model Parameter Table
 
