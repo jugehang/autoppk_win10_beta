@@ -1934,6 +1934,9 @@ struct SCMSetupSheetView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .onChange(of: store.scmDataFileName) { _ in
+                    store.refreshSCMCandidateCovariates()
+                }
             }
 
             if store.etaScreeningRunID == store.scmModelRunID,
@@ -1962,10 +1965,18 @@ struct SCMSetupSheetView: View {
             }
 
             QuickSheetCard(title: L10n.scmCandidates) {
-                Toggle(L10n.scmCovWT, isOn: $store.scmIncludeWT)
-                Toggle(L10n.scmCovAGE, isOn: $store.scmIncludeAGE)
-                Toggle(L10n.scmCovSEX, isOn: $store.scmIncludeSEX)
-                Toggle(L10n.scmCovSTUDY, isOn: $store.scmIncludeSTUDY)
+                if store.scmAvailableCovariates.contains("WT") {
+                    Toggle(L10n.scmCovWT, isOn: $store.scmIncludeWT)
+                }
+                if store.scmAvailableCovariates.contains("AGE") {
+                    Toggle(L10n.scmCovAGE, isOn: $store.scmIncludeAGE)
+                }
+                if store.scmAvailableCovariates.contains("SEX") {
+                    Toggle(L10n.scmCovSEX, isOn: $store.scmIncludeSEX)
+                }
+                if store.scmAvailableCovariates.contains("STUDY") {
+                    Toggle(L10n.scmCovSTUDY, isOn: $store.scmIncludeSTUDY)
+                }
                 ForEach(store.scmCandidateCovariates, id: \.self) { cov in
                     Toggle(cov, isOn: Binding(
                         get: { store.scmIncludedAdditionalCovariates.contains(cov) },
@@ -2052,6 +2063,7 @@ struct SCMSetupSheetView: View {
                 .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
         .onChange(of: store.scmModelRunID) { _ in
+            store.refreshSCMCandidateCovariates()
             store.applyETAScreeningDefaultsIfAvailable(for: store.scmModelRunID)
         }
     }

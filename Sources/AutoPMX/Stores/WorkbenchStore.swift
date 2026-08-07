@@ -515,6 +515,8 @@ final class WorkbenchStore: ObservableObject {
     @Published var scmIncludeAGE = true
     @Published var scmIncludeSEX = true
     @Published var scmIncludeSTUDY = true
+    /// Covariates available in both the current model $INPUT and the selected SCM dataset.
+    @Published var scmAvailableCovariates: [String] = []
     /// Additional SCM candidate covariates detected from the current model $INPUT
     /// (e.g. DOSE, ROUTE, ADA, RACE, TRT). Kept separate from the four core toggles.
     @Published var scmCandidateCovariates: [String] = []
@@ -7469,10 +7471,12 @@ final class WorkbenchStore: ObservableObject {
         if recommended.isEmpty {
             resetSCMCovariatesToAll()
         } else {
-            scmIncludeWT = recommended.contains("WT")
-            scmIncludeAGE = recommended.contains("AGE")
-            scmIncludeSEX = recommended.contains("SEX")
-            scmIncludeSTUDY = recommended.contains("STUDY") || recommended.contains("STUD")
+            let available = Set(scmAvailableCovariates)
+            scmIncludeWT = recommended.contains("WT") && available.contains("WT")
+            scmIncludeAGE = recommended.contains("AGE") && available.contains("AGE")
+            scmIncludeSEX = recommended.contains("SEX") && available.contains("SEX")
+            scmIncludeSTUDY = (recommended.contains("STUDY") || recommended.contains("STUD"))
+                && (available.contains("STUDY") || available.contains("STUD"))
             let extra = Set(scmCandidateCovariates)
             scmIncludedAdditionalCovariates = recommended.intersection(extra)
         }
@@ -7483,10 +7487,11 @@ final class WorkbenchStore: ObservableObject {
     }
 
     func resetSCMCovariatesToAll() {
-        scmIncludeWT = true
-        scmIncludeAGE = true
-        scmIncludeSEX = true
-        scmIncludeSTUDY = true
+        let available = Set(scmAvailableCovariates)
+        scmIncludeWT = available.contains("WT")
+        scmIncludeAGE = available.contains("AGE")
+        scmIncludeSEX = available.contains("SEX")
+        scmIncludeSTUDY = available.contains("STUDY") || available.contains("STUD")
         scmIncludedAdditionalCovariates = Set(scmCandidateCovariates)
     }
 
@@ -7599,6 +7604,32 @@ final class WorkbenchStore: ObservableObject {
         return found
     }
 
+    func refreshSCMCandidateCovariates() {
+        guard !scmModelRunID.isEmpty else {
+            scmAvailableCovariates = []
+            scmCandidateCovariates = []
+            scmIncludedAdditionalCovariates = []
+            return
+        }
+        let modURL = projectURL.appendingPathComponent("run\(scmModelRunID).mod")
+        let modText = (try? String(contentsOf: modURL, encoding: .utf8)) ?? ""
+        let datasetColumns = scmDatasetColumnSet(scmDataFileName)
+        let coreCovariates: Set<String> = ["WT", "AGE", "SEX", "STUDY"]
+        let allAvailable = covariateColumns(from: modText).filter { datasetColumns.contains($0) }
+        let previousAdditional = scmIncludedAdditionalCovariates
+        scmAvailableCovariates = allAvailable
+        scmCandidateCovariates = allAvailable.filter { !coreCovariates.contains($0) }
+        scmIncludedAdditionalCovariates = previousAdditional.intersection(scmCandidateCovariates)
+    }
+
+    private func scmDatasetColumnSet(_ dataFile: String) -> Set<String> {
+        guard !dataFile.isEmpty,
+              let record = LLMCommandService.datasetInputRecord(projectURL: projectURL, dataFile: dataFile) else {
+            return []
+        }
+        return Set(record.split(whereSeparator: \.isWhitespace).map { String($0).uppercased() })
+    }
+
     private func recursiveFile(named name: String, in root: URL) -> URL? {
         guard let enumerator = FileManager.default.enumerator(
             at: root,
@@ -7697,29 +7728,18 @@ final class WorkbenchStore: ObservableObject {
             let profile = LLMCommandService.analyzeDataset(projectURL: projectURL, dataFile: resolvedData,
                                                            log: { msg in Task { @MainActor in self.runner.append(msg) } })
 
-            // Read $INPUT from model for fallback when dataset analysis returns no covariates
+            // Candidate covariates must exist in BOTH the model $INPUT and the selected CSV.
             let modPath = projectURL.appendingPathComponent("run\(runID).mod")
-            let modelInput: Set<String>
-            if let modText = try? String(contentsOf: modPath, encoding: .utf8) {
-                modelInput = detectModelInput(in: modText)
-            } else {
-                modelInput = []
-            }
-
-            // Fallback: if dataset profile has zero covariates but $INPUT does, use $INPUT
-            let dsAllFalse = !profile.hasWT && !profile.hasAGE && !profile.hasSEX
-                && !profile.hasSTUDY && profile.additionalCovariates.isEmpty
-            let knownInputCovariates: Set<String> = ["WT", "AGE", "SEX", "STUDY", "STUD", "STUDYID", "STUDYNO",
-                "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE", "ROUTE", "ADA",
-                "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"]
-            let inputHasAny = !modelInput.intersection(knownInputCovariates).isEmpty
-            let useFallback = dsAllFalse && inputHasAny
-            let showWT  = useFallback ? modelInput.contains("WT")  : profile.hasWT
-            let showAGE = useFallback ? modelInput.contains("AGE") : profile.hasAGE
-            let showSEX = useFallback ? modelInput.contains("SEX") : profile.hasSEX
-            let showSTUDY = useFallback ? (modelInput.contains("STUD") || modelInput.contains("STUDY")) : profile.hasSTUDY
-
-            let studyDisplayName = showSTUDY ? (modelInput.contains("STUDY") ? "STUDY" : "STUD") : nil
+            let modText = (try? String(contentsOf: modPath, encoding: .utf8)) ?? ""
+            let datasetColumns = scmDatasetColumnSet(resolvedData)
+            let uiAvailable = Set(scmAvailableCovariates)
+            let availableCovariates = !uiAvailable.isEmpty
+                ? uiAvailable.intersection(datasetColumns)
+                : Set(covariateColumns(from: modText)).intersection(datasetColumns)
+            let showWT = availableCovariates.contains("WT")
+            let showAGE = availableCovariates.contains("AGE")
+            let showSEX = availableCovariates.contains("SEX")
+            let showSTUDY = availableCovariates.contains("STUDY")
             let ofvForward = ofvForPValue(Double(pForward) ?? 0.01)
             let ofvBackward = ofvForPValue(Double(pBackward) ?? 0.001)
 
@@ -7728,8 +7748,12 @@ final class WorkbenchStore: ObservableObject {
             if scmIncludeWT && showWT { included.insert("WT") }
             if scmIncludeAGE && showAGE { included.insert("AGE") }
             if scmIncludeSEX && showSEX { included.insert("SEX") }
-            if scmIncludeSTUDY && showSTUDY { included.insert(studyDisplayName ?? "STUDY") }
-            for cov in scmCandidateCovariates where scmIncludedAdditionalCovariates.contains(cov) && modelInput.contains(cov) {
+            if scmIncludeSTUDY && showSTUDY { included.insert("STUDY") }
+            if scmIncludeSTUDY && availableCovariates.contains("STUD") && !scmCandidateCovariates.contains("STUD") {
+                included.insert("STUD")
+            }
+            for cov in scmCandidateCovariates
+            where scmIncludedAdditionalCovariates.contains(cov) && availableCovariates.contains(cov) {
                 included.insert(cov)
             }
 
@@ -7837,16 +7861,14 @@ final class WorkbenchStore: ObservableObject {
         scmDataFileName = csvs.first ?? dataFile
         scmPForward = "0.01"
         scmPBackward = "0.001"
-        let selectedModURL = projectURL.appendingPathComponent("run\(scmModelRunID).mod")
-        let selectedModText = (try? String(contentsOf: selectedModURL, encoding: .utf8)) ?? ""
-        let coreCovariates = Set(["WT", "AGE", "SEX", "STUDY", "STUD"])
-        scmCandidateCovariates = covariateColumns(from: selectedModText)
-            .filter { !coreCovariates.contains($0) }
         // Default: examine all candidate covariates
         scmIncludeWT = true
         scmIncludeAGE = true
         scmIncludeSEX = true
         scmIncludeSTUDY = true
+        scmAvailableCovariates = []
+        scmCandidateCovariates = []
+        refreshSCMCandidateCovariates()
         scmIncludedAdditionalCovariates = Set(scmCandidateCovariates)
         applyETAScreeningDefaultsIfAvailable(for: scmModelRunID)
         showSCMDialog = true
