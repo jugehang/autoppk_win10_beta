@@ -171,6 +171,56 @@ p_individual <- ggplot(d_ind, aes(x = TIME, y = DV, group = ID)) +
     panel.grid.minor = element_blank()
   )
 
+# 6b. Individual C-T curves grouped by dose and/or route
+if (length(levels(d_obs$DOSE_GROUP)) > 1) {
+  p_individual_dose <- ggplot(d_ind, aes(x = TIME, y = DV, group = ID, color = factor(ID))) +
+    geom_line(alpha = 0.65, linewidth = 0.6) +
+    geom_point(size = 1.2, alpha = 0.7) +
+    facet_wrap(~DOSE_GROUP, scales = "free_y") +
+    scale_y_log10(
+      labels = function(x) format(x, scientific = FALSE, digits = 3, trim = TRUE),
+      breaks = trans_breaks("log10", function(x) 10^x)
+    ) +
+    labs(
+      title = "Individual C-T Curves by Dose",
+      subtitle = paste0("First ", length(ids_to_plot), " subjects  |  Each line = one subject"),
+      x = "Time",
+      y = "Concentration"
+    ) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "none", panel.grid.minor = element_blank())
+  ggsave(paste0(out_prefix, "_individual_ct_by_dose.png"), p_individual_dose,
+         width = 12, height = 8, dpi = 150, bg = "white")
+  cat(sprintf(">>> Individual C-T by dose saved: %s_individual_ct_by_dose.png\n", out_prefix))
+}
+
+if (has_route && "ROUTE" %in% names(d_obs)) {
+  route_vals <- d_obs$ROUTE[!is.na(d_obs$ROUTE) & trimws(as.character(d_obs$ROUTE)) != ""]
+  if (length(unique(route_vals)) >= 2) {
+    d_ind_route <- d_ind %>%
+      mutate(ROUTE_GROUP = factor(ROUTE))
+    p_individual_route <- ggplot(d_ind_route, aes(x = TIME, y = DV, group = ID, color = factor(ID))) +
+      geom_line(alpha = 0.65, linewidth = 0.6) +
+      geom_point(size = 1.2, alpha = 0.7) +
+      facet_wrap(~ROUTE_GROUP, scales = "free_y") +
+      scale_y_log10(
+        labels = function(x) format(x, scientific = FALSE, digits = 3, trim = TRUE),
+        breaks = trans_breaks("log10", function(x) 10^x)
+      ) +
+      labs(
+        title = "Individual C-T Curves by Route",
+        subtitle = paste0("First ", length(ids_to_plot), " subjects  |  Each line = one subject"),
+        x = "Time",
+        y = "Concentration"
+      ) +
+      theme_bw(base_size = 11) +
+      theme(legend.position = "none", panel.grid.minor = element_blank())
+    ggsave(paste0(out_prefix, "_individual_ct_by_route.png"), p_individual_route,
+           width = 12, height = 8, dpi = 150, bg = "white")
+    cat(sprintf(">>> Individual C-T by route saved: %s_individual_ct_by_route.png\n", out_prefix))
+  }
+}
+
 # ---- 7. Panel 2: Population C-T by Dose Group ----
 p_population <- ggplot(d_obs, aes(x = TIME, y = DV, color = DOSE_GROUP, group = DOSE_GROUP)) +
   geom_point(alpha = 0.25, size = 1) +

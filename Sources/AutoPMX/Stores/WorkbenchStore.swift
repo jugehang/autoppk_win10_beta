@@ -5954,6 +5954,24 @@ final class WorkbenchStore: ObservableObject {
                 assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.ctAnalysisComplete, profile.summary)))
                 updateLastThinkingStep(type: .done, detail: "\(profile.route) route, \(profile.subjectCount) subjects, \(dataCovariateSummary(profile))")
 
+                if !resolvedR().isEmpty {
+                    automationStep = "Exploratory data analysis"
+                    addThinkingStep("Running EDA: covariate distributions and demographics", type: .working)
+                    _ = await runner.runAndWait(
+                        command: pythonBridgeCommandForDataset(task: "eda", dataFile: activeDataFile),
+                        in: projectURL
+                    )
+                    try checkAutomationStop("EDA")
+
+                    automationStep = "Plotting individual C-T curves"
+                    addThinkingStep("Plotting individual C-T curves by dose/route", type: .working)
+                    _ = await runner.runAndWait(
+                        command: pythonBridgeCommandForDataset(task: "ct-curves", dataFile: activeDataFile),
+                        in: projectURL
+                    )
+                    try checkAutomationStop("C-T curves")
+                }
+
                 // Run dose-normalized C-T plot + lag / elimination / exposure analysis
                 var lagInfo: (
                     hasLag: Bool, lagTime: Double, recommendation: String,

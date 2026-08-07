@@ -179,6 +179,70 @@ for (cov in available_covs) {
   plot_list[[paste0("cov_", cov)]] <- p_cov
 }
 
+# 7b2. Demographic statistics / distribution grouped by dose or route
+demographic_candidates <- c("WT", "AGE", "SEX", "RACE", "HT", "BMI", "CRCL", "ADA", "STUDY", "STUD")
+demographic_covs <- intersect(demographic_candidates, names(d))
+group_candidates <- c("DOSE", "ROUTE")
+valid_groups <- intersect(group_candidates, names(d))
+valid_groups <- valid_groups[sapply(valid_groups, function(col) {
+  vals <- d[[col]]
+  vals <- vals[!is.na(vals) & trimws(as.character(vals)) != ""]
+  length(unique(vals)) >= 2 && length(vals) >= 10
+})]
+
+if (length(demographic_covs) > 0 && length(valid_groups) > 0) {
+  subj_dem <- d %>% distinct(ID, .keep_all = TRUE)
+  for (group_col in valid_groups) {
+    if (group_col %in% names(subj_dem)) {
+      subj_dem[[paste0("GRP_", group_col)]] <- factor(subj_dem[[group_col]])
+    }
+    for (cov in demographic_covs) {
+      if (!cov %in% names(subj_dem)) next
+      grp_var <- paste0("GRP_", group_col)
+      valid_rows <- subj_dem %>% filter(!is.na(.data[[cov]]), !is.na(.data[[grp_var]]))
+      if (nrow(valid_rows) == 0 || length(unique(valid_rows[[grp_var]])) < 2) next
+      if (is.numeric(valid_rows[[cov]])) {
+        p_dem <- ggplot(valid_rows, aes(x = .data[[grp_var]], y = .data[[cov]], fill = .data[[grp_var]])) +
+          geom_boxplot(alpha = 0.75, outlier.size = 1.2) +
+          geom_jitter(width = 0.18, alpha = 0.35, size = 0.9, color = "gray20") +
+          stat_summary(fun = median, geom = "point", shape = 18, size = 3, color = "black") +
+          labs(
+            title = paste(cov, "by", group_col),
+            subtitle = paste0("Subject-level demographic distribution"),
+            x = group_col,
+            y = cov
+          ) +
+          theme_bw(base_size = 11) +
+          theme(legend.position = "none")
+      } else {
+        p_dem <- ggplot(valid_rows, aes(x = .data[[cov]], fill = .data[[grp_var]])) +
+          geom_bar(position = "fill", color = "white", alpha = 0.85) +
+          scale_y_continuous(labels = percent_format()) +
+          labs(
+            title = paste(cov, "Composition by", group_col),
+            subtitle = paste0("Subject-level proportions"),
+            x = cov,
+            y = "Proportion"
+          ) +
+          theme_bw(base_size = 11) +
+          theme(axis.text.x = element_text(angle = 35, hjust = 1))
+      }
+      plot_list[[paste0("dem_", cov, "_by_", group_col)]] <- p_dem
+    }
+  }
+
+  dem_export_cols <- c("ID", demographic_covs, valid_groups)
+  dem_export_cols <- intersect(dem_export_cols, names(d))
+  dem_export <- d %>%
+    distinct(ID, .keep_all = TRUE) %>%
+    select(any_of(dem_export_cols))
+  if (nrow(dem_export) > 0) {
+    dem_csv <- paste0(out_prefix, "_demographics.csv")
+    write.csv(dem_export, dem_csv, row.names = FALSE)
+    cat(sprintf(">>> Demographics table saved: %s\n", dem_csv))
+  }
+}
+
 # 7c. Spaghetti plot (DV vs TIME)
 d_obs <- d %>% filter(!is.na(DV) & !is.na(TIME) & DV > 0)
 if (nrow(d_obs) > 0) {
