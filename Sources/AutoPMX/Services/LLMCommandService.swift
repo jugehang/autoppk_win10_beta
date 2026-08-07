@@ -3047,12 +3047,9 @@ struct LLMCommandService {
     /// change assay/route-specific residual behavior.
     static func enforceIVAnchorHandoffFixes(_ modText: String) -> String {
         let fixesReleased = modText.uppercased().contains("AUTOPMX INHERITED FIXES RELEASED")
-        let upperText = modText.uppercased()
+        // Only the deterministic release marker may bypass structural FIX enforcement.
+        // AI comments such as "release all inherited FIXes" are NOT authorization.
         let releaseIntent = fixesReleased
-            || upperText.contains("RELEASE ALL INHERITED")
-            || upperText.contains("RELEASING ALL INHERITED")
-            || upperText.contains("HANDOFF RELEASE")
-            || upperText.contains("FIXES RELEASED")
         let fixedThetas: Set<String> = releaseIntent ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
         let residualThetas = Set(["PROP.RE", "ADD.RE"])
         let fixedOmegas: Set<String> = releaseIntent ? [] : ["CL", "V", "V1", "V2", "V3", "Q", "Q2", "Q3", "Q4"]
@@ -3092,7 +3089,11 @@ struct LLMCommandService {
             let key = normalizedParameterKey(comment)
             var updated = line
             if inTheta, residualThetas.contains(key) {
-                result.append(unfixingResidualThetaLine(line, key: key))
+                if upper.contains("FIX") {
+                    result.append(line)
+                } else {
+                    result.append(unfixingResidualThetaLine(line, key: key))
+                }
                 continue
             }
             if inTheta, fixedThetas.contains(key), !upper.contains("FIX") {
@@ -3345,6 +3346,32 @@ struct LLMCommandService {
             newValue = "(0, \(initial))"
         }
         return comment.isEmpty ? newValue : "\(newValue) ; \(comment)"
+    }
+
+    private static func fixedResidualLabels(in modText: String) -> Set<String> {
+        var labels: Set<String> = []
+        var inTheta = false
+        for line in modText.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("$THETA") {
+                inTheta = true
+                continue
+            }
+            if inTheta && upper.hasPrefix("$") {
+                inTheta = false
+                continue
+            }
+            guard inTheta, upper.contains("FIX") else { continue }
+            let comment = trimmed.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = normalizedParameterKey(comment)
+            if key == "PROP.RE" || key == "ADD.RE" {
+                labels.insert(key)
+            }
+        }
+        return labels
     }
 
     private static func modelLibraryText(projectURL: URL, knowledgeBaseURL: URL? = nil) -> String {
@@ -3999,10 +4026,19 @@ struct LLMCommandService {
             thetaIndex += 1
         }
 
+        let fixedResiduals = fixedResidualLabels(in: parentModText)
         let propThetaIndex = thetaIndex
-        thetaLines.append("(0, \(fmt(thetaMap["PROP.RE"] ?? 0.15))) ; Prop.RE (sd)")
+        if fixedResiduals.contains("PROP.RE") {
+            thetaLines.append("0 FIX ; Prop.RE (sd)")
+        } else {
+            thetaLines.append("(0, \(fmt(thetaMap["PROP.RE"] ?? 0.15))) ; Prop.RE (sd)")
+        }
         let addThetaIndex = thetaIndex + 1
-        thetaLines.append("(0, \(fmt(thetaMap["ADD.RE"] ?? 1.0))) ; Add.RE (sd)")
+        if fixedResiduals.contains("ADD.RE") {
+            thetaLines.append("0 FIX ; Add.RE (sd)")
+        } else {
+            thetaLines.append("(0, \(fmt(thetaMap["ADD.RE"] ?? 1.0))) ; Add.RE (sd)")
+        }
 
         if inputRecord.components(separatedBy: .whitespaces).contains("DUR") {
             if inputRecord.components(separatedBy: .whitespaces).contains("CMT") {
