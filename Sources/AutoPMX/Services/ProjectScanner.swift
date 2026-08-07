@@ -581,7 +581,11 @@ struct ProjectScanner {
             || lowerName.contains("_population_ct")
             || lowerName.contains("_by_")
         )
-        if isExploratoryName || isCTExploratoryImage { return .exploratory }
+        let isExploratoryText = ext == "txt" && (
+            lowerName.hasSuffix("_analysis.txt")
+            || lowerName.hasSuffix("_ct_summary.txt")
+        )
+        if isExploratoryName || isCTExploratoryImage || isExploratoryText { return .exploratory }
 
         // CSV/XLSX files AND NONMEM table files all go under Data
         if ["csv", "xlsx"].contains(ext) ||
