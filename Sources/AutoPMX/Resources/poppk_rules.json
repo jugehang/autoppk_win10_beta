@@ -430,7 +430,7 @@
           "rule_id": "MT-RESID-001",
           "category": "Parameter Estimation",
           "subcategory": "Residual Error",
-          "rule_description": "When Add.RE or Prop.RE has RSE > 100% or is at the zero boundary, rewrite that THETA line as `0 FIX`; never keep a nonzero fixed residual value such as `(0, 1.0) FIX`. Keep the $ERROR block unchanged and do not remove THETA lines.",
+          "rule_description": "When Add.RE or Prop.RE has RSE > 100% or is at the zero boundary, rewrite that THETA line as `0 FIX`; never keep a nonzero fixed residual value such as `(0, 1.0) FIX`. Keep the $ERROR block unchanged and do not remove THETA lines. If residual RSE is acceptable and no boundary estimate exists, keep both components estimated; do not fix residual error merely because the model is being iterated.",
           "source": "AutoPMX residual simplification policy",
           "source_section": "Residual error model",
           "keywords": ["residual", "Add.RE", "Prop.RE", "0 FIX", "RSE"],

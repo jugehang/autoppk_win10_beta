@@ -2015,6 +2015,9 @@ struct LLMCommandService {
         - If Add.err THETA has RSE>100% or ≤1e-6 → set it to `0 FIX` (keep error unchanged)
         - If Prop.err THETA has RSE>100% or ≤1e-6 → set it to `0 FIX` (keep error unchanged)
         - If both → fix the worst one. Only fix ONE at a time.
+        - If neither residual component has RSE>100% or a boundary estimate, keep BOTH estimated.
+          Do NOT fix Add.err/Prop.err merely because the run is being iterated; a healthy
+          residual component is not a simplification target.
         - Do NOT modify $ERROR block. Do NOT remove THETA lines.
         - Replace the THETA value with `0 FIX`. Never write `(0, 1.0) FIX`, `(0, 0.15) FIX`,
           or any other nonzero fixed residual value. Adding `FIX` to a nonzero initial is wrong.

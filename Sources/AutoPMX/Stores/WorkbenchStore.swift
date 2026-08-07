@@ -3467,6 +3467,117 @@ final class WorkbenchStore: ObservableObject {
         return result.joined(separator: "\n")
     }
 
+    /// Prevent the AI from fixing a residual component unless the parent run actually
+    /// justifies it. The evaluation evidence may be fine (e.g. Add.RE RSE ~8%) while the
+    /// model still decides to simplify the error model. That is exactly the behavior the
+    /// hard gate below blocks: residual simplification is only legal when the parent has
+    /// a high residual RSE/boundary or already carries a fixed residual component.
+    private func protectResidualEstimation(_ modText: String, sourceModText: String, runID: String) -> String {
+        let sourceResiduals = residualThetaEntries(in: sourceModText)
+        let sourceFixedLabels = Set(sourceResiduals.filter { $0.isFixed }.map { $0.label })
+
+        let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+        let unstableLabels = Set(rows.compactMap { row -> String? in
+            row.group == "Residual"
+                && ((row.rsePercent ?? 0) > 100 || abs(row.estimate) <= 1e-6)
+                ? normalizedParameterLabel(row.name)
+                : nil
+        })
+
+        let sourceByLabel = Dictionary(
+            sourceResiduals.map { ($0.label, $0.line) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let residualPattern = residualLabelPattern
+        let lines = modText.components(separatedBy: "\n")
+        var result = lines
+        var restored = false
+        var inTheta = false
+
+        for (index, line) in lines.enumerated() {
+            let upper = line.uppercased()
+            if upper.hasPrefix("$THETA") {
+                inTheta = true
+                continue
+            }
+            if inTheta && upper.hasPrefix("$") {
+                inTheta = false
+                continue
+            }
+            guard inTheta, upper.contains("FIX") else { continue }
+
+            let comment = line.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !comment.isEmpty,
+                  residualPattern.firstMatch(
+                    in: comment, options: [],
+                    range: NSRange(location: 0, length: comment.utf16.count)
+                  ) != nil else { continue }
+
+            let label = normalizedParameterLabel(comment)
+            if sourceFixedLabels.contains(label) || unstableLabels.contains(label) {
+                continue
+            }
+            if let sourceLine = sourceByLabel[label] {
+                result[index] = sourceLine
+            } else {
+                let valuePart = line.components(separatedBy: ";").first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let restoredValue = valuePart
+                    .replacingOccurrences(
+                        of: #"\s*FIX\s*"#,
+                        with: " ",
+                        options: .regularExpression
+                    )
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                result[index] = restoredValue.isEmpty ? line : restoredValue
+            }
+            restored = true
+        }
+
+        if restored {
+            runner.append("Protected residual estimation: run\(runID) residual RSE was acceptable; removed unrequested residual FIX from drafted model.")
+        }
+        return result.joined(separator: "\n")
+    }
+
+    private var residualLabelPattern: NSRegularExpression {
+        let pattern = #"(?:Add|Prop)\.\s*RE|(?:additive|proportional|residual)\s*error|(?:additive|proportional|residual)\s*err|\.RE\b|\.err\b"#
+        return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    }
+
+    private func residualThetaEntries(in text: String) -> [(label: String, line: String, isFixed: Bool)] {
+        var entries: [(label: String, line: String, isFixed: Bool)] = []
+        var inTheta = false
+        for line in text.components(separatedBy: "\n") {
+            let upper = line.uppercased()
+            if upper.hasPrefix("$THETA"), !upper.hasPrefix("$THETAP") {
+                inTheta = true
+                continue
+            }
+            if inTheta && upper.hasPrefix("$") {
+                inTheta = false
+                continue
+            }
+            guard inTheta else { continue }
+            let comment = line.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !comment.isEmpty,
+                  residualLabelPattern.firstMatch(
+                    in: comment, options: [],
+                    range: NSRange(location: 0, length: comment.utf16.count)
+                  ) != nil else { continue }
+            entries.append((
+                label: normalizedParameterLabel(comment),
+                line: line,
+                isFixed: upper.contains("FIX")
+            ))
+        }
+        return entries
+    }
+
     /// Hard-code-level S1/S2 unit guard: corrects the scale expression from the
     /// actual AMT/DV units instead of trusting the LLM to remember /1000.
     private func correctS1Scaling(_ modText: String) -> String {
@@ -4809,6 +4920,9 @@ final class WorkbenchStore: ObservableObject {
                 projectURL: projectURL,
                 dataFile: dataFile
             )
+            if let sourceModText = try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8) {
+                drafted = protectResidualEstimation(drafted, sourceModText: sourceModText, runID: sourceRun)
+            }
             drafted = enforceZeroFixForResidualError(drafted)
             drafted = withETATableRecord(drafted, runID: nextRun)
             drafted = LLMCommandService.applyingIVInfusionDurationFix(drafted)
@@ -5576,6 +5690,9 @@ final class WorkbenchStore: ObservableObject {
                         dataFile: activeDataFile
                     )
                     draftedModel = normalizeTypicalValueNaming(draftedModel)
+                    if let sourceModText = try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8) {
+                        draftedModel = protectResidualEstimation(draftedModel, sourceModText: sourceModText, runID: sourceRun)
+                    }
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     draftedModel = LLMCommandService.applyingIVInfusionDurationFix(draftedModel)
@@ -6658,6 +6775,9 @@ final class WorkbenchStore: ObservableObject {
                         runner.append("Released inherited structural FIXes in run\(nextRun).mod; parameters will be re-estimated on the full mixed dataset.")
                     }
                     draftedModel = normalizeTypicalValueNaming(draftedModel)
+                    if let sourceModText = try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8) {
+                        draftedModel = protectResidualEstimation(draftedModel, sourceModText: sourceModText, runID: sourceRun)
+                    }
                     draftedModel = enforceZeroFixForResidualError(draftedModel)
                     draftedModel = withETATableRecord(draftedModel, runID: nextRun)
                     draftedModel = correctS1Scaling(draftedModel)
