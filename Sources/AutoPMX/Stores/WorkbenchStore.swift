@@ -5490,7 +5490,10 @@ final class WorkbenchStore: ObservableObject {
                 let profile = LLMCommandService.analyzeDataset(projectURL: projectURL, dataFile: activeDataFile)
                 resetTokenUsage()
                 let ruleContext = activeRuleContext(phase: "phase2")
-                let rules = ruleContext.text
+                let skillCtx = PPKSkillStore.shared.contextBlock(for: [
+                    "modeling", "phase2", "covariate", "convergence", "SCM", "optimization"
+                ])
+                let rules = ruleContext.text + (skillCtx.isEmpty ? "" : "\n\n" + skillCtx)
                 // Stable session id so DeepSeek keeps the prompt-cache alive (~1h) across iterations.
                 let automationSessionId = UUID().uuidString
                 var modelRuns = automationModelRuns()
@@ -5857,6 +5860,12 @@ final class WorkbenchStore: ObservableObject {
                 }
                 // Carry over the globally-stored PPK skills (success patterns + lessons distilled by DuDu PMx)
                 // so a freshly-created sub-project still inherits previously learned modeling techniques.
+                let sourceInsights = sourceForCopy.appendingPathComponent(".autopmx_ppk_insights.json")
+                let demoInsights = demo.appendingPathComponent(".autopmx_ppk_insights.json")
+                if FileManager.default.fileExists(atPath: sourceInsights.path) {
+                    try? FileManager.default.removeItem(at: demoInsights)
+                    try? FileManager.default.copyItem(at: sourceInsights, to: demoInsights)
+                }
                 PPKSkillStore.shared.load(from: demo)
                 refreshWorkspace()
                 if let handoff = ivHandoff, let sourceURL = ivHandoffSourceProjectURL {
@@ -5928,7 +5937,11 @@ final class WorkbenchStore: ObservableObject {
                 updateLastThinkingStep(type: .done, detail: projectURL.lastPathComponent)
 
                 let ruleContext = activeRuleContext(userGuidance: userGuidance, phase: "phase1")
-                let rules = ruleContext.text
+                let skillCtx = PPKSkillStore.shared.contextBlock(for: [
+                    "modeling", "phase1", "estimation", "convergence", "residual",
+                    "IIV", "OMEGA", "model structure", "S+C"
+                ])
+                let rules = ruleContext.text + (skillCtx.isEmpty ? "" : "\n\n" + skillCtx)
                 ruleContextStatus = ruleContext.summary
                 runner.append("Rule context for DuDu PMx: \(ruleContext.summary)")
 
@@ -6385,6 +6398,8 @@ final class WorkbenchStore: ObservableObject {
                     var fullEvidence = """
                     Dataset: \(profile.summary)
 
+                    \(skillCtx)
+
                     \(evidence)
                     """
                     // Hard estimation status injected BEFORE the AI evaluates, so the model cannot
@@ -6718,7 +6733,7 @@ final class WorkbenchStore: ObservableObject {
                         sourceRun: sourceRun,
                         nextRun: nextRun,
                         rules: rules,
-                        diagnosticSummary: "\(decision)\n\n\(evidence)",
+                        diagnosticSummary: "\(decision)\n\n\(skillCtx)\n\n\(evidence)",
                         isCovariatePhase: covariatePhase,
                         forceCompartmentEscalation: forceEscalation,
                         forceSameCompartment: forceSameCompartment,
