@@ -427,6 +427,16 @@
           "phase": "both"
         },
         {
+          "rule_id": "MT-RANDOM-006",
+          "category": "Parameter Estimation",
+          "subcategory": "$OMEGA",
+          "rule_description": "During final tuning, if an estimated IIV/OMEGA variance is <= 0.001 (for example 0.0007), treat it as negligible IIV and write that OMEGA row as `0 FIX`. Keep ETA numbering contiguous; retaining the ETA with `0 FIX` is preferred unless all IIV terms are removed and renumbering is clean. This reduces covariance instability without changing the structural model.",
+          "source": "AutoPMX final tuning IIV policy",
+          "source_section": "IIV / OMEGA fixing policy",
+          "keywords": ["OMEGA", "IIV", "tiny", "negligible", "0 FIX", "final tuning"],
+          "phase": "both"
+        },
+        {
           "rule_id": "MT-RESID-001",
           "category": "Parameter Estimation",
           "subcategory": "Residual Error",

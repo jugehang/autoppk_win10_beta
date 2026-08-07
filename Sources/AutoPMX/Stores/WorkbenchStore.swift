@@ -205,6 +205,7 @@ enum DuDuPersonality: String, CaseIterable, Identifiable {
 final class WorkbenchStore: ObservableObject {
     private static let pinnedAssetDefaultsKey = "AutoPMX.pinnedAssetIDs.v1"
     private static let recentProjectsKey = "AutoPMX.recentProjects.v1"
+    private static let negligibleIIVVarianceThreshold = 0.001
 
     @Published var workspaceURL: URL
     @Published var projectURL: URL
@@ -5042,6 +5043,104 @@ final class WorkbenchStore: ObservableObject {
         return nil
     }
 
+    /// During final tuning, tiny IIV variances add covariance instability without
+    /// meaningful explanatory power. Rewrite them as `0 FIX` while keeping the ETA
+    /// numbering and $PK definitions intact.
+    private func forceFixTinyIIVInMod(_ modText: String, runID: String) -> String {
+        let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+        let tiny = rows.filter {
+            $0.group == "IIV"
+                && $0.estimate.isFinite
+                && $0.estimate > 0
+                && $0.estimate <= Self.negligibleIIVVarianceThreshold
+        }
+        guard !tiny.isEmpty else { return modText }
+
+        var result = modText
+        for row in tiny {
+            let target = normalizedParameterLabel(row.name)
+            guard !target.isEmpty else { continue }
+            let lines = result.components(separatedBy: "\n")
+            guard let index = omegaLineIndex(matching: target, in: lines) else { continue }
+            let line = lines[index]
+            guard !line.uppercased().contains("FIX") else { continue }
+            let comment = line.firstIndex(of: ";").map { String(line[$0...]) } ?? ""
+            var updated = lines
+            updated[index] = comment.isEmpty ? "0 FIX" : "0 FIX  \(comment)"
+            result = updated.joined(separator: "\n")
+        }
+
+        if result != modText {
+            runner.append("  → Fixed negligible IIV(s) to 0 FIX (OMEGA variance ≤ \(Self.negligibleIIVVarianceThreshold))")
+        }
+        return result
+    }
+
+    private func performFinalTinyIIVFixIfNeeded(for runID: String) async -> String? {
+        let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+        let hasTinyIIV = rows.contains {
+            $0.group == "IIV"
+                && $0.estimate.isFinite
+                && $0.estimate > 0
+                && $0.estimate <= Self.negligibleIIVVarianceThreshold
+        }
+        guard hasTinyIIV else { return nil }
+
+        let sourceURL = projectURL.appendingPathComponent("run\(runID).mod")
+        guard let sourceText = try? String(contentsOf: sourceURL, encoding: .utf8) else { return nil }
+        let nextRunID = nextChildRunID(parent: runID)
+        let activeDataFile = automationDataFile.isEmpty ? dataFile : automationDataFile
+
+        runner.append("Final tuning: tiny OMEGA variance detected in run\(runID); drafting run\(nextRunID) with negligible IIV fixed to 0 FIX.")
+        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+            "最终调优：run\(runID) 有极小 IIV，自动生成 run\(nextRunID) 将 OMEGA 固定到 0 FIX。",
+            "Final tuning: run\(runID) contains negligible IIV; drafting run\(nextRunID) with those OMEGA entries fixed to 0 FIX."
+        )))
+
+        var drafted = forceFixTinyIIVInMod(sourceText, runID: runID)
+        drafted = drafted.replacingOccurrences(of: "run\(runID)", with: "run\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "RUN\(runID)", with: "RUN\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "Run\(runID)", with: "Run\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "SDTAB\(runID)", with: "SDTAB\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "PATAB\(runID)", with: "PATAB\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "CATAB\(runID)", with: "CATAB\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "COTAB\(runID)", with: "COTAB\(nextRunID)")
+        drafted = drafted.replacingOccurrences(of: "run\(runID).ETA", with: "run\(nextRunID).ETA")
+        drafted = LLMCommandService.sanitizeControlStream(
+            drafted,
+            projectURL: projectURL,
+            dataFile: activeDataFile
+        )
+        drafted = enforceZeroFixForResidualError(drafted)
+        drafted = withETATableRecord(drafted, runID: nextRunID)
+        drafted = correctS1Scaling(drafted)
+        drafted = LLMCommandService.applyingIVInfusionDurationFix(drafted)
+        drafted = LLMCommandService.normalizingTableRecords(drafted, runID: nextRunID)
+
+        let nextURL = projectURL.appendingPathComponent("run\(nextRunID).mod")
+        guardModFileWrite(drafted, to: nextURL, label: "run\(nextRunID).mod (final tuning)")
+        refreshWorkspace()
+
+        let validation = await validateModel(nextRunID)
+        if !validation.passed {
+            _ = await autoFixModel(nextRunID)
+        }
+
+        let exit = await runner.runAndWait(command: psnRunCommand(runID: nextRunID), in: projectURL)
+        refreshWorkspace()
+        guard exit == 0, isModelStable(runID: nextRunID) else {
+            runner.append("Final tuning run\(nextRunID) did not achieve S+C; keeping run\(runID) as the final model.")
+            return nil
+        }
+
+        currentRun = nextRunID
+        previousRun = runID
+        commandText = psnRunCommand(runID: nextRunID)
+        markAIModel(runID: nextRunID)
+        runner.append("Final tuned model run\(nextRunID) achieved S+C with negligible IIV fixed to 0 FIX.")
+        return nextRunID
+    }
+
     private func extractThetaLabels(from modText: String) -> [String] {
         let lines = modText.components(separatedBy: "\n")
         var inTheta = false
@@ -7104,13 +7203,22 @@ final class WorkbenchStore: ObservableObject {
         runner.append("=== Final model package for run\(runID): PK parameters + diagnostics ===")
         activateRun(runID)
         Task {
-            let pkCommand = pythonBridgeCommand(task: "pk-parameters", previous: previousRun, current: runID)
+            var finalRunID = runID
+            var effectivePreviousRun = previousRun
+            if let tunedRunID = await performFinalTinyIIVFixIfNeeded(for: runID) {
+                finalRunID = tunedRunID
+                effectivePreviousRun = runID
+                bootstrapFinalRunID = tunedRunID
+                activateRun(tunedRunID)
+            }
+
+            let pkCommand = pythonBridgeCommand(task: "pk-parameters", previous: effectivePreviousRun, current: finalRunID)
             _ = await runner.runAndWait(command: pkCommand, in: projectURL)
 
-            let diagnosticsCommand = pythonBridgeCommand(task: "r-diagnostics", previous: previousRun, current: runID)
+            let diagnosticsCommand = pythonBridgeCommand(task: "r-diagnostics", previous: effectivePreviousRun, current: finalRunID)
             _ = await runner.runAndWait(command: diagnosticsCommand, in: projectURL)
 
-            bootstrapSheetRunID = runID
+            bootstrapSheetRunID = finalRunID
             isBootstrapSheetPresented = true
         }
     }

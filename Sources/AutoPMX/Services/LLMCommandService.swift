@@ -2042,6 +2042,10 @@ struct LLMCommandService {
           Only fix central IIV (CL, V) if ALL peripherals are already fixed AND
           central IIV still has RSE > 50%.
         - New escalation IIV starts at 0.04. Fix one at a time.
+        - FINAL TUNING TINY IIV RULE: during final tuning, if an S+C run has an estimated
+          OMEGA variance <= 0.001 (for example IIV KA = 0.0007), treat it as negligible IIV.
+          Write that OMEGA row as `0 FIX` and keep the ETA in $PK so numbering stays
+          contiguous. Multiple tiny OMEGA entries may be fixed in the same final-tuning round.
 
         ═══ HIGH-COMPARTMENT STOP RULE ═══
         3-comp that achieves S+C but has persistent high %RSE (>50%) on peripheral
