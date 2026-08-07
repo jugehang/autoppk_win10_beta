@@ -6076,12 +6076,12 @@ final class WorkbenchStore: ObservableObject {
 
                 // Run dose-normalized C-T plot + lag / elimination / exposure analysis
                 var lagInfo: (
-                    hasLag: Bool, lagTime: Double, recommendation: String,
+                    hasLag: Bool, lagTime: Double, kaInitial: Double, kaTmaxMedian: Double, recommendation: String,
                     elimSimilar: Bool, elimReliable: Bool, elimDetail: String,
                     linearPK: Bool, exposureDetail: String,
                     firstDoseElimSimilar: Bool, firstDoseElimDetail: String, multiDose: Bool,
                     route: String, compartmentSuspected: Bool, compartmentShapeDetail: String
-                ) = (false, 0, "", true, false, "", true, "", true, "", false, "Unknown", false, "")
+                ) = (false, 0, 0.2, 0, "", true, false, "", true, "", true, "", false, "Unknown", false, "")
                 if resolvedR().isEmpty == false {
                     addThinkingStep("Plotting dose-normalized C-T curves", type: .working)
                     lagInfo = await runCTAnalysis(dataFile: activeDataFile)
@@ -6223,6 +6223,8 @@ final class WorkbenchStore: ObservableObject {
                         apiKey: llmAPIKey,
                         hasLag: lagInfo.hasLag,
                         lagTime: lagInfo.lagTime,
+                        kaInitial: lagInfo.kaInitial,
+                        kaTmaxMedian: lagInfo.kaTmaxMedian,
                         elimSimilar: lagInfo.elimSimilar,
                         elimReliable: lagInfo.elimReliable,
                         elimDetail: lagInfo.elimDetail,
@@ -6354,6 +6356,7 @@ final class WorkbenchStore: ObservableObject {
                         parentCompartments: handoff.compartments,
                         hasIV: hasIV,
                         hasExtravascular: hasExtravascular,
+                        kaInitial: lagInfo.kaInitial,
                         timeUnit: timeUnit,
                         derivedCLUnit: derivedCLUnit,
                         derivedVUnit: derivedVUnit,
@@ -9693,7 +9696,7 @@ final class WorkbenchStore: ObservableObject {
 
     /// Run dose-normalized C-T analysis (lag, elimination, exposure similarity) via R
     private func runCTAnalysis(dataFile: String) async -> (
-        hasLag: Bool, lagTime: Double, recommendation: String,
+        hasLag: Bool, lagTime: Double, kaInitial: Double, kaTmaxMedian: Double, recommendation: String,
         elimSimilar: Bool, elimReliable: Bool, elimDetail: String,
         linearPK: Bool, exposureDetail: String,
         firstDoseElimSimilar: Bool, firstDoseElimDetail: String, multiDose: Bool,
@@ -9702,12 +9705,12 @@ final class WorkbenchStore: ObservableObject {
         let rscript = resolvedR()
         guard !rscript.isEmpty else {
             runner.append("CT analysis skipped: R not configured (set R path in Settings)")
-            return (false, 0, "R not configured", true, false, "", true, "", true, "", false, "Unknown", false, "")
+            return (false, 0, 0.2, 0, "R not configured", true, false, "", true, "", true, "", false, "Unknown", false, "")
         }
         let ctScript = findOrCopyCTScript()
         guard let script = ctScript, FileManager.default.fileExists(atPath: script) else {
             runner.append("CT analysis skipped: dose_normalized_ct_plot.R not found")
-            return (false, 0, "CT analysis script not found", true, false, "", true, "", true, "", false, "Unknown", false, "")
+            return (false, 0, 0.2, 0, "CT analysis script not found", true, false, "", true, "", true, "", false, "Unknown", false, "")
         }
         let csvPath = projectURL.appendingPathComponent(dataFile).path
         let outPrefix = projectURL.appendingPathComponent(dataFile.replacingOccurrences(of: ".csv", with: "")).path
@@ -9731,7 +9734,7 @@ final class WorkbenchStore: ObservableObject {
                 runner.append("  \(line)")
             }
             refreshWorkspace()
-            return (false, 0, "", true, false, "", true, "", true, "", false, "Unknown", false, "")
+            return (false, 0, 0.2, 0, "", true, false, "", true, "", true, "", false, "Unknown", false, "")
         }
         // Show summary lines from R output
         let summaryLines = allOutput.components(separatedBy: "\n").filter { $0.contains("║") || $0.contains(">>>") }
@@ -9742,6 +9745,8 @@ final class WorkbenchStore: ObservableObject {
         // Parse structured output
         var hasLag = false
         var lagTime = 0.0
+        var kaInitial = 0.2
+        var kaTmaxMedian = 0.0
         var recommendation = ""
         var elimSimilar = true
         var elimReliable = false
@@ -9760,6 +9765,12 @@ final class WorkbenchStore: ObservableObject {
                 if line.hasPrefix("HAS_LAG=YES") { hasLag = true }
                 if line.hasPrefix("LAG_TIME="), let val = Double(line.replacingOccurrences(of: "LAG_TIME=", with: "")) {
                     lagTime = val
+                }
+                if line.hasPrefix("KA_INITIAL="), let val = Double(line.replacingOccurrences(of: "KA_INITIAL=", with: "")) {
+                    kaInitial = val
+                }
+                if line.hasPrefix("KA_TMAX_MEDIAN="), let val = Double(line.replacingOccurrences(of: "KA_TMAX_MEDIAN=", with: "")) {
+                    kaTmaxMedian = val
                 }
                 if line.hasPrefix("LAG_RECOMMENDATION=") {
                     recommendation = line.replacingOccurrences(of: "LAG_RECOMMENDATION=", with: "")
@@ -9794,7 +9805,7 @@ final class WorkbenchStore: ObservableObject {
         }
         // Refresh workspace to show new figure
         refreshWorkspace()
-        return (hasLag, lagTime, recommendation, elimSimilar, elimReliable, elimDetail, linearPK, exposureDetail, firstDoseElimSimilar, firstDoseElimDetail, multiDose, route, compartmentSuspected, compartmentShapeDetail)
+        return (hasLag, lagTime, kaInitial, kaTmaxMedian, recommendation, elimSimilar, elimReliable, elimDetail, linearPK, exposureDetail, firstDoseElimSimilar, firstDoseElimDetail, multiDose, route, compartmentSuspected, compartmentShapeDetail)
     }
 
     private func findOrCopyCTScript() -> String? {

@@ -669,6 +669,57 @@ if (n_first > 0 && nrow(first_norm_obs) > 0) {
 firstdose_elim <- list(similar = NA, n_reliable = 0, detail = "No first-dose data.",
                        has_assess = FALSE, half_lives = c(), r2 = c(), reliable_mask = c())
 
+# ---- 8c. NCA-informed KA initial estimate ----
+# NCA does not report KA directly, but first-dose Tmax gives a practical
+# starting value for first-order absorption instead of a generic 0.5.
+estimate_ka_initial <- function(first_obs, all_data) {
+  if (!all(c("ID", "TREL", "DV") %in% names(first_obs))) {
+    return(list(ka = NA_real_, tmax = NA_real_))
+  }
+
+  dosing <- all_data %>% filter(!is.na(AMT) & AMT > 0)
+  sc_ids <- c()
+  if ("CMT" %in% names(dosing)) {
+    sc_ids <- dosing %>% filter(CMT == 1) %>% pull(ID) %>% unique()
+  }
+  if (length(sc_ids) == 0 && "ROUTE" %in% names(dosing)) {
+    sc_ids <- dosing %>%
+      filter(grepl("SC|SUBQ|ORAL|PO|EXTRAVASCULAR", toupper(as.character(ROUTE)))) %>%
+      pull(ID) %>% unique()
+  }
+
+  obs <- if (length(sc_ids) > 0) {
+    first_obs %>% filter(ID %in% sc_ids)
+  } else {
+    first_obs
+  }
+  obs <- obs %>% filter(!is.na(DV) & DV > 0 & !is.na(TREL) & TREL >= 0)
+  if (nrow(obs) < 4) {
+    return(list(ka = NA_real_, tmax = NA_real_))
+  }
+
+  tmax_by_subject <- obs %>%
+    group_by(ID) %>%
+    summarise(TMAX = TREL[which.max(DV)], N = n(), .groups = "drop") %>%
+    filter(is.finite(TMAX) & TMAX > 0 & N >= 2)
+  if (nrow(tmax_by_subject) == 0) {
+    return(list(ka = NA_real_, tmax = NA_real_))
+  }
+
+  med_tmax <- median(tmax_by_subject$TMAX, na.rm = TRUE)
+  if (!is.finite(med_tmax) || med_tmax <= 0) {
+    return(list(ka = NA_real_, tmax = NA_real_))
+  }
+
+  ka <- log(2) / med_tmax
+  ka <- min(max(ka, 1e-4), 5.0)
+  list(ka = ka, tmax = med_tmax)
+}
+
+ka_result <- estimate_ka_initial(d_first_obs, d)
+ka_initial <- ka_result$ka
+ka_tmax_median <- ka_result$tmax
+
 # ---- 9. Absorption lag detection ----
 # For extravascular: check early time points for near-zero DV
 # For IV infusion: typically no lag; skip or flag if early points are zero
@@ -1029,6 +1080,8 @@ writeLines(c(
   paste0("ROUTE=", route_info),
   paste0("DOSE_COLUMN=", dose_col),
   paste0("DOSE_GROUPS=", paste(levels(d_obs_plot$DOSE_GROUP), collapse = ", ")),
+  paste0("KA_INITIAL=", ifelse(is.na(ka_initial), "NA", round(ka_initial, 6))),
+  paste0("KA_TMAX_MEDIAN=", ifelse(is.na(ka_tmax_median), "NA", round(ka_tmax_median, 3))),
   paste0("HAS_LAG=", ifelse(lag_result$has_lag, "YES", "NO")),
   paste0("LAG_TIME=", lag_result$lag_time),
   paste0("LAG_RECOMMENDATION=", lag_result$recommendation),

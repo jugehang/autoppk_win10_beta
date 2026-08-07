@@ -46,6 +46,9 @@ struct ParameterEstimateRow: Identifiable, Hashable {
     }
 
     var estimateText: String {
+        if group == "Fit" {
+            return Self.formatFitEstimate(estimate)
+        }
         if let displayEstimate { return displayEstimate }
         return Self.format(estimate)
     }
@@ -84,6 +87,20 @@ struct ParameterEstimateRow: Identifiable, Hashable {
             return String(format: "%.3E", value)
         }
         return String(format: "%.3g", value)
+    }
+
+    private static func formatFitEstimate(_ value: Double) -> String {
+        guard value.isFinite else { return "NA" }
+        var text = String(format: "%.3f", value)
+        if text.contains(".") {
+            while text.hasSuffix("0") {
+                text.removeLast()
+            }
+            if text.hasSuffix(".") {
+                text.removeLast()
+            }
+        }
+        return text
     }
 }
 
@@ -366,9 +383,11 @@ enum ParameterEstimateParser {
             var idx = 0
             var inTheta = false
             for line in modText.components(separatedBy: .newlines) {
-                let stripped = line.trimmingCharacters(in: .whitespaces)
+                var stripped = line.trimmingCharacters(in: .whitespaces)
                 if stripped.uppercased().hasPrefix("$THETA"), !stripped.uppercased().hasPrefix("$THETAP") {
-                    inTheta = true; continue
+                    inTheta = true
+                    stripped = String(stripped.dropFirst("$THETA".count)).trimmingCharacters(in: .whitespaces)
+                    if stripped.isEmpty { continue }
                 }
                 if inTheta && stripped.hasPrefix("$") { break }
                 if inTheta, !stripped.isEmpty, !stripped.hasPrefix(";") {
@@ -394,9 +413,14 @@ enum ParameterEstimateParser {
             var idx = 0
             var inOmega = false
             for line in modText.components(separatedBy: .newlines) {
-                let stripped = line.trimmingCharacters(in: .whitespaces)
+                var stripped = line.trimmingCharacters(in: .whitespaces)
                 if stripped.uppercased().hasPrefix("$OMEGA"), !stripped.uppercased().hasPrefix("$OMEGAP") {
-                    inOmega = true; continue
+                    inOmega = true
+                    stripped = String(stripped.dropFirst("$OMEGA".count)).trimmingCharacters(in: .whitespaces)
+                    if stripped.isEmpty { continue }
+                    if stripped.uppercased().hasPrefix("BLOCK") || stripped.uppercased().hasPrefix("DIAG") {
+                        continue
+                    }
                 }
                 if inOmega && stripped.hasPrefix("$") { break }
                 if inOmega, !stripped.isEmpty, !stripped.hasPrefix(";") {
@@ -483,15 +507,22 @@ enum ParameterEstimateParser {
         var labels: Set<String> = []
         var inBlock = false
         for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            var trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             let upper = trimmed.uppercased()
             if upper.hasPrefix(blockPrefix) {
                 inBlock = true
-                continue
-            }
-            if inBlock && upper.hasPrefix("$") {
-                inBlock = false
-                continue
+                trimmed = String(trimmed.dropFirst(blockPrefix.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                if blockPrefix == "$OMEGA"
+                    && (trimmed.uppercased().hasPrefix("BLOCK") || trimmed.uppercased().hasPrefix("DIAG")) {
+                    continue
+                }
+            } else {
+                if inBlock && upper.hasPrefix("$") {
+                    inBlock = false
+                    continue
+                }
             }
             guard inBlock, !trimmed.isEmpty, !trimmed.hasPrefix(";") else { continue }
             if fixedOnly && !upper.contains("FIX") { continue }

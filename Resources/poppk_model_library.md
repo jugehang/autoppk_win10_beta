@@ -80,6 +80,7 @@ explicit depot-input implementation, not D1 bolted onto a first-order KA model.
 | `$PK` | Parameters, IIV, covariates, dosing, scaling | Set Q=0, V2=0, KA=0 for unused params in simpler models to keep TABLE safe. |
 | `$ERROR` | Residual error | IPRED=F, W=combined prop+add, Y, IRES, IWRES. |
 | `$THETA` | Fixed-effects | Count must match references. **Structural escalation initial values (CRITICAL for convergence):** When escalating 1-cmt→2-cmt, set peripheral V2≈0.3-0.5×V1 and Q≈0.5-0.8×CL. When escalating 2-cmt→3-cmt, set V3≈0.3-0.5×V1 and Q3≈0.3-0.6×CL. The rationale: the peripheral compartments should start small (rapid equilibrium) so the model is a gentle perturbation from the simpler parent. Starting with large peripheral volumes or high inter-compartment clearances causes immediate minimization failure. MAb typical initials: CL≈0.2-0.5 L/day (0.008-0.02 L/h), V≈3-6 L, Q≈0.3-1 L/day, V2/V3≈2-5 L, KA≈0.2-1 h⁻¹. |
+| `$THETA` | KA initial for SC/mixed mAb | Prefer NCA-informed KA from the dataset's first-dose median Tmax: `KA ≈ ln(2) / median(Tmax)`. Do not force 0.5 for slow SC absorption; SC mAb KA can be far below 0.1 h⁻¹. Clamp the initial to a finite positive range such as 1e-4 to 5 h⁻¹. |
 | `$OMEGA` | ETA variances | Dimensions must match ETA references. Values are variances, not SDs. |
 | `$SIGMA` | EPS scale | 1 FIX; residual SDs as THETA. |
 | `$EST` | Estimation | METHOD=1 INTER MAXEVAL=9999 NOABORT SIG=3 PRINT=10. |

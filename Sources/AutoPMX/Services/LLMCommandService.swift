@@ -844,6 +844,8 @@ struct LLMCommandService {
         apiKey: String = "",
         hasLag: Bool = false,
         lagTime: Double = 0,
+        kaInitial: Double? = nil,
+        kaTmaxMedian: Double? = nil,
         elimSimilar: Bool = true,
         elimReliable: Bool = true,
         elimDetail: String = "",
@@ -1023,6 +1025,8 @@ struct LLMCommandService {
         Prop.RE (sd): use 0.15 (15% CV) — standard for mAb PK assays.
         Add.RE (sd): use \(profile.typicalDV.map { String(format: "%.4f", min(1.0, $0 * 0.05)) } ?? "1.0") — roughly 1-5% of typical DV, capped at 1.0, NEVER exceed 20% of typical DV.
         CRITICAL: Add.RE must be SMALLER than typical DV, not larger. If typical DV is 10 \(concUnit), Add.RE ≈ 0.5 NOT 5.0.
+
+        \(kaInitial.map { "NCA-INFORMED KA INITIAL: use \(String(format: "%.6g", $0)) \(timeUnit)^-1 as the KA $THETA initial instead of the generic 0.5\(kaTmaxMedian.map { " (derived from median first-dose Tmax = \(String(format: "%.3g", $0)) \(timeUnit))" } ?? "")." } ?? "KA INITIAL: if the model has KA, use a data-driven value from NCA Tmax when available; otherwise start around 0.1-0.2, not 0.5 for slow SC absorption.")
 
         AUTOMATION PHASE: Initial 1-Compartment Model.
         This is the FIRST iteration — use the simplest defensible structural model.
@@ -3958,6 +3962,7 @@ struct LLMCommandService {
         parentCompartments: Int,
         hasIV: Bool,
         hasExtravascular: Bool,
+        kaInitial: Double? = nil,
         timeUnit: String,
         derivedCLUnit: String,
         derivedVUnit: String,
@@ -3980,7 +3985,8 @@ struct LLMCommandService {
         default: advan = "ADVAN2 TRANS2"
         }
 
-        var thetaLines = ["(0, \(fmt(thetaMap["KA"] ?? 0.5))) ; KA (1/\(timeUnit))"]
+        let resolvedKA = kaInitial ?? thetaMap["KA"] ?? 0.5
+        var thetaLines = ["(0, \(fmt(resolvedKA))) ; KA (1/\(timeUnit))"]
         var omegaLines = ["0.08 ; IIV KA"]
         var pkLines = ["TVKA=THETA(1)", "KA=TVKA*EXP(ETA(1))"]
         var tableParams = ["KA"]
