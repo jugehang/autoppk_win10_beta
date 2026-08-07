@@ -1294,6 +1294,7 @@ struct LLMCommandService {
         derivedCLUnit: String = "L/h",
         isCovariatePhase: Bool = false,
         isInheritedHandoffMode: Bool = false,
+        forceReAddDroppedIIV: Bool = false,
         apiFormat: APIFormat = .openAICompatible
     ) async throws -> (text: String, usage: TokenUsage?) {
         let url = try endpointURL(baseURL: baseURL, path: "chat/completions")
@@ -1317,6 +1318,16 @@ struct LLMCommandService {
         - Non-zero ETABAR for inherited fixed parameters is expected while those parameters are pinned; the release round addresses it.
         - Do not block acceptance solely because IIV-KA shrinkage is high while structural parameters are still fixed. Re-evaluate RSE after the release round; eta-shrinkage is not an accept/revise criterion.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """ : "")}
+
+        \(forceReAddDroppedIIV ? """
+        ━━━ SCHEDULED IIV RE-EXPLORATION (ONLY ALLOWED UNFIX CYCLE) ━━━
+        The workflow has explicitly scheduled re-adding dropped IIV/ETA terms after the
+        inherited child reached S+C with inherited FIXes released.
+        - If the current run is S+C and still lacks previously dropped structural IIV, output REVISE so the next model re-adds them.
+        - If the current run already re-added those IIV/ETA terms, judge it normally with %RSE; do not request a second cycle.
+        - Do not use eta-shrinkage as the reason for this cycle.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         """ : "")}
 
         ━━━ SELF-CHECK BEFORE ANY ACCEPT (MANDATORY) ━━━
@@ -1416,7 +1427,8 @@ struct LLMCommandService {
         ❌ WRONG: fix an IIV AND fix a residual component in the same run.
         
         ✅ RIGHT: Examine ALL residual error (Add.err, Prop.err) and ALL IIV parameters.
-                  Pick the SINGLE parameter with the WORST RSE% (>100% threshold).
+                  Pick the SINGLE parameter with the WORST RSE%:
+                  residual components use the >100% threshold; IIV/OMEGA uses the >50% threshold.
                   Fix ONLY that one parameter to 0 at the CURRENT compartment.
                   Re-run to confirm stability. THEN consider escalation in a LATER run.
         
@@ -1526,7 +1538,6 @@ struct LLMCommandService {
              → PIN THE PARAMETER TO ZERO, not to its initial value. Change the Add.err
                THETA to a fixed near-zero value so the additive term contributes nothing:
                  Change `(0, 1.0)  ; Add.RE (sd)`  →  `0 FIX  ; Add.RE (sd)`
-               (or `(0, 0.0001) FIX` if a plain `0 FIX` is rejected by the NONMEM build).
              → The FIX keyword pins the parameter at ZERO, so W reduces to proportional-only:
                W = SQRT(THETA(prop)^2*IPRED^2 + 0) = THETA(prop)*IPRED.  Do NOT fix it at
                the initial value (e.g. 1.0) — that would leave a large additive term intact.
@@ -1546,7 +1557,6 @@ struct LLMCommandService {
              → PIN THE PARAMETER TO ZERO. Change the Prop.err THETA to a fixed zero so the
                proportional term contributes nothing:
                  Change `(0, 0.15)  ; Prop.RE (sd)`  →  `0 FIX  ; Prop.RE (sd)`
-               (or `(0, 0.0001) FIX` if a plain `0 FIX` is rejected).
              → W then reduces to the additive-only component. Do NOT fix it at the initial
                value (e.g. 0.15) — that would leave a proportional term intact.
              → Keep $SIGMA 1 FIX.
@@ -1572,26 +1582,24 @@ struct LLMCommandService {
           - If neither component has RSE > 100% → keep combined error, proceed to step 6.
              
         6. After error model is fixed, refine IIV on existing parameters:
-           - Only remove IIV based on %RSE > 100%, repeated convergence/covariance failure, or a boundary
+           - Only remove IIV based on %RSE > 50%, repeated convergence/covariance failure, or a boundary
              estimate. Do NOT use eta-shrinkage as a reason to remove IIV.
-           - PROACTIVE IIV UNFIXING (CRITICAL — DO NOT SKIP):
-             After a model converges successfully (minimization OK, covariance OK):
-             Check $OMEGA block: if ANY peripheral parameter (Q, V2, Q3, V3) has OMEGA = 0 FIX
-             → the NEXT run MUST attempt to unfix/re-add IIV for ONE parameter.
-             Priority order: Q (or Q2) first, then V2, then Q3, then V3.
-             Set OMEGA = 0.04 for the unfixed parameter, add EXP(ETA(n)) in $PK.
-             CHAIN GUARD: do NOT attempt to unfix a peripheral parameter whose CENTRAL relative
-             was fixed — i.e., do NOT unfix V2/V3 if V/V1 IIV is fixed; do NOT unfix Q/Q2/Q3
-             if CL IIV is fixed. They were fixed for a reason and cannot be estimated reliably.
-             Only stop trying when ALL eligible peripheral IIV have been attempted (or blocked by chain).
-             A converged model with fixed peripheral IIV (due to chain or failed attempts) is acceptable
-             as final WITHOUT further unfixing once every eligible param has had one attempt.
+           - IIV RE-EXPLORATION POLICY (anti-oscillation wins by default):
+             A `0 FIX` OMEGA is a valid final state when %RSE, convergence/covariance, or boundary
+             evidence justifies it. Do NOT automatically re-add IIV in the next run.
+             Do NOT start your own fix → unfix → fix cycle.
+             Re-adding dropped IIV is allowed ONLY when the prompt contains the
+             `SCHEDULED IIV RE-EXPLORATION` block above. That is the one explicit exception
+             to the anti-oscillation rule, and it is limited to inherited-child workflow.
+             CHAIN GUARD: never re-add a peripheral IIV whose CENTRAL relative is fixed —
+             do NOT re-add V2/V3 if V/V1 IIV is fixed; do NOT re-add Q/Q2/Q3 if CL IIV is fixed.
 
         COVARIATES ARE FORBIDDEN IN PHASE 1. Any step 6 (covariate) is a PHASE VIOLATION.
         Covariates begin ONLY after Phase 1 ACCEPT transitions to Phase 2.
 
         ANTI-OSCILLATION RULES:
         - NEVER propose a change that UNDOES what the previous iteration just did (e.g., if run(N-1) removed IIV on V, do NOT re-add it in runN).
+          The only exception is an explicit `SCHEDULED IIV RE-EXPLORATION` instruction in the prompt.
         - If both the current and previous iteration propose toggling the error model, STOP and ACCEPT the simpler model. Accept that some parameters cannot be estimated with the available data.
 
         If REVISE, provide:
@@ -2007,7 +2015,12 @@ struct LLMCommandService {
         - If Add.err THETA has RSE>100% or ≤1e-6 → set it to `0 FIX` (keep error unchanged)
         - If Prop.err THETA has RSE>100% or ≤1e-6 → set it to `0 FIX` (keep error unchanged)
         - If both → fix the worst one. Only fix ONE at a time.
-        - Do NOT modify $ERROR block. Do NOT remove THETA lines. Only add `FIX`.
+        - Do NOT modify $ERROR block. Do NOT remove THETA lines.
+        - Replace the THETA value with `0 FIX`. Never write `(0, 1.0) FIX`, `(0, 0.15) FIX`,
+          or any other nonzero fixed residual value. Adding `FIX` to a nonzero initial is wrong.
+        - Inherited handoff override: when the source contains "IV-ANCHOR HANDOFF" or
+          "INHERITED IV ... FIXED", keep Prop.RE/Add.RE estimated and do NOT apply this residual
+          simplification unless the system explicitly asks for it.
 
         IIV STRATEGY — Fix Peripheral IIV FIRST, Central IIV LAST:
         - Priority rule: always fix PERIPHERAL IIV (Q, V2, Q2, V3, Q3) BEFORE central

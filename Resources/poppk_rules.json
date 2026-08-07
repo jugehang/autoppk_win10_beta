@@ -417,6 +417,26 @@
           "phase": "both"
         },
         {
+          "rule_id": "MT-RANDOM-005",
+          "category": "Parameter Estimation",
+          "subcategory": "$OMEGA",
+          "rule_description": "Do NOT automatically re-add an IIV that was fixed in the previous run; anti-oscillation wins. A `0 FIX` OMEGA may remain final when diagnostics justify it. Re-adding dropped IIV is allowed only when the workflow explicitly schedules IIV re-exploration, such as an inherited child model after IV-anchor structural FIXes are released.",
+          "source": "AutoPMX anti-oscillation policy",
+          "source_section": "IIV / OMEGA fixing policy",
+          "keywords": ["OMEGA", "IIV", "anti-oscillation", "re-add", "unfix"],
+          "phase": "both"
+        },
+        {
+          "rule_id": "MT-RESID-001",
+          "category": "Parameter Estimation",
+          "subcategory": "Residual Error",
+          "rule_description": "When Add.RE or Prop.RE has RSE > 100% or is at the zero boundary, rewrite that THETA line as `0 FIX`; never keep a nonzero fixed residual value such as `(0, 1.0) FIX`. Keep the $ERROR block unchanged and do not remove THETA lines.",
+          "source": "AutoPMX residual simplification policy",
+          "source_section": "Residual error model",
+          "keywords": ["residual", "Add.RE", "Prop.RE", "0 FIX", "RSE"],
+          "phase": "both"
+        },
+        {
           "rule_id": "MT-NONMEM-010",
           "category": "Parameter Estimation",
           "subcategory": "$SIGMA",

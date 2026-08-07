@@ -4854,7 +4854,7 @@ final class WorkbenchStore: ObservableObject {
     /// Force-add FIX to RSE-bloated parameters in a mod file.
     /// Scans both $THETA and $OMEGA blocks. For THETA: adds FIX to ANY parameter
     /// whose label comment contains a percent sign or residual indicator.
-    /// For OMEGA: adds FIX to entries with IIV labels when RSE > 100%.
+    /// For OMEGA: adds FIX to entries with IIV labels when RSE > 50%.
     /// Returns the modified text (or unchanged if already FIXed or no problem found).
     private func forceFixUnreliableParameter(_ modText: String, runID: String) -> String {
         let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
@@ -4878,7 +4878,7 @@ final class WorkbenchStore: ObservableObject {
 
         // Otherwise fix ONE unreliable IIV at a time.
         if let iiv = rows.first(where: {
-            $0.group == "IIV" && ($0.rsePercent ?? 0) > 100
+            $0.group == "IIV" && ($0.rsePercent ?? 0) > 50
         }), let index = omegaLineIndex(
             matching: normalizedParameterLabel(iiv.name),
             in: lines
@@ -4887,7 +4887,7 @@ final class WorkbenchStore: ObservableObject {
             let comment = line.firstIndex(of: ";").map { String(line[$0...]) } ?? ""
             var result = lines
             result[index] = comment.isEmpty ? "0 FIX" : "0 FIX  \(comment)"
-            runner.append("  → Fixed \(iiv.name) to 0 FIX (RSE>100%)")
+            runner.append("  → Fixed \(iiv.name) to 0 FIX (RSE>50%)")
             return result.joined(separator: "\n")
         }
         return modText
@@ -6296,6 +6296,7 @@ final class WorkbenchStore: ObservableObject {
                         derivedCLUnit: derivedCLUnit,
                         isCovariatePhase: false,
                         isInheritedHandoffMode: inheritedHandoffMode,
+                        forceReAddDroppedIIV: childIIVExplorationScheduled,
                         apiFormat: activeAPIFormat
                     )
                     recordUsage(usage)
