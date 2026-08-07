@@ -381,6 +381,7 @@ final class WorkbenchStore: ObservableObject {
             .filter { url in
                 let name = url.lastPathComponent
                 let upper = name.uppercased()
+                let lowerName = name.lowercased()
                 guard url.pathExtension.lowercased() == "csv" else { return false }
                 // Exclude table output files
                 if upper.hasPrefix("SDTAB") || upper.hasPrefix("PATAB") ||
@@ -388,6 +389,8 @@ final class WorkbenchStore: ObservableObject {
                    upper.hasPrefix("000") { return false }
                 // Exclude data_run* semantic CSVs (output of PK parameter extraction)
                 if upper.hasPrefix("DATA_RUN") { return false }
+                // Exclude EDA/exploratory output CSVs such as demographics tables.
+                if upper.hasPrefix("EDA_") || lowerName.contains("demographics") { return false }
                 return true
             }
             .map { $0.lastPathComponent }
@@ -8168,7 +8171,7 @@ final class WorkbenchStore: ObservableObject {
                 ?? mods.first?.replacingOccurrences(of: "run", with: "").replacingOccurrences(of: ".mod", with: "")
                 ?? currentRun
         }
-        scmDataFileName = csvs.first ?? dataFile
+        scmDataFileName = csvs.contains(dataFile) ? dataFile : (csvs.first ?? dataFile)
         scmPForward = "0.01"
         scmPBackward = "0.001"
         // Default: examine all candidate covariates
