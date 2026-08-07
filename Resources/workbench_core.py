@@ -698,7 +698,13 @@ def archive_existing_paths(project_dir: Path, paths: Iterable[Path], label: str)
         destination = archive / path.name
         if destination.exists():
             destination = archive / f"{path.stem}-{datetime.now().strftime('%H%M%S')}{path.suffix}"
-        shutil.move(str(path), str(destination))
+        try:
+            shutil.move(str(path), str(destination))
+        except FileNotFoundError:
+            # Case-insensitive filesystems can report both .jpg and .JPG as
+            # existing even though they are the same physical file. Skip the
+            # second copy instead of failing the whole archive.
+            continue
     return archive
 
 
