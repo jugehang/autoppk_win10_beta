@@ -9708,7 +9708,8 @@ final class WorkbenchStore: ObservableObject {
         for comp in sortedComps {
             guard let group = grouped[comp], !group.isEmpty else { continue }
             let stableGroup = group.filter { $0.stable }
-            let bestInGroup = stableGroup.min { a, b in
+            let eligibleStableGroup = stableGroup.filter { $0.precisionEligible }
+            let bestInGroup = (eligibleStableGroup.isEmpty ? stableGroup : eligibleStableGroup).min { a, b in
                 guard let aOFV = a.ofv, let bOFV = b.ofv else { return a.ofv != nil }
                 return aOFV < bOFV
             }
@@ -9717,7 +9718,12 @@ final class WorkbenchStore: ObservableObject {
                 let isBestOverall = best.runID == acceptedRun
                 lines.append("  Best \(comp)-comp: run\(best.runID) (OFV=\(ofvStr))\(isBestOverall ? " 🏆" : "")")
                 if best.precisionEligible {
-                    lines.append("  Precision: %RSE OK")
+                    if best.precisionIssues.isEmpty {
+                        lines.append("  Precision: %RSE OK")
+                    } else {
+                        let issueText = best.precisionIssues.prefix(4).joined(separator: ", ")
+                        lines.append("  Precision: acceptable (warning: \(issueText))")
+                    }
                 } else {
                     let issueText = best.precisionIssues.prefix(4).joined(separator: ", ")
                     lines.append("  Precision: ⚠️ high %RSE: \(issueText)")
@@ -9743,7 +9749,10 @@ final class WorkbenchStore: ObservableObject {
         var lastBestOFV: Double? = nil
         var lastBestComp: Int? = nil
         for comp in sortedComps {
-            guard let group = grouped[comp], let bestInGroup = group.filter({ $0.stable }).min(by: { a, b in
+            guard let group = grouped[comp] else { continue }
+            let stableGroup = group.filter { $0.stable }
+            let eligibleStableGroup = stableGroup.filter { $0.precisionEligible }
+            guard let bestInGroup = (eligibleStableGroup.isEmpty ? stableGroup : eligibleStableGroup).min(by: { a, b in
                 guard let aOFV = a.ofv, let bOFV = b.ofv else { return a.ofv != nil }
                 return aOFV < bOFV
             }), let bestOFV = bestInGroup.ofv else { continue }
@@ -9911,8 +9920,13 @@ final class WorkbenchStore: ObservableObject {
         // Find best model within each compartment group
         var bestPerComp: [Int: AutomationRunChoice] = [:]
         for (comp, group) in grouped {
+            let stable = group.filter { $0.stable }
+            let eligibleStable = stable.filter { $0.precisionEligible }
+            // Prefer a precision-eligible stable run. If none exists, fall back to the
+            // best stable run so the summary can still report why it is not acceptable.
+            let candidates = eligibleStable.isEmpty ? stable : eligibleStable
             // Sort within group: prefer successful minimization, then covariance, then lower OFV
-            let sorted = group.sorted { a, b in
+            let sorted = candidates.sorted { a, b in
                 if a.minimizationSuccessful != b.minimizationSuccessful {
                     return a.minimizationSuccessful
                 }

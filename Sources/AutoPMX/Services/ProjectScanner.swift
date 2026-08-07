@@ -149,10 +149,13 @@ struct ProjectScanner {
     static func parameterEstimates(runID: String, in projectURL: URL) -> [ParameterEstimateRow] {
         let semanticURL = projectURL.appendingPathComponent("data_run\(runID).csv")
         let epsilonShrinkage = parseEpsilonShrinkage(runID: runID, in: projectURL)
+        let modURL = projectURL.appendingPathComponent("run\(runID).mod")
+        let modText = try? String(contentsOf: modURL, encoding: .utf8)
 
         if let text = try? String(contentsOf: semanticURL, encoding: .utf8) {
             var rows = ParameterEstimateParser.parseSemanticCSV(text)
             if !rows.isEmpty {
+                rows = ParameterEstimateParser.applyingModFixedStatus(rows, modText: modText)
                 // Inject residual epsilon-shrinkage only. ETA/PK decisions use %RSE, not eta-shrinkage.
                 rows = rows.map { row in
                     if row.group == "Residual" {
@@ -175,9 +178,8 @@ struct ProjectScanner {
             return []
         }
         // Also read .mod to extract semicolon labels for THETA/OMEGA
-        let modURL = projectURL.appendingPathComponent("run\(runID).mod")
-        let modText = try? String(contentsOf: modURL, encoding: .utf8)
         var rows = ParameterEstimateParser.parseExt(text, modText: modText)
+        rows = ParameterEstimateParser.applyingModFixedStatus(rows, modText: modText)
         // Inject residual epsilon-shrinkage only. ETA/PK decisions use %RSE, not eta-shrinkage.
         rows = rows.map { row in
             if row.group == "Residual" {

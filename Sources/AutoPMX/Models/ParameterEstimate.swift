@@ -453,4 +453,58 @@ enum ParameterEstimateParser {
         fields.append(field)
         return fields
     }
+
+    /// Mark parameters that are FIXed in the .mod as non-estimated even when the
+    /// semantic CSV still contains an old estimate/SE from before the fix was applied.
+    static func applyingModFixedStatus(_ rows: [ParameterEstimateRow], modText: String?) -> [ParameterEstimateRow] {
+        guard let modText, !modText.isEmpty else { return rows }
+        let fixedThetaLabels = parameterLabels(in: modText, blockPrefix: "$THETA", fixedOnly: true)
+        let fixedOmegaLabels = parameterLabels(in: modText, blockPrefix: "$OMEGA", fixedOnly: true)
+        return rows.map { row in
+            let label = compactLabel(row.name)
+            let isFixedTheta = row.group == "Residual" && fixedThetaLabels.contains(label)
+            let isFixedOmega = row.group == "IIV" && fixedOmegaLabels.contains(label)
+            guard isFixedTheta || isFixedOmega else { return row }
+            return ParameterEstimateRow(
+                group: row.group,
+                name: row.name,
+                estimate: 0,
+                standardError: nil,
+                shrinkage: nil,
+                estimateText: "0",
+                standardErrorText: "NA",
+                rseText: "NA",
+                shrinkageText: "NA"
+            )
+        }
+    }
+
+    private static func parameterLabels(in text: String, blockPrefix: String, fixedOnly: Bool) -> Set<String> {
+        var labels: Set<String> = []
+        var inBlock = false
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix(blockPrefix) {
+                inBlock = true
+                continue
+            }
+            if inBlock && upper.hasPrefix("$") {
+                inBlock = false
+                continue
+            }
+            guard inBlock, !trimmed.isEmpty, !trimmed.hasPrefix(";") else { continue }
+            if fixedOnly && !upper.contains("FIX") { continue }
+            let comment = trimmed.components(separatedBy: ";").dropFirst()
+                .joined(separator: ";")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !comment.isEmpty else { continue }
+            labels.insert(compactLabel(comment))
+        }
+        return labels
+    }
+
+    private static func compactLabel(_ value: String) -> String {
+        value.uppercased().filter { $0.isLetter || $0.isNumber }
+    }
 }
