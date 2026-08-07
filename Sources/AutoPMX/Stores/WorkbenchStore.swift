@@ -5962,6 +5962,8 @@ final class WorkbenchStore: ObservableObject {
                         in: projectURL
                     )
                     try checkAutomationStop("EDA")
+                    refreshWorkspace()
+                    appendEDAOutputMessages(fileName: activeDataFile)
 
                     automationStep = "Plotting individual C-T curves"
                     addThinkingStep("Plotting individual C-T curves by dose/route", type: .working)
@@ -5970,6 +5972,7 @@ final class WorkbenchStore: ObservableObject {
                         in: projectURL
                     )
                     try checkAutomationStop("C-T curves")
+                    refreshWorkspace()
                 }
 
                 // Run dose-normalized C-T plot + lag / elimination / exposure analysis
@@ -7006,6 +7009,26 @@ final class WorkbenchStore: ObservableObject {
                 assistantMessages.append(AssistantMessage(
                     role: .system,
                     text: String.safeFormat(L10n.ctFacetPlot, facet, facetPath)
+                ))
+            }
+        }
+    }
+
+    private func appendEDAOutputMessages(fileName: String) {
+        let stem = (fileName as NSString).lastPathComponent.replacingOccurrences(of: ".csv", with: "")
+        let prefix = "EDA_\(stem)"
+        let candidates: [(String, String)] = [
+            ("\(prefix)_eda.png", "EDA Combined"),
+            ("\(prefix)_spaghetti.png", "Spaghetti Plot"),
+            ("\(prefix)_sampling.png", "Sampling Schedule"),
+            ("\(prefix)_demographics.csv", "Demographics Table")
+        ]
+        for (name, label) in candidates {
+            let path = projectURL.appendingPathComponent(name).path
+            if FileManager.default.fileExists(atPath: path) {
+                assistantMessages.append(AssistantMessage(
+                    role: .system,
+                    text: "📊 \(label): file://\(path)"
                 ))
             }
         }

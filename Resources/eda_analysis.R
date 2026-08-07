@@ -269,8 +269,8 @@ if (nrow(d_obs) > 0) {
   use_log <- dv_range[2] / dv_range[1] > 100
 
   p_spag <- ggplot(d_obs, aes(x = TIME, y = DV, group = ID)) +
-    geom_line(alpha = 0.3, color = "gray50") +
-    geom_point(alpha = 0.4, size = 1, color = "steelblue") +
+    geom_line(alpha = 0.45, linewidth = 0.45, color = "gray40") +
+    geom_point(alpha = 0.5, size = 0.9, color = "steelblue") +
     labs(
       title = "Concentration-Time Spaghetti Plot",
       subtitle = paste0("N = ", n_subjects, " subjects"),
@@ -335,8 +335,10 @@ sampling_summary <- d_obs %>%
   summarise(N = n(), Subjects = length(unique(ID)), .groups = "drop")
 
 if (nrow(sampling_summary) > 0) {
+  sampling_time_range <- diff(range(sampling_summary$TIME, na.rm = TRUE))
+  sampling_bar_width <- max(sampling_time_range / 80, 0.5)
   p_sample <- ggplot(sampling_summary, aes(x = TIME, y = N)) +
-    geom_col(fill = "mediumpurple", color = "white", alpha = 0.8) +
+    geom_col(width = sampling_bar_width, fill = "mediumpurple", color = "white", alpha = 0.85) +
     geom_text(aes(label = N), vjust = -0.5, size = 3) +
     labs(
       title = "Sampling Schedule",
