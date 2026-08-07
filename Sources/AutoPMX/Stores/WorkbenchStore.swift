@@ -6685,8 +6685,17 @@ final class WorkbenchStore: ObservableObject {
                             if hasInheritedFixes {
                                 // The release was already scheduled above; fall through and draft the release model.
                             } else {
+                                // Final inherited-child selection must compare all released
+                                // stable candidates, not blindly accept the latest repair run.
+                                let releasedChildRuns = modelRuns.filter { runID in
+                                    let text = (try? String(contentsOf: projectURL.appendingPathComponent("run\(runID).mod"), encoding: .utf8)) ?? ""
+                                    return !LLMCommandService.hasInheritedStructuralFixes(text)
+                                }
+                                let releasedChoices = releasedChildRuns.enumerated().map { index, runID in
+                                    automationRunChoice(runID: runID, previousRun: index > 0 ? releasedChildRuns[index - 1] : nil)
+                                }
                                 accepted = true
-                                acceptedRun = sourceRun
+                                acceptedRun = selectBestBaseModel(choices: releasedChoices)?.runID ?? sourceRun
                                 duDuMood = .excited
                                 let summary = phaseOneSummary(runs: modelRuns, acceptedRun: acceptedRun ?? sourceRun)
                                 let bestRunID = acceptedRun ?? sourceRun
@@ -6702,11 +6711,11 @@ final class WorkbenchStore: ObservableObject {
                                     break
                                 }
                                 runner.append("=== PHASE 1 COMPLETE ===\n\(summary)")
-                                runner.append("Inherited child base model complete: run\(sourceRun) reached S+C after releasing inherited structural FIXes.")
+                                runner.append("Inherited child base model complete: run\(bestRunID) reached S+C after releasing inherited structural FIXes.")
                                 assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusPhase1Complete, summary, acceptedRun ?? sourceRun)))
                                 assistantMessages.append(AssistantMessage(role: .system, text: localized(
-                                    "母本子模型 run\(sourceRun) 已达到 S+C，且继承的结构参数 FIX 已全部放开。这相当于混合数据集的基模已完成，是否继续 SCM？",
-                                    "Inherited child run\(sourceRun) reached S+C with all inherited structural FIXes released. The full-dataset base model is ready. Continue with SCM?"
+                                    "母本子模型 run\(bestRunID) 已达到 S+C，且继承的结构参数 FIX 已全部放开。这相当于混合数据集的基模已完成，是否继续 SCM？",
+                                    "Inherited child run\(bestRunID) reached S+C with all inherited structural FIXes released. The full-dataset base model is ready. Continue with SCM?"
                                 )))
                                 beginBenchmarkBaseWaitIfNeeded()
                                 isAutoModeling = false
