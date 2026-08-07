@@ -116,6 +116,18 @@ build_strata_label <- function(primary_factor, primary_values,
   label_stratum(primary_values, primary_factor)
 }
 
+label_vpc_strat <- function(values) {
+  values <- as.character(values)
+  out <- values
+  for (i in seq_along(values)) {
+    parts <- strsplit(values[i], "_", fixed = TRUE)[[1]]
+    if (length(parts) >= 2 && !is.na(parts[1]) && nzchar(parts[1])) {
+      out[i] <- paste0("Dose ", parts[1], " mg (", route_label(parts[2]), ")")
+    }
+  }
+  out
+}
+
 # --- 3. 解析 .mod 获取原始数据散点 [cite: 110, 118] ---
 mod_lines <- readLines(mod_file, warn = FALSE)
 data_line <- mod_lines[grep("^\\$DATA", mod_lines, ignore.case = TRUE)][1]
@@ -136,6 +148,51 @@ raw_obs_clean <- raw_obs_clean %>%
     DV_VAL   = as.numeric(as.character(!!sym(dv_col)))
   ) %>%
   filter(!is.na(DV_VAL), DV_VAL > 0)
+
+# Rebuild the same numeric DOSE_ROUTE code mapping used by the Python VPC prep.
+# PsN can only stratify on numeric values, so the plotter maps codes back to
+# readable "Dose 250 mg (IV)" labels here.
+raw_id_col <- resolve_actual_col(raw_obs_clean, "ID")
+raw_dose_col <- resolve_actual_col(raw_obs_clean, "DOSE")
+raw_route_col <- resolve_actual_col(raw_obs_clean, "ROUTE")
+vpc_strat_map <- NULL
+vpc_strat_label_vec <- NULL
+if (!is.na(raw_id_col) && !is.na(raw_dose_col) && !is.na(raw_route_col)) {
+  strat_pairs <- unique(raw_obs_clean[c(raw_id_col, raw_dose_col, raw_route_col)])
+  names(strat_pairs) <- c("ID", "DOSE", "ROUTE")
+  strat_pairs$DOSE_N <- suppressWarnings(as.numeric(as.character(strat_pairs$DOSE)))
+  strat_pairs <- strat_pairs[order(strat_pairs$DOSE_N, strat_pairs$ROUTE), , drop = FALSE]
+  pair_codes <- unique(strat_pairs[c("DOSE", "ROUTE")])
+  pair_codes$DOSE_N <- suppressWarnings(as.numeric(as.character(pair_codes$DOSE)))
+  pair_codes <- pair_codes[order(pair_codes$DOSE_N, pair_codes$ROUTE), , drop = FALSE]
+  pair_codes$VPC_STRAT <- seq_len(nrow(pair_codes))
+  vpc_strat_map <- merge(
+    strat_pairs[c("ID", "DOSE", "ROUTE")],
+    pair_codes[c("DOSE", "ROUTE", "VPC_STRAT")],
+    by = c("DOSE", "ROUTE"),
+    all.x = TRUE
+  )
+  vpc_strat_label_vec <- setNames(
+    paste0("Dose ", pair_codes$DOSE, " mg (", route_label(pair_codes$ROUTE), ")"),
+    as.character(pair_codes$VPC_STRAT)
+  )
+}
+
+# Locate the actual vpctab file. With combined DOSE_ROUTE stratification the
+# temporary model name is run{id}_vpc.mod, so the output may be vpctab{id}_vpc.
+vpctab_files <- list.files(
+  paste0("vpc_dir_", mod_index),
+  pattern = paste0("^vpctab", mod_index, "(_|$)"),
+  full.names = TRUE
+)
+vpctab_path <- if (length(vpctab_files) > 0) vpctab_files[1] else ""
+if (nzchar(vpctab_path)) {
+  vpctab_probe <- read.csv(vpctab_path, nrows = 1, check.names = FALSE)
+  if ("VPC_STRAT" %in% names(vpctab_probe)) {
+    group_factor_upper <- "VPC_STRAT"
+    group_factor <- "VPC_STRAT"
+  }
+}
 
 # 使用 PsN 实际分层列，缺失时再从 $INPUT / 配置里挑选可用列。
 input_line <- mod_lines[grep("^\\$INPUT", mod_lines, ignore.case = TRUE)][1]
@@ -164,7 +221,8 @@ if (length(strata_headers) > 0) {
   m <- str_match(strata_headers[1], "strata\\s+([A-Za-z0-9_]+)\\s*=")
   if (!is.na(m[2])) group_factor_upper <- toupper(m[2])
 }
-if (is.na(group_factor_upper) || !(group_factor_upper %in% input_cols)) {
+if (is.na(group_factor_upper) ||
+    (!(group_factor_upper %in% input_cols) && group_factor_upper != "VPC_STRAT")) {
   group_factor_upper <- pick_group(configured_group, input_cols)
 }
 if (is.na(group_factor_upper)) {
@@ -177,20 +235,21 @@ if (is.na(group_factor_upper)) {
 }
 
 group_factor <- resolve_actual_col(raw_obs_clean, group_factor_upper)
-if (!is.na(group_factor_upper) && is.na(group_factor)) {
+if (!is.na(group_factor_upper) && is.na(group_factor) && group_factor_upper != "VPC_STRAT") {
   message("⚠️ 模型声明的分层列未出现在原始数据中，VPC 将按 Overall 绘制。")
   group_factor_upper <- NA_character_
 }
 
 if (is.na(group_factor_upper)) {
   raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = "Overall")
+} else if (group_factor_upper == "VPC_STRAT") {
+  raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = NA_character_)
 } else {
   raw_obs_clean <- raw_obs_clean %>% mutate(STRAT_ID = as.character(!!sym(group_factor)))
 }
 raw_obs_clean <- raw_obs_clean %>%
   mutate(STRAT_LABEL = label_stratum(STRAT_ID, group_factor_upper))
 
-vpctab_path <- file.path(paste0("vpc_dir_", mod_index), paste0("vpctab", mod_index))
 strata_value_map <- NULL
 strata_label_map <- NULL
 raw_label_map <- NULL
@@ -251,14 +310,26 @@ if (file.exists(vpctab_path) && !is.na(group_factor_upper)) {
     }
   }
 }
-if (!is.null(raw_label_map)) {
+if (!is.null(raw_label_map) && group_factor_upper != "VPC_STRAT") {
   mapped <- unname(raw_label_map[raw_obs_clean$STRAT_ID])
   raw_obs_clean$STRAT_LABEL <- ifelse(is.na(mapped), raw_obs_clean$STRAT_LABEL, mapped)
+}
+if (group_factor_upper == "VPC_STRAT" && exists("vpctab") && "ID" %in% names(vpctab)) {
+  primary_col <- resolve_actual_col(vpctab, "VPC_STRAT")
+  raw_id_col <- resolve_actual_col(raw_obs_clean, "ID")
+  if (!is.na(primary_col) && !is.na(raw_id_col) && !is.null(vpc_strat_map)) {
+    raw_obs_clean$STRAT_ID <- as.character(vpc_strat_map$VPC_STRAT[match(raw_obs_clean[[raw_id_col]], vpc_strat_map$ID)])
+    mapped_labels <- vpc_strat_label_vec[raw_obs_clean$STRAT_ID]
+    raw_obs_clean$STRAT_LABEL <- ifelse(is.na(mapped_labels), raw_obs_clean$STRAT_LABEL, unname(mapped_labels))
+    if (!is.null(strata_value_map)) {
+      strata_label_map <- vpc_strat_label_vec[names(strata_value_map)]
+    }
+  }
 }
 
 # --- 4. 深度解析 vpc_results.csv (统计线) [cite: 110, 114] ---
 header_indices <- grep("median.idv", lines)
-strata_pattern <- if (!is.na(group_factor_upper)) paste0("strata\\s+", group_factor_upper, "\\s*=\\s*([0-9.]+)") else NULL
+strata_pattern <- if (!is.na(group_factor_upper)) paste0("strata\\s+", group_factor_upper, "\\s*=\\s*([^\\s=]+)") else NULL
 strata_indices <- if (!is.null(strata_pattern)) grep(strata_pattern, lines, ignore.case = TRUE) else integer(0)
 # 核心修正：锁定第一个诊断信息位置，解决 6 elements 警告
 diag_indices <- grep("Diagnostics VPC", lines)

@@ -402,22 +402,165 @@ def _vpc_no_of_strata(project_dir: Path, run_id: str, cfg: Dict, stratify_var: O
     return None
 
 
-def psn_vpc_command(project_dir: Path, run_id: str, psn_dir: str = "") -> List[str]:
+def _max_idv_time(project_dir: Path, cfg: Dict) -> Optional[float]:
+    """Return the maximum TIME/TAD value in the modeling dataset, if readable."""
+    data_file = cfg.get("data_file", "")
+    data_path = Path(project_dir) / data_file if data_file else None
+    if not data_path or not data_path.exists():
+        return None
+    try:
+        with data_path.open(newline="", encoding="utf-8", errors="ignore") as handle:
+            reader = csv.DictReader(handle)
+            headers = {str(name).strip().strip('"').upper(): name
+                       for name in (reader.fieldnames or [])}
+            idv_col = headers.get("TIME") or headers.get("TAD")
+            if not idv_col:
+                return None
+            values = []
+            for row in reader:
+                raw = row.get(idv_col)
+                if raw in (None, "", "."):
+                    continue
+                try:
+                    values.append(float(raw))
+                except ValueError:
+                    pass
+        return max(values) if values else None
+    except Exception:
+        return None
+
+
+def _prepare_vpc_strat_files(
+    project_dir: Path,
+    run_id: str,
+    cfg: Dict,
+    stratify_var: Optional[str],
+) -> Optional[Tuple[Path, str]]:
+    """Create a temporary VPC dataset/model with a combined DOSE_ROUTE column.
+
+    PsN only stratifies on the first variable in -stratify_on. To get true
+    DOSE*ROUTE panels, build a VPC_STRAT column from both variables and run the
+    VPC against that single stratification variable.
+    """
+    parts = [part.strip().upper() for part in str(stratify_var or "").split(",") if part.strip()]
+    if len(parts) < 2:
+        return None
+
+    data_file = cfg.get("data_file", "")
+    data_path = Path(project_dir) / data_file if data_file else None
+    mod_path = Path(project_dir) / f"run{run_id}.mod"
+    if not data_path or not data_path.exists() or not mod_path.exists():
+        return None
+
+    try:
+        with data_path.open(newline="", encoding="utf-8", errors="ignore") as handle:
+            rows = list(csv.reader(handle))
+        if not rows:
+            return None
+        headers = [str(h).strip().strip('"').upper() for h in rows[0]]
+        if not all(part in headers for part in parts) or "ID" not in headers:
+            return None
+
+        id_idx = headers.index("ID")
+        part_idx = [headers.index(part) for part in parts]
+        prep_dir = project_dir / f"vpc_prep_{run_id}"
+        prep_dir.mkdir(exist_ok=True)
+        data_out = prep_dir / f"vpc_data_{run_id}.csv"
+
+        # PsN/NONMEM stratification values must be numeric. Encode the combined
+        # DOSE_ROUTE pairs as stable numeric codes; the R plotter rebuilds the
+        # same sorted mapping from the original dataset for readable labels.
+        pair_set = set()
+        for row in rows[1:]:
+            values = tuple(row[idx].strip() if len(row) > idx else "" for idx in part_idx)
+            if all(values):
+                pair_set.add(values)
+        sorted_pairs = sorted(
+            pair_set,
+            key=lambda pair: (
+                float(pair[0]) if pair[0].replace(".", "", 1).isdigit() else pair[0],
+                pair[1],
+            ),
+        )
+        code_by_pair = {pair: index + 1 for index, pair in enumerate(sorted_pairs)}
+
+        with data_out.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(rows[0] + ["VPC_STRAT"])
+            for row in rows[1:]:
+                id_val = row[id_idx] if len(row) > id_idx else ""
+                values = tuple(row[idx].strip() if len(row) > idx else "" for idx in part_idx)
+                writer.writerow(row + [str(code_by_pair.get(values, 0))])
+
+        text = mod_path.read_text(encoding="utf-8", errors="ignore")
+        text = re.sub(
+            r"(?im)^\s*\$DATA\s+\S+",
+            f"$DATA {data_out.name}",
+            text,
+            count=1,
+        )
+        input_match = re.search(r"(?im)^(\s*\$INPUT\s+.+)$", text)
+        if input_match and not re.search(r"\bVPC_STRAT\b", input_match.group(0), re.IGNORECASE):
+            line = input_match.group(0).rstrip()
+            text = text[:input_match.start()] + line + " VPC_STRAT\n" + text[input_match.end():]
+        text = re.sub(
+            r"(?im)^(\s*\$TABLE\s+)(.*?)(\s+ONEHEADER\b)",
+            r"\1\2 VPC_STRAT\3",
+            text,
+        )
+        mod_out = prep_dir / f"run{run_id}_vpc.mod"
+        mod_out.write_text(text, encoding="utf-8")
+        return mod_out, "VPC_STRAT"
+    except Exception:
+        return None
+
+
+def _cleanup_vpc_prep(project_dir: Path, run_id: str) -> None:
+    prep_dir = project_dir / f"vpc_prep_{run_id}"
+    if prep_dir.exists():
+        shutil.rmtree(prep_dir, ignore_errors=True)
+
+
+def psn_vpc_command(
+    project_dir: Path,
+    run_id: str,
+    psn_dir: str = "",
+    prepared: Optional[Tuple[Path, str]] = None,
+) -> List[str]:
     cfg = load_project_config(project_dir)
     psn_cfg = cfg.get("psn_settings", {})
     samples = psn_cfg.get("vpc_samples", 500)
-    stratify_var = _vpc_stratify_var(project_dir, run_id, cfg)
+    if prepared:
+        model_path, stratify_var = prepared
+    else:
+        model_path = f"run{run_id}.mod"
+        stratify_var = _vpc_stratify_var(project_dir, run_id, cfg)
     no_of_strata = _vpc_no_of_strata(project_dir, run_id, cfg, stratify_var)
     command = _psn_command("vpc", psn_dir)
     cmd = [
         command,
-        f"run{run_id}.mod",
+        str(model_path),
         f"-samples={samples}",
         f"-dir=vpc_dir_{run_id}",
         "-idv=TIME",
-        "-bin_by_count=1",
-        "-no_of_bins=12",
     ]
+    bin_cfg = psn_cfg.get("vpc_binning", {})
+    points = bin_cfg.get("points")
+    if points:
+        try:
+            boundaries = [float(x.strip()) for x in str(points).split(",") if x.strip()]
+            if boundaries:
+                max_time = _max_idv_time(project_dir, cfg)
+                if max_time is not None and boundaries[-1] <= max_time:
+                    boundaries.append(max_time + 0.1)
+                bin_array = ",".join(f"{x:g}" for x in boundaries)
+                cmd += ["-bin_by_count=0", f"-bin_array={bin_array}"]
+            else:
+                cmd += ["-bin_by_count=1", "-no_of_bins=12"]
+        except (TypeError, ValueError):
+            cmd += ["-bin_by_count=1", "-no_of_bins=12"]
+    else:
+        cmd += ["-bin_by_count=1", "-no_of_bins=12"]
     if stratify_var:
         cmd.insert(4, f"-stratify_on={stratify_var}")
     if no_of_strata:
@@ -739,11 +882,30 @@ class TaskRunner:
         archive = archive_existing_paths(self.root, [self.root / f"vpc_dir_{self.settings.curr_run}"], "psn")
         if archive:
             self.log(f"Archived previous VPC directory to: {archive.name}")
-        command = psn_vpc_command(self.root, self.settings.curr_run, self.settings.psn_dir)
+        cfg = load_project_config(self.root)
+        stratify_var = _vpc_stratify_var(self.root, self.settings.curr_run, cfg)
+        prepared = _prepare_vpc_strat_files(
+            self.root,
+            self.settings.curr_run,
+            cfg,
+            stratify_var,
+        )
+        if prepared:
+            self.log(f"VPC: combined stratification prepared as {prepared[0].name} (stratify on {prepared[1]})")
+        command = psn_vpc_command(
+            self.root,
+            self.settings.curr_run,
+            self.settings.psn_dir,
+            prepared=prepared,
+        )
         if not shutil.which(command[0]) and not Path(command[0]).exists():
+            _cleanup_vpc_prep(self.root, self.settings.curr_run)
             self.log(f"PsN vpc command not found: {command[0]}")
             return 127
-        return stream_subprocess(command, self.root, self.log, env=mac_nonmem_env())
+        try:
+            return stream_subprocess(command, self.root, self.log, env=mac_nonmem_env())
+        finally:
+            _cleanup_vpc_prep(self.root, self.settings.curr_run)
 
     def run_r_diagnostics(self) -> int:
         final_code = 0

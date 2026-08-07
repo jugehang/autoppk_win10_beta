@@ -1425,7 +1425,7 @@ struct LLMCommandService {
             → Run002: fix Add.err to 0 (worst RSE = 120% > 100%), keep 1-comp and everything else unchanged.
         
           run001: 1-comp S+C, Add.err RSE=40%, Prop.err RSE=25%, IIV-CL RSE=45%, IIV-V RSE=150%
-            → Run002: fix IIV-V (OMEGA for V to 0 FIX), keep 1-comp and everything else unchanged.
+            → Run002: fix IIV-V (OMEGA for V to its last estimated variance, e.g. 0.08 FIX), keep 1-comp and everything else unchanged.
         
           run002 (after fix): 1-comp proportional-only S+C, IIV-CL RSE=20%, IIV-V fixed.
             → Run003: now stable → escalate to 2-comp.
@@ -1464,7 +1464,9 @@ struct LLMCommandService {
                • V/V1 IIV fixed in parent → V2 (2-comp), V3 (3-comp) IIV stay FIXED.
              Apply this BEFORE enabling: e.g., if 1-comp had V IIV fixed, do NOT unfix V3 in 3-comp.
            - AFTER the run: for each parameter whose IIV was just ENABLED, check its RSE%:
-             if RSE% > 50% → FIX it (OMEGA 0 FIX). BEFORE fixing, verify:
+             if RSE% > 50% → FIX it to the last estimated OMEGA variance (e.g. 0.05 FIX).
+             Do NOT fix OMEGA to 0 unless the estimate is already at the zero boundary.
+             BEFORE fixing, verify:
                (i) MODEL CHANGE: does fixing cause a large ΔOFV jump (worse fit)?
                (ii) STABILITY: does fixing avoid a near-singular covariance / rounding error?
              Only fix when RSE>50% shows the IIV is unreliable OR it causes instability.
@@ -1487,7 +1489,8 @@ struct LLMCommandService {
            - The goal for EACH compartment count (1-comp, 2-comp, 3-comp) is to produce at least one S+C model. Only a model that is S+C counts as a valid result for that compartment.
            - If a model fails minimization or covariance, do NOT immediately move to the next compartment count.
            - Instead, create a new run WITHIN the same compartment count and try fixes:
-             a) Fix problematic IIV to 0 FIX in $OMEGA.
+             a) Fix problematic IIV to its last estimated OMEGA variance in $OMEGA
+                (e.g. 0.05 FIX); do not pin an estimable IIV to 0.
              b) Reduce initial estimates by 50%.
              c) Try different TRANS (e.g., TRANS1 vs TRANS4).
              d) Re-seed initial estimates from the PREVIOUS run's post-hoc estimates with small perturbations (±10–20%), then re-fit.
@@ -1573,7 +1576,7 @@ struct LLMCommandService {
              estimate. Do NOT use eta-shrinkage as a reason to remove IIV.
            - PROACTIVE IIV UNFIXING (CRITICAL — DO NOT SKIP):
              After a model converges successfully (minimization OK, covariance OK):
-             Check $OMEGA block: if ANY peripheral parameter (Q, V2, Q3, V3) has OMEGA = 0 FIX
+             Check $OMEGA block: if ANY peripheral parameter (Q, V2, Q3, V3) has a FIXed OMEGA
              → the NEXT run MUST attempt to unfix/re-add IIV for ONE parameter.
              Priority order: Q (or Q2) first, then V2, then Q3, then V3.
              Set OMEGA = 0.04 for the unfixed parameter, add EXP(ETA(n)) in $PK.
@@ -1615,7 +1618,8 @@ struct LLMCommandService {
         - All GOF plots show no systematic bias; CWRES centered around zero without trends
         - (Phase 2 only) ALL available covariates from the Dataset have been tested
         If S or C is MISSING, you MUST output REVISE — never ACCEPT. Diagnose and fix estimation
-        (fix unreliable IIV to 0 FIX, widen $THETA bounds, try DIAGONAL OMEGA, reduce MAXEVAL) and re-run
+        (fix unreliable IIV to its last estimated OMEGA variance, widen $THETA bounds,
+         try DIAGONAL OMEGA, reduce MAXEVAL) and re-run
         until BOTH S and C are achieved. A model that cannot reach S+C is NOT a valid base model.
 
         COVARIANCE FAILURE ON HIGHER-COMPARTMENT MODELS:
@@ -1726,6 +1730,7 @@ struct LLMCommandService {
         forceCompartmentEscalation: Bool = false,
         forceSameCompartment: Bool = false,
         forceReleaseInheritedFixes: Bool = false,
+        forceReAddDroppedIIV: Bool = false,
         apiKey: String = "",
         sessionId: String? = nil,
         s1Expression: String = "V/1000",
@@ -1821,6 +1826,21 @@ struct LLMCommandService {
         The deterministic release step will automatically restore or trim any missing/extra IIV.
         The model can then re-estimate the inherited parameters freely on the full mixed dataset.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """ : "")}
+        \(forceReAddDroppedIIV ? """
+        ━━━ INHERITED CHILD IIV RE-EXPLORATION ━━━
+        run\(sourceRun) is a stable full-dataset child model whose inherited structural
+        THETA/OMEGA FIXes have already been released. Before finalizing the child base model,
+        re-add the previously dropped IIV/ETA terms for structural PK parameters that are
+        currently bare (e.g. Q and V3 in an extravascular ADVAN4 2-compartment model).
+        - Keep ADVAN/TRANS, compartment count, THETA, F1 and residual error unchanged.
+        - Add EXP(ETA(n)) to the bare structural PK parameters and one matching $OMEGA row
+          with initial 0.04.
+        - Keep ETA numbering contiguous ETA1..ETAn and update $OMEGA, PATAB and runXXXX.ETA.
+        - Do NOT fix any OMEGA to 0; use 0.04 as the initial estimate.
+        - Do not add covariates or change the route/compartment structure.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
         """ : "")}
 
         ━━━ SOURCE MODEL ANALYSIS CHECKLIST ━━━
@@ -1995,7 +2015,8 @@ struct LLMCommandService {
           all meaning — the peripheral compartment describes CENTRAL→PERIPHERAL
           distribution, which cannot be estimated if central variance is zero.
         - ETA INDEXING IS CONTIGUOUS (HARD): Never create ETA gaps. When fixing/removing an IIV,
-          EITHER keep the ETA in $PK and set its OMEGA to 0 FIX, OR remove that OMEGA line AND
+          EITHER keep the ETA in $PK and set its OMEGA to the last estimated variance FIX,
+          OR remove that OMEGA line AND
           renumber all remaining ETA references ($PK, $OMEGA, PATAB, runXXXX.ETA) as ETA1..ETAn.
           A model like ETA1, ETA2, ETA4, ETA5 is invalid and must not be written.
         - Chain rule (AUTOMATIC): if central CL IIV is FIXED → Q/Q2/Q3 IIV MUST also
@@ -2436,7 +2457,8 @@ struct LLMCommandService {
           SC first-order CMT=1 must not use D1; IV infusion to central CMT=2 with DUR should use D2.
         - NEVER paste dataset rows into the .mod. The CSV is loaded through $DATA, not embedded after $INPUT.
         - ETA numbering must remain contiguous. If an IIV is fixed/removed, either keep ETA with
-          0 FIX or remove the OMEGA row and renumber all ETA references (PK, OMEGA, tables).
+          last estimated OMEGA variance FIX or remove the OMEGA row and renumber all ETA
+          references (PK, OMEGA, tables).
 
         Source model:
         \(sourceText)

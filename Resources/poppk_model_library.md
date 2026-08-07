@@ -10,7 +10,7 @@ This library is the syntax anchor for DuDu PMx automated model building. Local L
 - Treat the CSV header as the source of truth for `$INPUT`: labels must appear in the same order as the data file columns.
 - The `C` column must remain a literal `C` token and must never be written as `C=DROP`, `C=SKIP`, omitted, or moved away from its CSV position.
 - Use semicolon labels on `$THETA`, `$OMEGA`, and `$SIGMA`; the parameter extraction pipeline relies on these labels.
-- ETA numbering must always be contiguous (ETA1..ETAn). When fixing/removing IIV, either keep the ETA with `0 FIX` or remove the OMEGA row and renumber every ETA reference in `$PK`, `$OMEGA`, and `$TABLE`.
+- ETA numbering must always be contiguous (ETA1..ETAn). When fixing/removing IIV, either keep the ETA with its last estimated OMEGA variance `FIX` (never force an estimable IIV to 0) or remove the OMEGA row and renumber every ETA reference in `$PK`, `$OMEGA`, and `$TABLE`.
 - Default residual error is combined proportional plus additive.
 - Use `S1=V/1000` (or `S1=V` when units align, e.g. AMT=mg + DV=µg/mL where mg/L=µg/mL) for IV central observations in compartment 1. Use `S2=V/1000` for extravascular models. S1/S2 MUST always be the LAST line of $PK — the variables they reference (V, V1, V2) must be defined first.
   ⚠ S1 scaling rule: S1=V/1000 is only correct when AMT & DV units require a 1000× scaling (e.g. mg+ng/mL → V in ×10³ L). When mg/L = µg/mL numerically (e.g. AMT=mg, DV=µg/mL), use S1=V (no /1000). The correct expression is determined by your dataset's unit configuration.

@@ -4864,7 +4864,7 @@ final class WorkbenchStore: ObservableObject {
 
         // Collect THETA indices with high RSE (>100%) from .lst
         var thetaHighRSE: Set<Int> = []
-        var omegaHighRSE: Set<Int> = []
+        var omegaHighRSE: [Int: String] = [:]
         guard let thetaRe = try? NSRegularExpression(pattern: #"THETA\s+(\d+):\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]),
               let omegaRe = try? NSRegularExpression(pattern: #"OMEGA\s+(\d+):\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]) else { return modText }
         var inTheta = false
@@ -4885,7 +4885,7 @@ final class WorkbenchStore: ObservableObject {
             if inOmega, let m = omegaRe.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)),
                let rse = Double((t as NSString).substring(with: m.range(at: 2))), rse > 100 {
                 if let num = Int((t as NSString).substring(with: m.range(at: 1))) {
-                    omegaHighRSE.insert(num - 1)
+                    omegaHighRSE[num - 1] = (t as NSString).substring(with: m.range(at: 2))
                 }
             }
         }
@@ -4926,18 +4926,19 @@ final class WorkbenchStore: ObservableObject {
             }
             if inBlock == "OMEGA" {
                 let isEmptyLine = trimmed.isEmpty || trimmed.hasPrefix(";")
-                if isEmptyLine && omegaHighRSE.contains(omegaIdx) {
+                if isEmptyLine, let rawEstimate = omegaHighRSE[omegaIdx] {
                     let alreadyFixed = trimmed.uppercased().contains("FIX")
                     if !alreadyFixed {
-                        // IIV that cannot be estimated is pinned to 0 (OMEGA 0 FIX) — the
-                        // variance term is dropped, which is the correct simplification.
+                        // Keep the last estimated variance as the fixed value instead of
+                        // forcing 0, which would silently remove an estimable IIV component.
+                        let fixedValue = Double(rawEstimate).map { String(format: "%.6g", $0) } ?? "0.04"
                         if let semi = line.firstIndex(of: ";") {
                             let comment = line[semi...]
-                            result.append("0 FIX  \(comment)")
+                            result.append("\(fixedValue) FIX  \(comment)")
                         } else {
-                            result.append("0 FIX")
+                            result.append("\(fixedValue) FIX")
                         }
-                        runner.append("  → Fixed OMEGA[\(omegaIdx)] to 0 FIX (RSE>100%)")
+                        runner.append("  → Fixed OMEGA[\(omegaIdx)] to \(fixedValue) FIX (RSE>100%)")
                         omegaIdx += 1
                         continue
                     }
@@ -6208,6 +6209,8 @@ final class WorkbenchStore: ObservableObject {
                     }
                 }
                 var releaseInheritedFixes = false
+                var childIIVExplorationScheduled = false
+                var childIIVExplorationAttempted = false
                 var previousRunWasFailure = false
                 var consecutiveLLMFailures = 0
                 let maxEvaluations = 100
@@ -6405,6 +6408,22 @@ final class WorkbenchStore: ObservableObject {
                         )))
                     }
 
+                    let stableReleasedChild = inheritedHandoffMode
+                        && runMinimizationOK(sourceRun)
+                        && runCovarianceOK(sourceRun)
+                        && !hasBoundaryWarningsFor(sourceRun)
+                        && !LLMCommandService.hasInheritedStructuralFixes(
+                            (try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8)) ?? ""
+                        )
+                    if stableReleasedChild && !childIIVExplorationScheduled && !childIIVExplorationAttempted {
+                        childIIVExplorationScheduled = true
+                        runner.append("Inherited child base run\(sourceRun) is S+C with inherited FIXes released. Re-adding previously dropped IIV before final model selection.")
+                        assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                            "母本子模型 run\(sourceRun) 已稳定，且继承参数 FIX 已放开。下一步把之前 drop 掉的 ETA/OMEGA 重新加回来，再继续考察 IIV。",
+                            "Inherited child run\(sourceRun) is stable with inherited FIXes released. Next, re-add the previously dropped ETA/OMEGA terms and continue IIV exploration."
+                        )))
+                    }
+
                     if isAcceptanceDecision(decision) {
                         // RULE 0: The run being accepted MUST itself be S+C (stable + converged).
                         // No amount of higher-compartment testing justifies accepting a non-S+C run.
@@ -6418,6 +6437,12 @@ final class WorkbenchStore: ObservableObject {
                             assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusCompAcceptNotSC, sourceRun, String(runInfo.compartments), reason, String(runInfo.compartments))))
                             forceEscalation = false
                             // Fall through — proposeOptimizedModel will repair at same compartment
+                        } else if inheritedHandoffMode && childIIVExplorationScheduled {
+                            decision = "REVISE\nInherited child base is S+C; re-add dropped IIV before final acceptance."
+                            assistantMessages.append(AssistantMessage(role: .system, text: localized(
+                                "母本子模型已达到 S+C，先不把它作为最终子模型。下一步重新加入之前 drop 掉的 IIV，再做 IIV 放开/固定比较。",
+                                "Inherited child base reached S+C, but it is not final yet. Next, re-add previously dropped IIV and compare keep/fix options."
+                            )))
                         } else if inheritedHandoffMode {
                             let handoffModURL = projectURL.appendingPathComponent("run\(sourceRun).mod")
                             let handoffModText = (try? String(contentsOf: handoffModURL, encoding: .utf8)) ?? ""
@@ -6588,6 +6613,7 @@ final class WorkbenchStore: ObservableObject {
                         forceEscalation = false
                     }
 
+                    let forceReAddIIVThisRound = childIIVExplorationScheduled
                     let (nextModel, optUsage) = try await LLMCommandService.proposeOptimizedModel(
                         baseURL: llmBaseURL,
                         model: llmModel,
@@ -6600,6 +6626,7 @@ final class WorkbenchStore: ObservableObject {
                         forceCompartmentEscalation: forceEscalation,
                         forceSameCompartment: forceSameCompartment,
                         forceReleaseInheritedFixes: forceReleaseThisRound,
+                        forceReAddDroppedIIV: forceReAddIIVThisRound,
                         apiKey: llmAPIKey,
                         sessionId: automationSessionId,
                         s1Expression: derivedS1Expression,
@@ -6611,6 +6638,11 @@ final class WorkbenchStore: ObservableObject {
                         apiFormat: activeAPIFormat
                     )
                     recordUsage(optUsage)
+                    if forceReAddIIVThisRound {
+                        childIIVExplorationScheduled = false
+                        childIIVExplorationAttempted = true
+                        runner.append("Scheduled run\(nextRun) to re-add previously dropped IIV/ETA terms.")
+                    }
                     try checkAutomationStop("model drafting run\(nextRun)")
                     var draftedModel = LLMCommandService.sanitizeControlStream(
                         nextModel,
