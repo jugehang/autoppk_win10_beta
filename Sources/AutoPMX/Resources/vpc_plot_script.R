@@ -338,7 +338,14 @@ global_end <- if(length(diag_indices) > 0) diag_indices[1] else length(lines)
 all_strata_stats <- list()
 for (i in seq_along(header_indices)) {
   start_ln <- header_indices[i]
-  next_ln <- if (i < length(header_indices)) header_indices[i+1] else global_end
+  next_diag <- diag_indices[diag_indices > start_ln]
+  next_ln <- if (length(next_diag) > 0) {
+    next_diag[1]
+  } else if (i < length(header_indices)) {
+    header_indices[i+1]
+  } else {
+    length(lines)
+  }
 
   prev_strata_ln <- tail(strata_indices[strata_indices < start_ln], 1)
   current_id <- if (length(prev_strata_ln) > 0) {
@@ -357,11 +364,13 @@ for (i in seq_along(header_indices)) {
 
   block <- read.csv(text = lines[start_ln:(next_ln-1)], header = TRUE, check.names = FALSE)
   block <- robust_clean_names(block)
+  bin_end_col <- grep("^\\s*<=\\s*$", colnames(block), value = TRUE)[1]
 
   stratum_clean <- block %>%
     filter(!grepl("median", `median.idv`)) %>%
     transmute(
       bin_mid = as.numeric(`median.idv`),
+      bin_end = if (!is.na(bin_end_col) && nzchar(bin_end_col)) as.numeric(.data[[bin_end_col]]) else bin_mid,
       obs_med = as.numeric(`50% real`), med_med = as.numeric(`50% sim`),
       med_low = as.numeric(`95%CI for 50% from`), med_hi = as.numeric(`95%CI for 50% to`),
       obs_lo  = as.numeric(`5% real`), lo_med = as.numeric(`5% sim`),
@@ -375,6 +384,13 @@ for (i in seq_along(header_indices)) {
   all_strata_stats[[i]] <- stratum_clean
 }
 vpc_stats <- bind_rows(all_strata_stats)
+# PsN's median.idv is the bin midpoint for interval bins, so the final bin can
+# stop at 3000 while observations continue to 3336. Plot the last bin at its
+# right boundary so the VPC prediction interval actually reaches the tail.
+vpc_stats <- vpc_stats %>%
+  group_by(STRAT_LABEL) %>%
+  mutate(bin_mid = if_else(row_number() == n(), bin_end, bin_mid)) %>%
+  ungroup()
 message(paste0(">>> VPC 分层标签: ", paste(sort(unique(vpc_stats$STRAT_LABEL)), collapse = " | ")))
 
 # --- 5. 绘图 (Log10 + 6 剂量组对齐) ---
