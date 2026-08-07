@@ -442,7 +442,7 @@ def psn_scm_command(project_dir: Path, run_id: str, log: LogFn, psn_dir: str = "
     command = _psn_command("scm", psn_dir)
     config_path = root / f"scm_run_{run_id}.conf"
     if not config_path.exists():
-        config_path.write_text(default_scm_config(run_id), encoding="utf-8")
+        config_path.write_text(default_scm_config(run_id, root), encoding="utf-8")
         log(f"Created editable SCM config: {config_path.name}")
     return [
         command,
@@ -451,21 +451,67 @@ def psn_scm_command(project_dir: Path, run_id: str, log: LogFn, psn_dir: str = "
     ]
 
 
-def default_scm_config(run_id: str) -> str:
-    return f"""model=run{run_id}.mod
-search_direction=forward
-p_forward=0.05
-p_backward=0.01
-linearize=0
-continuous_covariates=WT,AGE
-categorical_covariates=SEX,STUDY
+def default_scm_config(run_id: str, project_dir: Optional[Path] = None) -> str:
+    root = Path(project_dir) if project_dir else Path.cwd()
+    mod_path = root / f"run{run_id}.mod"
+    model_columns: Set[str] = set()
+    if mod_path.exists():
+        mod_text = mod_path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?im)^\s*\$INPUT\s+(.+)$", mod_text)
+        if match:
+            model_columns = {
+                token.split("=", 1)[0].upper()
+                for token in match.group(1).split()
+                if token.upper() not in ("INPUT", "C")
+            }
+    cfg = load_project_config(root)
+    data_file = cfg.get("data_file", "")
+    data_columns: Set[str] = set()
+    if data_file:
+        data_path = root / data_file
+        if data_path.exists():
+            with data_path.open(newline="", encoding="utf-8", errors="ignore") as handle:
+                header = handle.readline()
+                data_columns = {
+                    col.strip().strip('"').upper()
+                    for col in header.split(",")
+                    if col.strip()
+                }
 
-[test_relations]
-CL=WT,AGE,SEX,STUDY
-V1=WT,AGE,SEX,STUDY
-V2=WT,AGE,SEX,STUDY
-Q=WT,AGE,SEX,STUDY
-"""
+    continuous_names = {"WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"}
+    categorical_names = {"SEX", "STUDY", "STUD", "ROUTE", "ADA", "RACE", "TRT", "ARM",
+                         "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"}
+    available = sorted((model_columns & (continuous_names | categorical_names)) & data_columns)
+    cont_covs = [name for name in available if name in continuous_names]
+    cat_covs = [name for name in available if name in categorical_names]
+
+    params: List[str] = []
+    if mod_path.exists():
+        mod_text = mod_path.read_text(encoding="utf-8", errors="ignore")
+        params = sorted(set(re.findall(r"(?im)\bTV([A-Za-z0-9_]+)\s*=\s*THETA", mod_text)))
+    if not params:
+        params = ["CL", "V1", "V2", "Q"]
+
+    lines = [
+        f"model=run{run_id}.mod",
+        "search_direction=forward",
+        "p_forward=0.05",
+        "p_backward=0.01",
+        "linearize=0",
+        f"continuous_covariates={','.join(cont_covs)}",
+        f"categorical_covariates={','.join(cat_covs)}",
+        "",
+        "[test_relations]",
+    ]
+    for param in params:
+        lines.append(f"{param}={','.join(available)}")
+    lines.extend([
+        "",
+        "[valid_states]",
+        f"continuous = 1,{max(len(cont_covs) + 3, 3)}",
+        f"categorical = 1,{max(len(cat_covs) + 1, 1)}",
+    ])
+    return "\n".join(lines) + "\n"
 
 
 def build_psn_execute_command(run_id: str, directory: Optional[str] = None) -> List[str]:

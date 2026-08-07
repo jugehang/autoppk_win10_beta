@@ -515,6 +515,10 @@ final class WorkbenchStore: ObservableObject {
     @Published var scmIncludeAGE = true
     @Published var scmIncludeSEX = true
     @Published var scmIncludeSTUDY = true
+    /// Additional SCM candidate covariates detected from the current model $INPUT
+    /// (e.g. DOSE, ROUTE, ADA, RACE, TRT). Kept separate from the four core toggles.
+    @Published var scmCandidateCovariates: [String] = []
+    @Published var scmIncludedAdditionalCovariates: Set<String> = []
     /// ETA vs covariate screening results, used to prompt and prefill SCM covariate choices.
     @Published var etaScreeningRunID = ""
     @Published var etaScreeningRecommendation = ""
@@ -5085,28 +5089,16 @@ final class WorkbenchStore: ObservableObject {
             runner.append("SCM: AI config failed (\(error.localizedDescription)), using fallback")
             let pkParams = detectPKParams(in: cleanMod)
 
-            // Same fallback as SCM config: if dataset profile has no covariates but $INPUT does, trust $INPUT
-            let dsAllFalse = !profile.hasWT && !profile.hasAGE && !profile.hasSEX && !profile.hasSTUDY
-            let inputHasAny = modelInput.contains("WT") || modelInput.contains("AGE") || modelInput.contains("SEX") || modelInput.contains("STUD")
-            let useFallback = dsAllFalse && inputHasAny
-            let effWT  = useFallback ? modelInput.contains("WT")  : profile.hasWT
-            let effAGE = useFallback ? modelInput.contains("AGE") : profile.hasAGE
-            let effSEX = useFallback ? modelInput.contains("SEX") : profile.hasSEX
-            let effSTUDY = useFallback ? (modelInput.contains("STUD") || modelInput.contains("STUDY")) : profile.hasSTUDY
-
-            let studyName = modelInput.contains("STUDY") ? "STUDY" : (modelInput.contains("STUD") ? "STUD" : nil)
-            // Respect analyst's covariate selection (nil = all detected)
-            let wantWT = includedCovariates == nil || includedCovariates!.contains("WT")
-            let wantAGE = includedCovariates == nil || includedCovariates!.contains("AGE")
-            let wantSEX = includedCovariates == nil || includedCovariates!.contains("SEX")
-            let wantSTUDY = includedCovariates == nil || includedCovariates!.contains("STUDY") || includedCovariates!.contains("STUD")
-            let allCovs = (effAGE && modelInput.contains("AGE") && wantAGE ? ["AGE"] : []) +
-                          (effWT && modelInput.contains("WT") && wantWT ? ["WT"] : []) +
-                          (effSEX && modelInput.contains("SEX") && wantSEX ? ["SEX"] : []) +
-                          (effSTUDY && studyName != nil && wantSTUDY ? [studyName!] : [])
-            let contCovs = allCovs.filter { ["WT", "AGE"].contains($0) }
-            let catCovs = allCovs.filter { ["SEX", "STUDY", "STUD"].contains($0) }
-            let covLine = { (covs: [String]) in covs.isEmpty ? "WT" : covs.sorted().joined(separator: ",") }
+            let knownCovs = covariateColumns(from: cleanMod)
+            let selectedCovs = Set(includedCovariates ?? Set(knownCovs))
+            let allCovs = selectedCovs
+                .filter { modelInput.contains($0) || knownCovs.contains($0) }
+                .sorted()
+            let continuousSet: Set<String> = ["WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
+            let categoricalSet: Set<String> = ["SEX", "STUDY", "STUD", "ROUTE", "ADA", "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"]
+            let contCovs = allCovs.filter { continuousSet.contains($0) }
+            let catCovs = allCovs.filter { categoricalSet.contains($0) }
+            let covLine = { (covs: [String]) in covs.sorted().joined(separator: ",") }
             let timeVaryingCovs = LLMCommandService.detectTimeVaryingCovariates(
                 projectURL: projectURL, dataFile: dataFile,
                 continuousCovs: contCovs,
@@ -5128,10 +5120,10 @@ final class WorkbenchStore: ObservableObject {
             fallback.append("")
             fallback.append("[test_relations]")
             if pkParams.isEmpty {
-                fallback.append("CL=\(allCovs.isEmpty ? "WT,AGE,SEX" : allCovs.sorted().joined(separator: ","))")
+                fallback.append("CL=\(allCovs.joined(separator: ","))")
             } else {
                 for p in pkParams.sorted() {
-                    fallback.append("\(p)=\(allCovs.sorted().joined(separator: ","))")
+                    fallback.append("\(p)=\(allCovs.joined(separator: ","))")
                 }
             }
             fallback.append("")
@@ -7477,6 +7469,8 @@ final class WorkbenchStore: ObservableObject {
             scmIncludeAGE = recommended.contains("AGE")
             scmIncludeSEX = recommended.contains("SEX")
             scmIncludeSTUDY = recommended.contains("STUDY") || recommended.contains("STUD")
+            let extra = Set(scmCandidateCovariates)
+            scmIncludedAdditionalCovariates = recommended.intersection(extra)
         }
     }
 
@@ -7489,6 +7483,7 @@ final class WorkbenchStore: ObservableObject {
         scmIncludeAGE = true
         scmIncludeSEX = true
         scmIncludeSTUDY = true
+        scmIncludedAdditionalCovariates = Set(scmCandidateCovariates)
     }
 
     private func ensureETATable(runID: String) async -> Bool {
@@ -7586,7 +7581,11 @@ final class WorkbenchStore: ObservableObject {
             .dropFirst(6)
             .split(whereSeparator: { $0 == " " || $0 == "\t" })
             .map { String($0).uppercased() }
-        let candidates = ["WT", "AGE", "SEX", "STUDY", "STUD", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
+        let candidates = [
+            "WT", "AGE", "SEX", "STUDY", "STUD", "BSA", "HB", "ALB", "CLCR",
+            "EGFR", "BMI", "DOSE", "ROUTE", "ADA", "RACE", "TRT", "ARM",
+            "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"
+        ]
         var found: [String] = []
         for candidate in candidates {
             if tokens.contains(candidate) {
@@ -7722,12 +7721,13 @@ final class WorkbenchStore: ObservableObject {
             if scmIncludeAGE && showAGE { included.insert("AGE") }
             if scmIncludeSEX && showSEX { included.insert("SEX") }
             if scmIncludeSTUDY && showSTUDY { included.insert(studyDisplayName ?? "STUDY") }
+            for cov in scmCandidateCovariates where scmIncludedAdditionalCovariates.contains(cov) && modelInput.contains(cov) {
+                included.insert(cov)
+            }
 
             // The status message must reflect the ACTUAL checked covariates, not just the
             // columns present in the dataset.
-            let covList = ["WT", "AGE", "SEX", studyDisplayName ?? "STUDY"]
-                .filter { included.contains($0) }
-                .joined(separator: " ")
+            let covList = included.sorted().joined(separator: " ")
             assistantMessages.append(AssistantMessage(role: .system, text: String.safeFormat(L10n.statusSCMStarted,
                                                                                   runID, runID, resolvedData, covList,
                                                                                   String(format: "%.3f", pForward),
@@ -7829,11 +7829,17 @@ final class WorkbenchStore: ObservableObject {
         scmDataFileName = csvs.first ?? dataFile
         scmPForward = "0.01"
         scmPBackward = "0.001"
+        let selectedModURL = projectURL.appendingPathComponent("run\(scmModelRunID).mod")
+        let selectedModText = (try? String(contentsOf: selectedModURL, encoding: .utf8)) ?? ""
+        let coreCovariates = Set(["WT", "AGE", "SEX", "STUDY", "STUD"])
+        scmCandidateCovariates = covariateColumns(from: selectedModText)
+            .filter { !coreCovariates.contains($0) }
         // Default: examine all candidate covariates
         scmIncludeWT = true
         scmIncludeAGE = true
         scmIncludeSEX = true
         scmIncludeSTUDY = true
+        scmIncludedAdditionalCovariates = Set(scmCandidateCovariates)
         applyETAScreeningDefaultsIfAvailable(for: scmModelRunID)
         showSCMDialog = true
     }

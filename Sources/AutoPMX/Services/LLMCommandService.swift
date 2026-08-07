@@ -4677,42 +4677,22 @@ struct LLMCommandService {
 
         // Fallback: if analyzeDataset() didn't find ANY covariate columns (likely file/parse error),
         // trust the $INPUT line directly — it IS the authoritative source for model columns.
-        let dsAllFalse = !profile.hasWT && !profile.hasAGE && !profile.hasSEX && !profile.hasSTUDY
-        let inputHasAny = modelInput.contains("WT") || modelInput.contains("AGE") || modelInput.contains("SEX") || modelInput.contains("STUD")
-        let useInputFallback = dsAllFalse && inputHasAny
-        if useInputFallback {
-            log?("SCM diag: dataset profile returned NO covariates, falling back to $INPUT line")
-        }
-        let effectiveHasWT  = useInputFallback ? modelInput.contains("WT")  : profile.hasWT
-        let effectiveHasAGE = useInputFallback ? modelInput.contains("AGE") : profile.hasAGE
-        let effectiveHasSEX = useInputFallback ? modelInput.contains("SEX") : profile.hasSEX
-        let effectiveHasSTUDY = useInputFallback ? (modelInput.contains("STUD") || modelInput.contains("STUDY")) : profile.hasSTUDY
-        log?("SCM diag: effective — hasWT:\(effectiveHasWT) hasAGE:\(effectiveHasAGE) hasSEX:\(effectiveHasSEX) hasSTUDY:\(effectiveHasSTUDY)")
-
-        let contCovs: [String] = {
-            var list: [String] = []
-            // Respect analyst's covariate selection (nil = all detected)
-            let wantAGE = includedCovariates == nil || includedCovariates!.contains("AGE")
-            let wantWT = includedCovariates == nil || includedCovariates!.contains("WT")
-            if effectiveHasAGE && modelInput.contains("AGE") && wantAGE { list.append("AGE") }
-            if effectiveHasWT && modelInput.contains("WT") && wantWT { list.append("WT") }
-            return list
-        }()
-        let catCovs: [String] = {
-            var list: [String] = []
-            let wantSEX = includedCovariates == nil || includedCovariates!.contains("SEX")
-            let wantSTUDY = includedCovariates == nil || includedCovariates!.contains("STUDY") || includedCovariates!.contains("STUD")
-            if effectiveHasSEX && modelInput.contains("SEX") && wantSEX { list.append("SEX") }
-            // Use the ACTUAL study column name from $INPUT (STUDY or STUD), not a hardcoded "STUD".
-            if effectiveHasSTUDY {
-                if modelInput.contains("STUDY") && wantSTUDY { list.append("STUDY") }
-                else if modelInput.contains("STUD") && wantSTUDY { list.append("STUD") }
-            }
-            return list
-        }()
+        let modelColumns = Set(inputLine.uppercased().components(separatedBy: .whitespaces))
+        let knownContinuous: Set<String> = ["WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
+        let knownCategorical: Set<String> = [
+            "SEX", "STUDY", "STUD", "ROUTE", "ADA", "RACE", "TRT", "ARM",
+            "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"
+        ]
+        let selected = includedCovariates?.map { $0.uppercased() } ?? []
+        let selectedCovs: Set<String> = selected.isEmpty
+            ? knownContinuous.union(knownCategorical)
+            : Set(selected)
+        let available = selectedCovs.intersection(modelColumns)
+        let allCovs = available.sorted()
+        let contCovs = allCovs.filter { knownContinuous.contains($0) }
+        let catCovs = allCovs.filter { knownCategorical.contains($0) }
         let contCovStr = contCovs.joined(separator: ",")
         let catCovStr = catCovs.joined(separator: ",")
-        let allCovs = contCovs + catCovs
         let allCovStr = allCovs.joined(separator: ",")
         log?("SCM diag: contCovs=[\(contCovStr)], catCovs=[\(catCovStr)], allCovs=[\(allCovStr)]")
 

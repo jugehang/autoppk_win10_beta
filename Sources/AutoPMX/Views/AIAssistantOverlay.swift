@@ -1966,6 +1966,18 @@ struct SCMSetupSheetView: View {
                 Toggle(L10n.scmCovAGE, isOn: $store.scmIncludeAGE)
                 Toggle(L10n.scmCovSEX, isOn: $store.scmIncludeSEX)
                 Toggle(L10n.scmCovSTUDY, isOn: $store.scmIncludeSTUDY)
+                ForEach(store.scmCandidateCovariates, id: \.self) { cov in
+                    Toggle(cov, isOn: Binding(
+                        get: { store.scmIncludedAdditionalCovariates.contains(cov) },
+                        set: { included in
+                            if included {
+                                store.scmIncludedAdditionalCovariates.insert(cov)
+                            } else {
+                                store.scmIncludedAdditionalCovariates.remove(cov)
+                            }
+                        }
+                    ))
+                }
                     Text(L10n.scmCovNote)
                     .font(DuDuFont.caption(11)).foregroundStyle(Color.adaptiveSheetText)
             }

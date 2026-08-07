@@ -238,11 +238,12 @@ enum ParameterEstimateParser {
             if shouldHideSIGMA(name: name, modText: modText) { continue }
 
             // If the parameter is FIXED in .mod, SE/RSE/shinkage are meaningless → nil
-            let finalSE = isParameterFixed(name: name, index: index, modText: modText) ? nil : se
+            let isFixed = isParameterFixed(name: name, index: index, modText: modText)
+            let finalSE = isFixed ? nil : se
 
             let displayName = labeledName(for: name, modText: modText) ?? name
             result.append(ParameterEstimateRow(
-                group: groupName(for: name), name: displayName,
+                group: groupName(for: name, label: displayName, isFixed: isFixed), name: displayName,
                 estimate: estimate, standardError: finalSE
             ))
         }
@@ -266,8 +267,11 @@ enum ParameterEstimateParser {
         return value
     }
 
-    private static func groupName(for name: String) -> String {
-        if name.hasPrefix("THETA") { return "Fixed" }
+    private static func groupName(for name: String, label: String, isFixed: Bool) -> String {
+        if name.hasPrefix("THETA") {
+            if isFixed { return "Fixed" }
+            return semanticGroup(for: label) == "Residual" ? "Residual" : "PK Parameter"
+        }
         if name.hasPrefix("OMEGA") { return "IIV" }
         if name.hasPrefix("SIGMA") { return "Residual" }
         return "Other"
