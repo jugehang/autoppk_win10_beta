@@ -396,9 +396,9 @@ message(paste0(">>> VPC 分层标签: ", paste(sort(unique(vpc_stats$STRAT_LABEL
 # --- 5. 绘图 (Log10 + 6 剂量组对齐) ---
 p_vpc <- ggplot(vpc_stats, aes(x = bin_mid)) +
   # 阴影层
-  geom_ribbon(aes(ymin = hi_low, ymax = hi_hi, fill = "5% & 95% CI (Sim)"), alpha = 0.2) +
-  geom_ribbon(aes(ymin = lo_low, ymax = lo_hi, fill = "5% & 95% CI (Sim)"), alpha = 0.2) +
-  geom_ribbon(aes(ymin = med_low, ymax = med_hi, fill = "Median CI (Sim)"), alpha = 0.2) +
+  geom_ribbon(aes(ymin = hi_low, ymax = hi_hi, fill = "90% PI (Sim)"), alpha = 0.2) +
+  geom_ribbon(aes(ymin = lo_low, ymax = lo_hi, fill = "90% PI (Sim)"), alpha = 0.2) +
+  geom_ribbon(aes(ymin = med_low, ymax = med_hi, fill = "Median (Sim)"), alpha = 0.2) +
 
   # 线条层
   geom_line(aes(y = hi_med, color = "5% & 95% Percentiles (Sim)"), linetype = "dashed", linewidth = 0.7) +
@@ -424,8 +424,8 @@ p_vpc <- ggplot(vpc_stats, aes(x = bin_mid)) +
     "Median (Obs)" = "#DD4B39", "Median (Sim)" = "#DD4B39",
     "5% & 95% Percentiles (Obs)" = "#3C8DBC", "5% & 95% Percentiles (Sim)" = "#3C8DBC"
   )) +
-  scale_fill_manual(name = "Confidence Intervals", values = c(
-    "Median CI (Sim)" = "#DD4B39", "5% & 95% CI (Sim)" = "#3C8DBC"
+  scale_fill_manual(name = "Prediction Intervals", values = c(
+    "Median (Sim)" = "#DD4B39", "90% PI (Sim)" = "#3C8DBC"
   )) +
   theme_bw(base_size = 14) +
   theme(legend.position = "bottom", legend.box = "vertical", panel.grid.minor = element_blank()) +
