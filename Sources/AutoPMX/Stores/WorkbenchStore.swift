@@ -4857,96 +4857,72 @@ final class WorkbenchStore: ObservableObject {
     /// For OMEGA: adds FIX to entries with IIV labels when RSE > 100%.
     /// Returns the modified text (or unchanged if already FIXed or no problem found).
     private func forceFixUnreliableParameter(_ modText: String, runID: String) -> String {
-        // First, check which parameters have high RSE from .lst
-        let lstURL = projectURL.appendingPathComponent("run\(runID).lst")
-        let lstText = (try? String(contentsOf: lstURL, encoding: .utf8)) ?? ""
-        let lstLines = lstText.components(separatedBy: "\n")
+        let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+        let lines = modText.components(separatedBy: "\n")
 
-        // Collect THETA indices with high RSE (>100%) from .lst
-        var thetaHighRSE: Set<Int> = []
-        var omegaHighRSE: Set<Int> = []
-        guard let thetaRe = try? NSRegularExpression(pattern: #"THETA\s+(\d+):\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]),
-              let omegaRe = try? NSRegularExpression(pattern: #"OMEGA\s+(\d+):\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]) else { return modText }
+        // Residual error has first priority: if Add.RE/Prop.RE cannot be estimated,
+        // fix that component to 0 before touching any IIV.
+        if let residual = rows.first(where: {
+            $0.group == "Residual" && ($0.rsePercent ?? 0) > 100
+        }), let index = thetaLineIndex(
+            matching: normalizedParameterLabel(residual.name),
+            in: lines
+        ) {
+            let line = lines[index]
+            let comment = line.firstIndex(of: ";").map { String(line[$0...]) } ?? ""
+            var result = lines
+            result[index] = comment.isEmpty ? "0 FIX" : "0 FIX  \(comment)"
+            runner.append("  → Fixed \(residual.name) to 0 FIX (RSE>100%)")
+            return result.joined(separator: "\n")
+        }
+
+        // Otherwise fix ONE unreliable IIV at a time.
+        if let iiv = rows.first(where: {
+            $0.group == "IIV" && ($0.rsePercent ?? 0) > 100
+        }), let index = omegaLineIndex(
+            matching: normalizedParameterLabel(iiv.name),
+            in: lines
+        ) {
+            let line = lines[index]
+            let comment = line.firstIndex(of: ";").map { String(line[$0...]) } ?? ""
+            var result = lines
+            result[index] = comment.isEmpty ? "0 FIX" : "0 FIX  \(comment)"
+            runner.append("  → Fixed \(iiv.name) to 0 FIX (RSE>100%)")
+            return result.joined(separator: "\n")
+        }
+        return modText
+    }
+
+    private func normalizedParameterLabel(_ value: String) -> String {
+        value.uppercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func thetaLineIndex(matching target: String, in lines: [String]) -> Int? {
         var inTheta = false
-        var inOmega = false
-        for line in lstLines {
+        for (index, line) in lines.enumerated() {
             let t = line.trimmingCharacters(in: .whitespaces)
             let upper = t.uppercased()
-            if upper.contains("THETA - ") { inTheta = true; inOmega = false; continue }
-            if upper.range(of: "OMEGA -", options: .regularExpression) != nil { inTheta = false; inOmega = true; continue }
-            if upper.range(of: "SIGMA -", options: .regularExpression) != nil || upper.hasPrefix("$") { inTheta = false; inOmega = false; break }
-            if inTheta, let m = thetaRe.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)),
-               let rse = Double((t as NSString).substring(with: m.range(at: 2))), rse > 100 {
-                // Convert from 1-based NONMEM index to 0-based .mod line index
-                if let num = Int((t as NSString).substring(with: m.range(at: 1))) {
-                    thetaHighRSE.insert(num - 1)
-                }
-            }
-            if inOmega, let m = omegaRe.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)),
-               let rse = Double((t as NSString).substring(with: m.range(at: 2))), rse > 100 {
-                if let num = Int((t as NSString).substring(with: m.range(at: 1))) {
-                    omegaHighRSE.insert(num - 1)
-                }
-            }
+            if upper.hasPrefix("$THETA") { inTheta = true; continue }
+            if upper.hasPrefix("$") && inTheta { inTheta = false; continue }
+            guard inTheta, let semi = t.firstIndex(of: ";") else { continue }
+            let label = String(t[t.index(after: semi)...]).trimmingCharacters(in: .whitespaces)
+            if normalizedParameterLabel(label) == target { return index }
         }
+        return nil
+    }
 
-        // Now modify the .mod file accordingly
-        let modLines = modText.components(separatedBy: "\n")
-        var result: [String] = []
-        var inBlock: String? = nil
-        var thetaIdx = 0
-        var omegaIdx = 0
-
-        for line in modLines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let upper = trimmed.uppercased()
-            if upper.hasPrefix("$THETA") { inBlock = "THETA"; thetaIdx = 0; result.append(line); continue }
-            if upper.hasPrefix("$OMEGA") { inBlock = "OMEGA"; omegaIdx = 0; result.append(line); continue }
-            if upper.hasPrefix("$") && inBlock != nil { inBlock = nil }
-
-            if inBlock == "THETA" {
-                let isEmptyLine = trimmed.isEmpty || trimmed.hasPrefix(";") || trimmed.hasPrefix("(")
-                if isEmptyLine && thetaHighRSE.contains(thetaIdx) {
-                    let alreadyFixed = trimmed.uppercased().contains("FIX")
-                    if !alreadyFixed {
-                        // Pin to ZERO (0 FIX) so the unreliable component contributes nothing.
-                        // Keep the trailing comment for readability.
-                        if let semi = line.firstIndex(of: ";") {
-                            let comment = line[semi...]
-                            result.append("0 FIX  \(comment)")
-                        } else {
-                            result.append("0 FIX")
-                        }
-                        runner.append("  → Fixed THETA[\(thetaIdx)] to 0 FIX (RSE>100%)")
-                        thetaIdx += 1
-                        continue
-                    }
-                }
-                thetaIdx += 1
-            }
-            if inBlock == "OMEGA" {
-                let isEmptyLine = trimmed.isEmpty || trimmed.hasPrefix(";")
-                if isEmptyLine && omegaHighRSE.contains(omegaIdx) {
-                    let alreadyFixed = trimmed.uppercased().contains("FIX")
-                    if !alreadyFixed {
-                        // IIV that cannot be estimated is pinned to 0 (OMEGA 0 FIX),
-                        // removing the variance contribution from the model.
-                        if let semi = line.firstIndex(of: ";") {
-                            let comment = line[semi...]
-                            result.append("0 FIX  \(comment)")
-                        } else {
-                            result.append("0 FIX")
-                        }
-                        runner.append("  → Fixed OMEGA[\(omegaIdx)] to 0 FIX (RSE>100%)")
-                        omegaIdx += 1
-                        continue
-                    }
-                }
-                omegaIdx += 1
-            }
-            result.append(line)
+    private func omegaLineIndex(matching target: String, in lines: [String]) -> Int? {
+        var inOmega = false
+        for (index, line) in lines.enumerated() {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            let upper = t.uppercased()
+            if upper.hasPrefix("$OMEGA") { inOmega = true; continue }
+            if upper.hasPrefix("$") && inOmega { inOmega = false; continue }
+            guard inOmega, let semi = t.firstIndex(of: ";") else { continue }
+            let label = String(t[t.index(after: semi)...]).trimmingCharacters(in: .whitespaces)
+            if normalizedParameterLabel(label) == target { return index }
         }
-        return result.joined(separator: "\n")
+        return nil
     }
 
     private func extractThetaLabels(from modText: String) -> [String] {
@@ -9115,6 +9091,43 @@ final class WorkbenchStore: ObservableObject {
         return (warnings.joined(separator: "\n"), directive)
     }
 
+    /// Check residual error RSE from .ext/parameter rows. This is the robust path
+    /// for NONMEM versions whose .lst prints matrices instead of per-parameter RSE.
+    private func checkResidualErrorRSEFromExt(runID: String) -> (warnings: String, hardDirective: String) {
+        let rows = ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+        var warnings: [String] = []
+        var hardProblems: [(label: String, rse: Double)] = []
+        for row in rows where row.group == "Residual" {
+            guard let rse = row.rsePercent else { continue }
+            if rse > 100 {
+                hardProblems.append((label: row.name, rse: rse))
+                warnings.append("🔴 \(row.name) has %RSE ≈ \(String(format: "%.0f", rse))% — UNESTIMABLE — MUST FIX to 0")
+            } else if rse > 50 {
+                warnings.append("⚠️ \(row.name) has %RSE ≈ \(String(format: "%.0f", rse))% — consider fixing to 0")
+            }
+        }
+        var directive = ""
+        if let worst = hardProblems.max(by: { $0.rse < $1.rse }) {
+            let lower = worst.label.lowercased()
+            let target = lower.contains("prop") ? "Prop.RE" : "Add.RE"
+            directive = """
+            ╔══════════════════════════════════════════════════════════════════╗
+            ║  🔴🔴🔴 PRIORITY DIRECTIVE — NON-NEGOTIABLE 🔴🔴🔴               ║
+            ║  Parent run\(runID) has \(worst.label) at %RSE = \(String(format: "%.0f", worst.rse))%   ║
+            ║  This EXCEEDS 100% → parameter is UNESTIMABLE.                  ║
+            ║                                                                  ║
+            ║  The new run MUST perform EXACTLY these actions:                  ║
+            ║  → Keep model structure. Do NOT remove THETA or modify $ERROR.    ║
+            ║  → Set \(target) in $THETA to `0 FIX  ; \(target) (sd)`.         ║
+            ║  → Keep $ERROR and $SIGMA unchanged.                              ║
+            ║  → Do NOT fix any IIV in this run.                                ║
+            ║  → Do NOT change compartment count or add covariates.             ║
+            ╚══════════════════════════════════════════════════════════════════╝
+            """
+        }
+        return (warnings.joined(separator: "\n"), directive)
+    }
+
     /// Summarize the structural / estimation settings of a model .mod — captured as a skill
     /// so successful parameter/structure choices can be reused across projects.
     private func modelSettingsSummary(runID: String) -> String {
@@ -9936,6 +9949,7 @@ final class WorkbenchStore: ObservableObject {
         let extPreview = textPreview(projectURL.appendingPathComponent("run\(runID).ext"), limit: 12_000)
         let failureEvidence = ModelRunEvidence.failureEvidence(projectURL: projectURL, runID: runID)
         let reports = recentReportPreviews(runID: runID)
+        let visualAudits = recentVisualAuditPreviews(runID: runID)
 
         // Extract OFV from current and previous runs for comparison
         let currentOFV = extractOFV(from: projectURL.appendingPathComponent("run\(runID).ext"))
@@ -9963,7 +9977,7 @@ final class WorkbenchStore: ObservableObject {
         let currentComp = compartmentInfoForRun(runID).compartments
 
         let cur = automationRunChoice(runID: runID, previousRun: previousRun)
-        let residualCheck = checkResidualErrorRSE(runID: runID)
+        let residualCheck = checkResidualErrorRSEFromExt(runID: runID)
         let residualWarnings = residualCheck.warnings
         let residualDirective = residualCheck.hardDirective
         let estStatus = """
@@ -9996,6 +10010,9 @@ final class WorkbenchStore: ObservableObject {
 
         Recent AI/diagnostic reports:
         \(reports)
+
+        ━━━ GOF/VPC VISUAL AUDIT REPORTS ━━━
+        \(visualAudits)
         """
     }
 
@@ -10033,6 +10050,38 @@ final class WorkbenchStore: ObservableObject {
             """
             --- \(url.lastPathComponent) ---
             \(textPreview(url, limit: 5_500))
+            """
+        }.joined(separator: "\n\n")
+    }
+
+    private func recentVisualAuditPreviews(runID: String) -> String {
+        let fm = FileManager.default
+        guard let topLevel = try? fm.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: nil) else {
+            return "No GOF/VPC visual audit reports found."
+        }
+        var matching: [URL] = []
+        for dir in topLevel where dir.lastPathComponent.hasPrefix("Compare") {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            matching.append(contentsOf: files.filter { url in
+                let name = url.lastPathComponent
+                return url.pathExtension.lowercased() == "md"
+                    && (name.hasPrefix("GOF_Expert_Audit_Run\(runID)_")
+                        || name.hasPrefix("VPC_Evolution_Audit_Run\(runID)_"))
+            })
+        }
+        matching.sort { left, right in
+            let leftDate = (try? left.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rightDate = (try? right.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return leftDate > rightDate
+        }
+        let selected = matching.prefix(4)
+        if selected.isEmpty {
+            return "No GOF/VPC visual audit reports found."
+        }
+        return selected.map { url in
+            """
+            --- \(url.lastPathComponent) ---
+            \(textPreview(url, limit: 6_000))
             """
         }.joined(separator: "\n\n")
     }
@@ -10334,52 +10383,8 @@ final class WorkbenchStore: ObservableObject {
     /// Scans both the THETA section and the OMEGA section of the .lst file.
     /// If ANY parameter exceeds threshold, returns true (the system should fix one).
     private func hasHighResidualRSE(runID: String, threshold: Double) -> Bool {
-        let lstURL = projectURL.appendingPathComponent("run\(runID).lst")
-        guard let text = try? String(contentsOf: lstURL, encoding: .utf8) else { return false }
-        let lines = text.components(separatedBy: "\n")
-        // THETA RSE pattern: "THETA 4:  1.00    4544    454398%  ; Add.RE"
-        guard let thetaRse = try? NSRegularExpression(pattern: #"THETA\s+\d+:\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]),
-              let thetaLabel = try? NSRegularExpression(pattern: #";\s*(\S+)"#, options: [.caseInsensitive]) else { return false }
-        // OMEGA RSE pattern: "OMEGA 1:  0.1436E+00  0.1606E-01  35.7%  ; IIV CL"
-        guard let omegaRse = try? NSRegularExpression(pattern: #"OMEGA\s+\d+:\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]),
-              let omegaLabel = try? NSRegularExpression(pattern: #";\s*(.+)$"#, options: [.caseInsensitive]) else { return false }
-        var inTheta = false
-        var inOmega = false
-        var highCount = 0
-
-        for line in lines {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            let upper = t.uppercased()
-            // Section boundaries
-            if upper.contains("THETA - ") { inTheta = true; inOmega = false; continue }
-            if upper.range(of: "OMEGA -", options: .regularExpression) != nil { inTheta = false; inOmega = true; continue }
-            if upper.range(of: "SIGMA -", options: .regularExpression) != nil { inTheta = false; inOmega = false; break }
-            if upper.hasPrefix("$") { inTheta = false; inOmega = false }
-
-            if inTheta {
-                var label = ""
-                if let m = thetaLabel.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)) {
-                    label = (t as NSString).substring(with: m.range(at: 1))
-                }
-                if let m = thetaRse.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)) {
-                    if let rse = Double((t as NSString).substring(with: m.range(at: 1))) {
-                        if rse > threshold { highCount += 1 }
-                    }
-                }
-            }
-            if inOmega {
-                var label = ""
-                if let m = omegaLabel.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)) {
-                    label = (t as NSString).substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
-                }
-                if let m = omegaRse.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)) {
-                    if let rse = Double((t as NSString).substring(with: m.range(at: 1))) {
-                        if rse > threshold { highCount += 1 }
-                    }
-                }
-            }
-        }
-        return highCount >= 1
+        ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+            .contains { $0.group == "Residual" && ($0.rsePercent ?? 0) > threshold }
     }
 
     /// User chose to accept a lower-compartment model instead.
