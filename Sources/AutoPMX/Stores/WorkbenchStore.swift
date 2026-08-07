@@ -8902,6 +8902,7 @@ final class WorkbenchStore: ObservableObject {
         let structuralPrecisionIssues: [String]
         let highRSEParameters: [String]
         let residualPrecisionIssues: [String]
+        let diagnosticAudit: String
 
         /// A more complex model is not worth escalating to when its key structural
         /// parameters are imprecise, residual-error RSE is unacceptable, or many
@@ -8910,6 +8911,10 @@ final class WorkbenchStore: ObservableObject {
             structuralPrecisionIssues.isEmpty
                 && residualPrecisionIssues.isEmpty
                 && highRSEParameters.count < 3
+        }
+
+        var diagnosticEligible: Bool {
+            diagnosticAudit != "fail"
         }
 
         var precisionLabel: String {
@@ -8935,7 +8940,7 @@ final class WorkbenchStore: ObservableObject {
 
         var row: String {
             let ofvText = ofv.map { String(format: "%.3f", $0) } ?? "NA"
-            return "| run\(runID) | \(ofvText) | \(compartments)-comp | \(minimizationSuccessful ? "yes" : "no") | \(covarianceSuccessful ? "yes" : "no") | \(stable ? "stable" : "UNSTABLE") | \(precisionLabel) | \(hasLst ? "lst " : "")\(hasExt ? "ext " : "")\(hasCov ? "cov" : "") |"
+            return "| run\(runID) | \(ofvText) | \(compartments)-comp | \(minimizationSuccessful ? "yes" : "no") | \(covarianceSuccessful ? "yes" : "no") | \(stable ? "stable" : "UNSTABLE") | \(precisionLabel) | \(diagnosticAudit.uppercased()) | \(hasLst ? "lst " : "")\(hasExt ? "ext " : "")\(hasCov ? "cov" : "") |"
         }
     }
 
@@ -9704,7 +9709,7 @@ final class WorkbenchStore: ObservableObject {
         lines.append("📊 Base Model Selection Summary:")
 
         // Group runs by compartment count and find best in each group
-        var grouped: [Int: [(runID: String, ofv: Double?, ci: (compartments: Int, advan: String), stable: Bool, precisionEligible: Bool, precisionIssues: [String])]] = [:]
+        var grouped: [Int: [(runID: String, ofv: Double?, ci: (compartments: Int, advan: String), stable: Bool, precisionEligible: Bool, precisionIssues: [String], diagnosticEligible: Bool, diagnosticAudit: String)]] = [:]
         for runID in sorted {
             let ci = compartmentInfoForRun(runID)
             let ofv = extractOFV(from: projectURL.appendingPathComponent("run\(runID).ext"))
@@ -9714,7 +9719,9 @@ final class WorkbenchStore: ObservableObject {
             let precisionEligible = precision.structuralIssues.isEmpty
                 && precision.residualIssues.isEmpty
                 && precision.highRSE.count < 3
-            grouped[ci.compartments, default: []].append((runID, ofv, ci, stable, precisionEligible, precisionIssues))
+            let diagnosticAudit = diagnosticAuditStatus(runID: runID)
+            let diagnosticEligible = diagnosticAudit != "fail"
+            grouped[ci.compartments, default: []].append((runID, ofv, ci, stable, precisionEligible, precisionIssues, diagnosticEligible, diagnosticAudit))
         }
 
         let sortedComps = grouped.keys.sorted()
@@ -9723,8 +9730,10 @@ final class WorkbenchStore: ObservableObject {
         for comp in sortedComps {
             guard let group = grouped[comp], !group.isEmpty else { continue }
             let stableGroup = group.filter { $0.stable }
-            let eligibleStableGroup = stableGroup.filter { $0.precisionEligible }
-            let bestInGroup = (eligibleStableGroup.isEmpty ? stableGroup : eligibleStableGroup).min { a, b in
+            let precisionStableGroup = stableGroup.filter { $0.precisionEligible }
+            let diagnosticStableGroup = precisionStableGroup.filter { $0.diagnosticEligible }
+            let bestPool = precisionStableGroup.isEmpty ? stableGroup : (diagnosticStableGroup.isEmpty ? precisionStableGroup : diagnosticStableGroup)
+            let bestInGroup = bestPool.min { a, b in
                 guard let aOFV = a.ofv, let bOFV = b.ofv else { return a.ofv != nil }
                 return aOFV < bOFV
             }
@@ -9743,6 +9752,7 @@ final class WorkbenchStore: ObservableObject {
                     let issueText = best.precisionIssues.prefix(4).joined(separator: ", ")
                     lines.append("  Precision: ⚠️ high %RSE: \(issueText)")
                 }
+                lines.append("  Diagnostics: \(best.diagnosticAudit.uppercased()) (GOF/VPC audit)")
             } else {
                 lines.append("  Best \(comp)-comp: no stable S+C model")
             }
@@ -9766,8 +9776,10 @@ final class WorkbenchStore: ObservableObject {
         for comp in sortedComps {
             guard let group = grouped[comp] else { continue }
             let stableGroup = group.filter { $0.stable }
-            let eligibleStableGroup = stableGroup.filter { $0.precisionEligible }
-            guard let bestInGroup = (eligibleStableGroup.isEmpty ? stableGroup : eligibleStableGroup).min(by: { a, b in
+            let precisionStableGroup = stableGroup.filter { $0.precisionEligible }
+            let diagnosticStableGroup = precisionStableGroup.filter { $0.diagnosticEligible }
+            let bestPool = precisionStableGroup.isEmpty ? stableGroup : (diagnosticStableGroup.isEmpty ? precisionStableGroup : diagnosticStableGroup)
+            guard let bestInGroup = bestPool.min(by: { a, b in
                 guard let aOFV = a.ofv, let bOFV = b.ofv else { return a.ofv != nil }
                 return aOFV < bOFV
             }), let bestOFV = bestInGroup.ofv else { continue }
@@ -9777,9 +9789,12 @@ final class WorkbenchStore: ObservableObject {
                 let df = comp - lastComp
                 let threshold = Double(df) * 3.84
                 let result: String
-                if delta > threshold && !bestInGroup.precisionEligible {
+                if delta > threshold && (!bestInGroup.precisionEligible || !bestInGroup.diagnosticEligible) {
                     let issueText = bestInGroup.precisionIssues.prefix(3).joined(separator: ", ")
-                    result = "✅ ΔOFV 显著 (\(String(format: "%.1f", delta)) > \(String(format: "%.1f", threshold)))，但 %RSE 不可靠 (\(issueText)) → 保留 \(lastComp)-comp"
+                    let reason = bestInGroup.precisionEligible
+                        ? "GOF/VPC audit \(bestInGroup.diagnosticAudit)"
+                        : "%RSE 不可靠 (\(issueText))"
+                    result = "✅ ΔOFV 显著 (\(String(format: "%.1f", delta)) > \(String(format: "%.1f", threshold)))，但 \(reason) → 保留 \(lastComp)-comp"
                 } else if delta > threshold {
                     result = "✅ 显著改进 (Δ=\(String(format: "%.1f", delta)) > \(String(format: "%.1f", threshold)))"
                 } else if delta > 3.84 {
@@ -9875,7 +9890,8 @@ final class WorkbenchStore: ObservableObject {
             compartments: compartmentInfoForRun(runID).compartments,
             structuralPrecisionIssues: precision.structuralIssues,
             highRSEParameters: precision.highRSE,
-            residualPrecisionIssues: precision.residualIssues
+            residualPrecisionIssues: precision.residualIssues,
+            diagnosticAudit: diagnosticAuditStatus(runID: runID)
         )
     }
 
@@ -9936,10 +9952,13 @@ final class WorkbenchStore: ObservableObject {
         var bestPerComp: [Int: AutomationRunChoice] = [:]
         for (comp, group) in grouped {
             let stable = group.filter { $0.stable }
-            let eligibleStable = stable.filter { $0.precisionEligible }
-            // Prefer a precision-eligible stable run. If none exists, fall back to the
-            // best stable run so the summary can still report why it is not acceptable.
-            let candidates = eligibleStable.isEmpty ? stable : eligibleStable
+            let precisionStable = stable.filter { $0.precisionEligible }
+            let diagnosticStable = precisionStable.filter { $0.diagnosticEligible }
+            // Prefer a precision-eligible, diagnostic-acceptable stable run. If none exists,
+            // fall back to the best stable run so the summary can still report why it is not acceptable.
+            let candidates = precisionStable.isEmpty
+                ? stable
+                : (diagnosticStable.isEmpty ? precisionStable : diagnosticStable)
             // Sort within group: prefer successful minimization, then covariance, then lower OFV
             let sorted = candidates.sorted { a, b in
                 if a.minimizationSuccessful != b.minimizationSuccessful {
@@ -9998,9 +10017,12 @@ final class WorkbenchStore: ObservableObject {
                 // Significant OFV improvement alone is not enough. A more complex model
                 // with unstable structural or residual %RSE (or many imprecise parameters) is
                 // not a robust base model, so keep the simpler stable model.
-                if currentChoice.precisionEligible {
-                    runner.append("Base model selection: \(currentComp)-comp run\(currentChoice.runID) significantly better than \(bestChoice.compartments)-comp (ΔOFV=\(String(format: "%.1f", delta)) > threshold \(String(format: "%.1f", threshold))) and %RSE precision acceptable → ACCEPT")
+                if currentChoice.precisionEligible && currentChoice.diagnosticEligible {
+                    runner.append("Base model selection: \(currentComp)-comp run\(currentChoice.runID) significantly better than \(bestChoice.compartments)-comp (ΔOFV=\(String(format: "%.1f", delta)) > threshold \(String(format: "%.1f", threshold))) and precision/GOF-VPC audit acceptable → ACCEPT")
                     bestChoice = currentChoice
+                } else if !currentChoice.diagnosticEligible {
+                    runner.append("Base model selection: \(currentComp)-comp run\(currentChoice.runID) has significant ΔOFV but GOF/VPC audit failed (\(currentChoice.diagnosticAudit)) → REJECT, keep \(bestChoice.compartments)-comp")
+                    break
                 } else {
                     runner.append("Base model selection: \(currentComp)-comp run\(currentChoice.runID) has significant ΔOFV (\(String(format: "%.1f", delta)) > \(String(format: "%.1f", threshold))) BUT %RSE precision is not acceptable (\(currentChoice.precisionReason)) → REJECT, keep \(bestChoice.compartments)-comp")
                     break
@@ -10023,6 +10045,9 @@ final class WorkbenchStore: ObservableObject {
         // always beats an unstable one, regardless of OFV.
         if left.stable != right.stable {
             return left.stable
+        }
+        if left.diagnosticEligible != right.diagnosticEligible {
+            return left.diagnosticEligible
         }
         if left.minimizationSuccessful != right.minimizationSuccessful {
             return left.minimizationSuccessful
@@ -10069,10 +10094,10 @@ final class WorkbenchStore: ObservableObject {
         - Dataset route: \(profile.route)
         - Subject count: \(profile.subjectCount)
         - Observation count: \(profile.observationCount)
-        - Selection rule: stable S+C first; prefer lower OFV; reject a more complex model when structural or residual %RSE > 50% or ≥3 estimated parameters are imprecise.
+        - Selection rule: stable S+C first; prefer lower OFV; reject a more complex model when structural or residual %RSE > 50%, ≥3 estimated parameters are imprecise, or GOF/VPC visual audit reports an explicit failure.
 
-        | Run | OFV | Compartments | Minimization | Covariance | Stability | Precision | Outputs |
-        | --- | ---: | --- | --- | --- | --- | --- | --- |
+        | Run | OFV | Compartments | Minimization | Covariance | Stability | Precision | Diagnostics | Outputs |
+        | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
         \(rows)
         """
 
@@ -10238,6 +10263,48 @@ final class WorkbenchStore: ObservableObject {
             \(textPreview(url, limit: 6_000))
             """
         }.joined(separator: "\n\n")
+    }
+
+    private func diagnosticAuditStatus(runID: String) -> String {
+        let reports = visualAuditReportURLs(for: runID)
+        guard !reports.isEmpty else { return "missing" }
+        let combined = reports.compactMap { url in
+            try? String(contentsOf: url, encoding: .utf8)
+        }.joined(separator: "\n")
+        let lower = combined.lowercased()
+        let failMarkers = [
+            "不合格", "不通过", "不可接受", "失败", "严重", "系统偏差",
+            "poor", "reject", "inadequate", "fail", "not acceptable",
+            "does not", "未能覆盖", "未覆盖"
+        ]
+        let passMarkers = [
+            "通过", "合格", "可接受", "良好", "无明显", "无系统", "覆盖良好",
+            "acceptable", "adequate", "good", "pass", "recommend",
+            "建议定稿", "no major", "well"
+        ]
+        let failCount = failMarkers.filter { lower.contains($0) }.count
+        let passCount = passMarkers.filter { lower.contains($0) }.count
+        if failCount > passCount { return "fail" }
+        if passCount > 0 { return "pass" }
+        return "warn"
+    }
+
+    private func visualAuditReportURLs(for runID: String) -> [URL] {
+        let fm = FileManager.default
+        guard let topLevel = try? fm.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        var result: [URL] = []
+        for dir in topLevel where dir.lastPathComponent.hasPrefix("Compare") {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            result.append(contentsOf: files.filter { url in
+                let name = url.lastPathComponent
+                return url.pathExtension.lowercased() == "md"
+                    && (name.hasPrefix("GOF_Expert_Audit_Run\(runID)_")
+                        || name.hasPrefix("VPC_Evolution_Audit_Run\(runID)_"))
+            })
+        }
+        return result
     }
 
     private func textPreview(_ url: URL, limit: Int) -> String {

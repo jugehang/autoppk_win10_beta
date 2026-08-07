@@ -206,9 +206,9 @@ def _find_image(root: Path, prefix: str, run_id: str) -> Optional[Path]:
 def _run_visual_audit(settings: WorkbenchSettings, log, kind: str) -> int:
     root = settings.project_path
     output = dated_compare_dir(root, settings.prev_run, settings.curr_run)
-    prefix = "GOF_mod" if kind == "gof" else "VPC_mod"
-    current = _find_image(root, prefix, settings.curr_run)
-    previous = _find_image(root, prefix, settings.prev_run)
+    prefixes = ["GOF_mod"] if kind == "gof" else ["VPC_Stratified_mod", "VPC_mod"]
+    current = next((_find_image(root, prefix, settings.curr_run) for prefix in prefixes if _find_image(root, prefix, settings.curr_run)), None)
+    previous = next((_find_image(root, prefix, settings.prev_run) for prefix in prefixes if _find_image(root, prefix, settings.prev_run)), None)
     if not current:
         log(f"Missing current {kind.upper()} image for run {settings.curr_run}.")
         return 2
