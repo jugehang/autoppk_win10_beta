@@ -5918,7 +5918,7 @@ final class WorkbenchStore: ObservableObject {
 
             do {
                 try checkAutomationStop("startup")
-                automationStep = "Checking local LLM"
+                automationStep = "Checking LLM connection"
                 addThinkingStep("Checking LLM connection [\(activeAPIFormat.displayName)]", type: .working)
                 let probe = try await LLMCommandService.detectEndpoint(
                     preferredBaseURL: llmBaseURL, apiKey: llmAPIKey, apiFormat: activeAPIFormat
@@ -6715,11 +6715,13 @@ final class WorkbenchStore: ObservableObject {
                         runner.append("Inherited handoff run\(sourceRun) is S+C; scheduling release of all inherited structural FIXes.")
                     }
 
-                    // [硬性规定] 每次写下一份模型前，检查前一次运行的残差 RSE。
-                    // 如果残差项 %RSE > 100%，强制在当前房室层修复残差，不允许升室。
-                    // 实施方式：直接修改源 .mod 文件，给对应 THETA 加上 FIX 关键字。
+                    // [硬性规定] 每次写下一份模型前，检查前一次运行的残差/IIV RSE。
+                    // 如果残差 %RSE > 100% 或 IIV %RSE > 50%，强制在当前房室层修复，不允许升室。
+                    // 实施方式：直接修改源 .mod 文件，给对应 THETA/OMEGA 加上 0 FIX 关键字。
                     // AI 在 proposeOptimizedModel 中读取该文件时，看到的是已 FIX 的版本。
-                    if !covariatePhase && !inheritedHandoffMode && hasHighResidualRSE(runID: sourceRun, threshold: 100.0) {
+                    let needsResidualFix = hasHighResidualRSE(runID: sourceRun, threshold: 100.0)
+                    let needsIIVFix = !inheritedHandoffMode && hasHighIIVRSE(runID: sourceRun, threshold: 50.0)
+                    if !covariatePhase && !inheritedHandoffMode && (needsResidualFix || needsIIVFix) {
                         forceSameCompartment = true
                         forceEscalation = false
                         let sourceMod = projectURL.appendingPathComponent("run\(sourceRun).mod")
@@ -8928,7 +8930,7 @@ final class WorkbenchStore: ObservableObject {
         var precisionEligible: Bool {
             structuralPrecisionIssues.isEmpty
                 && residualPrecisionIssues.isEmpty
-                && highRSEParameters.count < 3
+                && highRSEParameters.isEmpty
         }
 
         var diagnosticEligible: Bool {
@@ -9736,7 +9738,7 @@ final class WorkbenchStore: ObservableObject {
             let precisionIssues = precision.highRSE
             let precisionEligible = precision.structuralIssues.isEmpty
                 && precision.residualIssues.isEmpty
-                && precision.highRSE.count < 3
+                && precision.highRSE.isEmpty
             let diagnosticAudit = diagnosticAuditStatus(runID: runID)
             let diagnosticEligible = diagnosticAudit != "fail"
             grouped[ci.compartments, default: []].append((runID, ofv, ci, stable, precisionEligible, precisionIssues, diagnosticEligible, diagnosticAudit))
@@ -10112,7 +10114,7 @@ final class WorkbenchStore: ObservableObject {
         - Dataset route: \(profile.route)
         - Subject count: \(profile.subjectCount)
         - Observation count: \(profile.observationCount)
-        - Selection rule: stable S+C first; prefer lower OFV; reject a more complex model when structural or residual %RSE > 50%, ≥3 estimated parameters are imprecise, or GOF/VPC visual audit reports an explicit failure.
+        - Selection rule: stable S+C first; prefer lower OFV; reject a more complex model when any estimated parameter %RSE > 50% (structural, IIV, or residual) or GOF/VPC visual audit reports an explicit failure.
 
         | Run | OFV | Compartments | Minimization | Covariance | Stability | Precision | Diagnostics | Outputs |
         | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
@@ -10624,6 +10626,11 @@ final class WorkbenchStore: ObservableObject {
     private func hasHighResidualRSE(runID: String, threshold: Double) -> Bool {
         ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
             .contains { $0.group == "Residual" && ($0.rsePercent ?? 0) > threshold }
+    }
+
+    private func hasHighIIVRSE(runID: String, threshold: Double) -> Bool {
+        ProjectScanner.parameterEstimates(runID: runID, in: projectURL)
+            .contains { $0.group == "IIV" && ($0.rsePercent ?? 0) > threshold }
     }
 
     /// User chose to accept a lower-compartment model instead.
