@@ -528,14 +528,14 @@ struct ProjectScanner {
                 "lloq_unit": "µg/mL"
               },
               "grouping": {
-                "factor": "STUDY",
+                "factor": "",
                 "labels": {}
               },
               "psn_settings": {
                 "vpc_samples": 500,
                 "bootstrap_samples": 200,
-                "stratify_var": "STUDY",
-                "vpc_stratify": "STUDY"
+                "stratify_var": "",
+                "vpc_stratify": ""
               }
             }
             """

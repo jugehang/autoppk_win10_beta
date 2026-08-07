@@ -324,7 +324,9 @@ enum SCMStepModelBuilder {
 
     private static func isCategoricalCovariate(_ cov: String) -> Bool {
         let c = cov.uppercased()
-        return c == "SEX" || c == "STUDY" || c == "STUD"
+        return ["SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "ADA", "ROUTE",
+                "BQL", "TYPE", "CMT", "EVID", "MDV", "RACE", "TRT", "ARM",
+                "REGION", "GROUP", "COHORT", "TREATMENT", "FORM"].contains(c)
     }
 
     private static func definitionBody(

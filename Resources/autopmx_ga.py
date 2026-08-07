@@ -865,6 +865,22 @@ def build_mod_from_structure(template_mod, structural_genes, theta_values):
 
     is_oral = (route_cat == "oral")
     has_infusion = ("D1=DUR" in template_mod.upper() or "D1" in template_mod.upper())
+    input_match = re.search(r"(?im)^\s*\$INPUT\s+(.+)$", template_mod)
+    input_tokens = []
+    if input_match:
+        input_tokens = [token for token in input_match.group(1).split()
+                        if token.upper() not in ("INPUT", "C")]
+    sdtab_extra = [token for token in input_tokens
+                   if token.upper() not in ("ID", "TIME", "DV", "MDV",
+                                            "PRED", "IPRED", "CWRES", "CIWRES")]
+    cat_cols = [token for token in input_tokens
+                if token.upper() in ("SEX", "STUDY", "STUD", "STUDYID", "STUDYNO",
+                                     "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID",
+                                     "MDV", "RACE", "TRT", "ARM", "REGION",
+                                     "GROUP", "COHORT", "TREATMENT", "FORM")] or ["ID"]
+    cont_cols = [token for token in input_tokens
+                 if token.upper() in ("WT", "AGE", "BSA", "HB", "ALB", "CLCR",
+                                      "EGFR", "BMI", "DOSE", "AMT", "RATE", "DUR")] or ["ID"]
 
     # Build parameter list
     params = COMPARTMENT_PARAMS.get(num_compartments, ["CL", "V"])
@@ -879,8 +895,16 @@ def build_mod_from_structure(template_mod, structural_genes, theta_values):
 
     # Collect covariate genes
     cov_genes = {}
-    for key in ["cov_wt_cl", "cov_wt_v", "cov_age", "cov_sex", "cov_study"]:
-        if structural_genes.get(key, False):
+    available_input = {token.upper() for token in input_tokens}
+    covariate_gene_columns = {
+        "cov_wt_cl": ["WT"],
+        "cov_wt_v": ["WT"],
+        "cov_age": ["AGE"],
+        "cov_sex": ["SEX"],
+        "cov_study": ["STUDY", "STUD"],
+    }
+    for key, columns in covariate_gene_columns.items():
+        if structural_genes.get(key, False) and any(col in available_input for col in columns):
             cov_genes[key] = True
 
     # Count THETAs needed
@@ -971,11 +995,11 @@ def build_mod_from_structure(template_mod, structural_genes, theta_values):
     eta_count = len(active_iiv_params)
     eta_terms = " ".join(f"ETA{i}" for i in range(1, eta_count + 1))
     pk_names = " ".join(params)
-    table_block = f"""$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=SDTAB{ga_run} FORMAT=s1PE14.7
+    table_block = f"""$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES {' '.join(sdtab_extra)} ONEHEADER NOPRINT NOAPPEND FILE=SDTAB{ga_run} FORMAT=s1PE14.7
 $TABLE ID {pk_names} {eta_terms} NOPRINT NOAPPEND ONEHEADER FILE=PATAB{ga_run}
 $TABLE ID {eta_terms} FIRSTONLY NOAPPEND NOPRINT FILE={ga_run}.ETA
-$TABLE ID WT SEX STUDY NOPRINT NOAPPEND ONEHEADER FILE=CATAB{ga_run}
-$TABLE ID AGE NOPRINT NOAPPEND ONEHEADER FILE=COTAB{ga_run}"""
+$TABLE ID {' '.join(cat_cols)} NOPRINT NOAPPEND ONEHEADER FILE=CATAB{ga_run}
+$TABLE ID {' '.join(cont_cols)} NOPRINT NOAPPEND ONEHEADER FILE=COTAB{ga_run}"""
 
     # Assemble
     sections = [
@@ -1295,7 +1319,24 @@ def run_ga_structural_optimization(mod_text, nmfe_path, project_dir,
     # --- Covariate genes ---
     cov_gene_names = []
     if "covariate" in structural_dims:
-        for cov in ["cov_wt_cl", "cov_wt_v", "cov_age", "cov_sex", "cov_study"]:
+        ga_input_match = re.search(r"(?im)^\s*\$INPUT\s+(.+)$", mod_text)
+        ga_input_cols = set()
+        if ga_input_match:
+            ga_input_cols = {
+                token.upper()
+                for token in ga_input_match.group(1).split()
+                if token.upper() not in ("INPUT", "C")
+            }
+        ga_covariate_columns = {
+            "cov_wt_cl": ["WT"],
+            "cov_wt_v": ["WT"],
+            "cov_age": ["AGE"],
+            "cov_sex": ["SEX"],
+            "cov_study": ["STUDY", "STUD"],
+        }
+        for cov, columns in ga_covariate_columns.items():
+            if not any(col in ga_input_cols for col in columns):
+                continue
             specs.add_categorical(cov, [True, False])
             cov_gene_names.append(cov)
         print(f"  Covariate genes: {cov_gene_names}")

@@ -40,7 +40,7 @@ def _run_generate(args) -> int:
         text = generate_from_template(
             template_id=args.template,
             run_id=args.run,
-            data_file=args.data or "NM_dat_new.csv",
+            data_file=args.data or "dataset.csv",
         )
         Path(args.output).write_text(strip_inline_dataset_rows(text), encoding="utf-8")
         print(f"Generated {args.output}")
@@ -71,7 +71,7 @@ def _run_autofix(args) -> int:
     settings = WorkbenchSettings(
         project_dir=mod_path.parent,
         curr_run=args.run_id or mod_path.stem.replace("run", ""),
-        data_file=args.data or "NM_dat_new.csv",
+        data_file=args.data or "dataset.csv",
     )
     runner = TaskRunner(settings, lambda msg: print(msg, file=sys.stderr))
     return runner._preflight_mod_check(mod_path)

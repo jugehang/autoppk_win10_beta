@@ -556,7 +556,7 @@ const slides = [
         <tr><td><span class="tag accent">自动建模</span></td><td>从数据集自动设计结构模型、残差模型，迭代优化至收敛</td></tr>
         <tr><td><span class="tag accent">模型提案</span></td><td>分析 LST/EXT 输出，给出 ACCEPT 或 REVISE 及具体修改建议</td></tr>
         <tr><td><span class="tag accent">错误修复</span></td><td>解析 NONMEM 错误信息，按规则库自动修正控制流语法错误</td></tr>
-        <tr><td><span class="tag accent">协变量筛选</span></td><td>评估 WT/SEX/AGE/STUDY 等协变量，控制前向/后向选择策略</td></tr>
+        <tr><td><span class="tag accent">协变量筛选</span></td><td>评估当前数据集/$INPUT 中实际存在的协变量，控制前向/后向选择策略</td></tr>
         <tr><td><span class="tag accent">诊断图解读</span></td><td>分析 GOF/VPC 图片，识别模型偏差、预测区间覆盖质量</td></tr>
         <tr><td><span class="tag accent">参数审计</span></td><td>审阅 THETA 合理性、OMEGA 收缩率、SIGMA 大小</td></tr>
         <tr><td><span class="tag accent">C-T 分析</span></td><td>剂量归一化 C-T 曲线 + 吸收滞后 + TMDD + ADA 检测</td></tr>
@@ -661,7 +661,7 @@ const slides = [
       <pre>
 Phase 0: 数据分析 → C-T 曲线 + 滞后检测 + Dataset Profile
 Phase 1: 结构模型 → AI 写 run001.mod → 运行 → 诊断 → 修复 (最多 3 次)
-Phase 2: 协变量筛选 → 逐个评估 WT/SEX/AGE/STUDY → 前向/后向选择
+Phase 2: 协变量筛选 → 逐个评估当前数据集/$INPUT 中实际存在的协变量 → 前向/后向选择
 Phase 3: 最终评估 → 完整诊断 + AI 综合审计报告 → 模型交付</pre>
     `
   },

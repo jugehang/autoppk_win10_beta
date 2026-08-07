@@ -28,7 +28,7 @@ if (length(pkg_errors) > 0) {
 }
 
 args <- commandArgs(trailingOnly = TRUE)
-csv_file   <- if (length(args) >= 1) args[1] else "NM_dat_new.csv"
+csv_file   <- if (length(args) >= 1) args[1] else "dataset.csv"
 out_prefix <- if (length(args) >= 2) args[2] else "ct_plot"
 # Optional unit args (passed from Swift/Python app when available)
 dose_unit  <- if (length(args) >= 3) args[3] else "mg"

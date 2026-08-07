@@ -922,7 +922,7 @@ Workspace/
 │   └── ...
 ├── poppk_rules.json            ← PopPK rule library (495 rules)
 ├── poppk_model_library.md      ← NONMEM ADVAN/TRANS template library
-├── NM_dat_new.csv              ← Default dataset
+├── dataset.csv                 ← Default dataset
 ├── autopmx_cli.py              ← Python bridge (diagnostics, validation)
 └── autopmx_ga.py               ← GA optimizer script
 </pre>
@@ -1184,7 +1184,7 @@ Workspace/
   <tr><td>1</td><td><span class="en">Refine structural model</span><span class="zh">精修结构模型</span></td><td><span class="en">1-comp → 2-comp if GOF/VPC shows distribution phase misspecification</span><span class="zh">若 GOF/VPC 显示分布相设定不当，则 1→2 房室</span></td></tr>
   <tr><td>2</td><td><span class="en">Refine error model</span><span class="zh">精修误差模型</span></td><td><span class="en">Combined is default; simplify only if one component is unsupported</span><span class="zh">组合误差为默认；仅当某分量不被支持时才简化</span></td></tr>
   <tr><td>3</td><td><span class="en">Add IIV</span><span class="zh">加 IIV</span></td><td><span class="en">One parameter at a time (CL first, then V); judge ETA/PK precision by %RSE, boundary, covariance, and convergence</span><span class="zh">一次一个参数（先 CL 后 V）；ETA/PK 参数精度看 %RSE、边界、协方差和收敛状态</span></td></tr>
-  <tr><td>4</td><td><span class="en">Screen covariates</span><span class="zh">筛选协变量</span></td><td><span class="en">WT on CL/V, then AGE, SEX, STUDY; OFV drop &gt; 3.84</span><span class="zh">WT 作用于 CL/V，再 AGE、SEX、STUDY；OFV 下降 &gt; 3.84</span></td></tr>
+  <tr><td>4</td><td><span class="en">Screen covariates</span><span class="zh">筛选协变量</span></td><td><span class="en">Use the actual covariate columns in the current dataset/$INPUT; OFV drop &gt; 3.84</span><span class="zh">使用当前数据集/$INPUT 中实际存在的协变量列；OFV 下降 &gt; 3.84</span></td></tr>
   <tr><td>5</td><td><span class="en">Bioavailability</span><span class="zh">生物利用度</span></td><td><span class="en">F1 only when both oral and IV data exist</span><span class="zh">仅当同时存在口服与静脉数据时才设 F1</span></td></tr>
 </table>
 
@@ -1230,7 +1230,7 @@ Workspace/
   <li><span class="en"><strong>ADVAN / Compartments</strong> — 1-comp, 2-comp, or 3-comp (route-locked)</span><span class="zh"><strong>ADVAN / 房室数</strong> —— 1、2 或 3 房室（途径锁定）</span></li>
   <li><span class="en"><strong>Error model</strong> — Proportional, combined, or additive</span><span class="zh"><strong>误差模型</strong> —— 比例、组合或加和</span></li>
   <li><span class="en"><strong>IIV</strong> — Which parameters get ETA terms + diagonal vs block OMEGA</span><span class="zh"><strong>IIV</strong> —— 哪些参数加 ETA，以及对角或块 OMEGA</span></li>
-  <li><span class="en"><strong>Covariates</strong> — WT on CL/V, AGE, SEX, STUDY</span><span class="zh"><strong>协变量</strong> —— WT 作用于 CL/V，以及 AGE、SEX、STUDY</span></li>
+  <li><span class="en"><strong>Covariates</strong> — current dataset columns actually present in the project, not a fixed preset list</span><span class="zh"><strong>协变量</strong> —— 以当前项目中实际存在的数据集列为准，不使用固定预设列表</span></li>
 </ul>
 <table>
   <tr><th><span class="en">Parameter</span><span class="zh">参数</span></th><th><span class="en">Default</span><span class="zh">默认</span></th><th><span class="en">Description</span><span class="zh">说明</span></th></tr>
@@ -1327,7 +1327,7 @@ Workspace/
   <li><span class="en"><strong>Python Environment</strong> — Detected from workspace <code>.venv</code> or system Python.</span><span class="zh"><strong>Python 环境</strong> —— 从工作区 <code>.venv</code> 或系统 Python 检测。</span></li>
   <li><span class="en"><strong>R (Rscript)</strong> — Path to Rscript for diagnostic plot generation.</span><span class="zh"><strong>R（Rscript）</strong> —— 用于生成诊断图的 Rscript 路径。</span></li>
   <li><span class="en"><strong>File Viewers</strong> — macOS QuickLook for images, PDF, DOCX, XLSX, PPTX, HTML.</span><span class="zh"><strong>文件预览</strong> —— 通过 macOS QuickLook 预览图片、PDF、DOCX、XLSX、PPTX、HTML。</span></li>
-  <li><span class="en"><strong>Default Dataset Filename</strong> — CSV used when creating new projects (default: NM_dat_new.csv).</span><span class="zh"><strong>默认数据集文件名</strong> —— 新建项目时使用的 CSV（默认 NM_dat_new.csv）。</span></li>
+  <li><span class="en"><strong>Default Dataset Filename</strong> — CSV used when creating new projects (default: dataset.csv, or the CSV you import).</span><span class="zh"><strong>默认数据集文件名</strong> —— 新建项目时使用的 CSV（默认 dataset.csv，或你导入的 CSV）。</span></li>
 </ul>
 
 <h3><span class="en">Rules</span><span class="zh">规则</span></h3>
@@ -1597,7 +1597,7 @@ Workspace/
           <tr><td><span class="ov-tag accent"><span class="en">Auto Modeling</span><span class="zh">自动建模</span></span></td><td><span class="en">Auto-design structural/residual model, iterate to convergence</span><span class="zh">自动设计结构/残差模型，迭代优化至收敛</span></td></tr>
           <tr><td><span class="ov-tag accent"><span class="en">Model Proposal</span><span class="zh">模型提案</span></span></td><td><span class="en">Analyze LST/EXT, give ACCEPT/REVISE and revision suggestions</span><span class="zh">分析 LST/EXT，给出 ACCEPT/REVISE 及修改建议</span></td></tr>
           <tr><td><span class="ov-tag accent"><span class="en">Error Fix</span><span class="zh">错误修复</span></span></td><td><span class="en">Parse FMSG, auto-fix control stream by rule base</span><span class="zh">解析 FMSG，按规则库自动修正控制流</span></td></tr>
-          <tr><td><span class="ov-tag accent"><span class="en">Covariate Screening</span><span class="zh">协变量筛选</span></span></td><td><span class="en">Evaluate WT/SEX/AGE/STUDY, control forward/backward strategy</span><span class="zh">评估 WT/SEX/AGE/STUDY，控制前向/后向策略</span></td></tr>
+          <tr><td><span class="ov-tag accent"><span class="en">Covariate Screening</span><span class="zh">协变量筛选</span></span></td><td><span class="en">Evaluate covariates actually present in the current dataset/$INPUT, control forward/backward strategy</span><span class="zh">评估当前数据集/$INPUT 中实际存在的协变量，控制前向/后向策略</span></td></tr>
           <tr><td><span class="ov-tag accent"><span class="en">Plot Interpretation</span><span class="zh">诊断图解读</span></span></td><td><span class="en">Analyze GOF/VPC, detect bias &amp; coverage quality (Vision LLM)</span><span class="zh">分析 GOF/VPC，识别偏差与覆盖质量（Vision LLM）</span></td></tr>
           <tr><td><span class="ov-tag accent"><span class="en">Parameter Audit</span><span class="zh">参数审计</span></span></td><td><span class="en">Review THETA/OMEGA/SIGMA sanity</span><span class="zh">审阅 THETA/OMEGA/SIGMA 合理性</span></td></tr>
           <tr><td><span class="ov-tag accent"><span class="en">C-T Analysis</span><span class="zh">C-T 分析</span></span></td><td><span class="en">Dose-normalized C-T + lag + TMDD + ADA detection</span><span class="zh">剂量归一化 C-T + 滞后 + TMDD + ADA 检测</span></td></tr>

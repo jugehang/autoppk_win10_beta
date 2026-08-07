@@ -128,7 +128,7 @@ if (is.null(data_path) && file.exists("project_config.json")) {
 }
 
 if (is.null(data_path)) {
-  for (candidate in c("NM_dat_new.csv", "NM_dat.csv", "dataset.csv", "data.csv")) {
+  for (candidate in c("dataset.csv", "data.csv", "NM_dat.csv")) {
     if (file.exists(candidate)) {
       data_path <- candidate
       break
@@ -151,7 +151,8 @@ excluded <- c(
   "SS", "LDOS", "IPRED", "PRED", "RES", "WRES", "CWRES", "IWRES", "IRES"
 )
 known_continuous <- c("WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE")
-known_categorical <- c("SEX", "STUDY", "STUD", "RACE", "GROUP", "FORM", "ROUTE")
+known_categorical <- c("SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "RACE",
+                       "GROUP", "FORM", "ROUTE")
 
 continuous_covs <- intersect(known_continuous, setdiff(names(raw), excluded))
 categorical_covs <- intersect(known_categorical, setdiff(names(raw), excluded))

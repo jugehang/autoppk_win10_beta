@@ -68,7 +68,7 @@ class WorkbenchSettings:
     rscript: str = "Rscript"
     nonmem_template: str = ""
     psn_execute_template: str = "execute {model} -model_dir_name"
-    data_file: str = "NM_dat_new.csv"
+    data_file: str = "dataset.csv"
 
     @property
     def project_path(self) -> Path:
@@ -116,8 +116,9 @@ def create_project_folder(workspace_dir: Path, name: str) -> Path:
                 {
                     "project_name": name.strip() or project_root.name,
                     "units": {"time": "Time (h)", "conc": "Concentration"},
-                    "grouping": {"factor": "STUDY", "labels": {}},
-                    "psn_settings": {"vpc_samples": 500, "bootstrap_samples": 200, "stratify_var": "STUDY"},
+                    "grouping": {"factor": "", "labels": {}},
+                    "psn_settings": {"vpc_samples": 500, "bootstrap_samples": 200,
+                                     "stratify_var": "", "vpc_stratify": ""},
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -145,7 +146,7 @@ def create_project_from_run(
     source_dir: Path,
     name: str,
     run_id: str,
-    data_file: str = "NM_dat_new.csv",
+    data_file: str = "dataset.csv",
 ) -> Path:
     project_root = create_project_folder(workspace_dir, name)
     source = Path(source_dir).resolve()
@@ -198,7 +199,7 @@ def extract_data_path(mod_path: Path) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def data_path_status(project_dir: Path, run_id: str, data_file: str = "NM_dat_new.csv") -> DataPathStatus:
+def data_path_status(project_dir: Path, run_id: str, data_file: str = "dataset.csv") -> DataPathStatus:
     root = Path(project_dir).resolve()
     mod_path = root / f"run{run_id}.mod"
     expected = root / data_file
@@ -479,8 +480,9 @@ def default_scm_config(run_id: str, project_dir: Optional[Path] = None) -> str:
                 }
 
     continuous_names = {"WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"}
-    categorical_names = {"SEX", "STUDY", "STUD", "ROUTE", "ADA", "RACE", "TRT", "ARM",
-                         "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"}
+    categorical_names = {"SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "ROUTE", "ADA",
+                         "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP",
+                         "COHORT", "TREATMENT"}
     available = sorted((model_columns & (continuous_names | categorical_names)) & data_columns)
     cont_covs = [name for name in available if name in continuous_names]
     cat_covs = [name for name in available if name in categorical_names]

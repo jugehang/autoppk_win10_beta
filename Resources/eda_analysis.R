@@ -23,7 +23,7 @@ suppressPackageStartupMessages({
 })
 
 args <- commandArgs(trailingOnly = TRUE)
-csv_file   <- if (length(args) >= 1) args[1] else "NM_dat_new.csv"
+csv_file   <- if (length(args) >= 1) args[1] else "dataset.csv"
 out_prefix <- if (length(args) >= 2) args[2] else "eda"
 
 # ---- 1. Robust CSV read ----

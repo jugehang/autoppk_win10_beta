@@ -376,7 +376,7 @@ def check_table_content(text: str, run_id: str) -> List[ValidationIssue]:
     for match in re.finditer(r"\bETA\s*\(\s*(\d+)\s*\)", text, re.IGNORECASE):
         eta_terms.add(f"ETA{match.group(1)}")
 
-    core_sdtab = {"ID", "TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES", "STUDY"}
+    core_sdtab = {"ID", "TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES"}
     ignored_keywords = {
         "$TABLE", "ID", "ONEHEADER", "NOPRINT", "NOAPPEND", "FIRSTONLY", "FORMAT",
     }

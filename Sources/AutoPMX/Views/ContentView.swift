@@ -626,7 +626,7 @@ struct ClaudeCodePanel: View {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n\n请比较 run\(store.previousRun).mod 和 run\(store.currentRun).mod 的 NONMEM 输出，根据 PopPK 规则库判断当前模型相比前一个模型是否有改进。列出 OFV 变化、参数估计变化、诊断图改进情况。"
                         }
                         skillChip(L10n.claudeSkillCovariate) {
-                            store.claudeCodeInput = "项目: \(store.projectURL.path)\n当前模型: run\(store.currentRun).mod\n数据: \(store.dataFile)\n\n请根据 PopPK 规则库评估是否可以添加协变量（WT, SEX, AGE, STUDY）到当前模型。只在结构模型和残差模型稳定后才考虑协变量。不要一次性添加多个协变量。"
+                            store.claudeCodeInput = "项目: \(store.projectURL.path)\n当前模型: run\(store.currentRun).mod\n数据: \(store.dataFile)\n\n请根据 PopPK 规则库评估是否可以添加协变量。以当前模型 $INPUT 和数据集实际列名为准（例如 WT、AGE、SEX、STUDY、DOSE、ROUTE、ADA 等，不要假设固定列）。只在结构模型和残差模型稳定后才考虑协变量。不要一次性添加多个协变量。"
                         }
                         skillChip(L10n.claudeSkillNewModel) {
                             store.claudeCodeInput = "项目: \(store.projectURL.path)\n数据: \(store.dataFile)\n\n请根据 PopPK 模型库模板创建一个新的 runXXX.mod 控制流。数据集是 IV Infusion 给药途径，从1房室模型开始。$INPUT 必须严格按照 CSV 表头顺序。$TABLE 的参数必须和 $PK 定义的参数完全一致。"

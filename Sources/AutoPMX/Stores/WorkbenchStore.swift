@@ -3581,7 +3581,7 @@ final class WorkbenchStore: ObservableObject {
         let sanitizedMod = LLMCommandService.stripInlineDatasetRows(modText)
         let tableParams = detectTableParams(from: sanitizedMod)
         let tableBlock = """
-        $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES STUDY ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(runID) FORMAT=s1PE14.7
+        $TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(runID) FORMAT=s1PE14.7
         $TABLE ID \(tableParams.paramList) ONEHEADER NOPRINT NOAPPEND FILE=patab\(runID)
         $TABLE ID \(tableParams.paramList) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(runID)
         $TABLE ID \(tableParams.paramList) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(runID)
@@ -3682,6 +3682,7 @@ final class WorkbenchStore: ObservableObject {
         if profile.hasAGE { covList.append("AGE") }
         if profile.hasSEX { covList.append("SEX") }
         if !profile.studyLevels.isEmpty { covList.append("STUDY(\(profile.studyLevels.count) levels)") }
+        covList.append(contentsOf: profile.additionalCovariates.sorted())
         let availableCovariates = covList.joined(separator: ", ")
 
         var lines: [String] = []
@@ -3716,8 +3717,8 @@ final class WorkbenchStore: ObservableObject {
         Now independently evaluate the SCM selection using these criteria:
         1. Forward inclusion p < 0.05 (ΔOFV > 3.84, 1 df)
         2. Backward elimination p < 0.01 (ΔOFV > 6.63, 1 df)
-        3. WT allometric scaling (0.75 FIX for CL, 1.0 FIX for V) → mandatory first step
-        4. Clinical significance: if ∂OFV < 10.83 even with p<0.01, check ratio at extremes
+        3. If WT is available, WT allometric scaling (0.75 FIX for CL, 1.0 FIX for V) is the first step
+        4. Clinical significance: if ΔOFV < 10.83 even with p<0.01, check ratio at extremes
 
         Your task:
         - For each available covariate, estimate whether it would be significant.
@@ -4142,7 +4143,8 @@ final class WorkbenchStore: ObservableObject {
                 .joined(separator: "\n")
         }
         let upper = searchText.uppercased()
-        let candidates = ["WT", "AGE", "SEX", "STUDY", "STUD", "BSA", "RACE", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
+        let candidates = ["WT", "AGE", "SEX", "STUDY", "STUD", "STUDYID", "STUDYNO",
+                          "BSA", "RACE", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
         var ordered: [String] = []
         for cov in candidates {
             let escaped = NSRegularExpression.escapedPattern(for: cov)
@@ -5095,7 +5097,9 @@ final class WorkbenchStore: ObservableObject {
                 .filter { modelInput.contains($0) || knownCovs.contains($0) }
                 .sorted()
             let continuousSet: Set<String> = ["WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
-            let categoricalSet: Set<String> = ["SEX", "STUDY", "STUD", "ROUTE", "ADA", "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"]
+            let categoricalSet: Set<String> = ["SEX", "STUDY", "STUD", "STUDYID", "STUDYNO",
+                                               "ROUTE", "ADA", "RACE", "TRT", "ARM",
+                                               "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"]
             let contCovs = allCovs.filter { continuousSet.contains($0) }
             let catCovs = allCovs.filter { categoricalSet.contains($0) }
             let covLine = { (covs: [String]) in covs.sorted().joined(separator: ",") }
@@ -7582,9 +7586,9 @@ final class WorkbenchStore: ObservableObject {
             .split(whereSeparator: { $0 == " " || $0 == "\t" })
             .map { String($0).uppercased() }
         let candidates = [
-            "WT", "AGE", "SEX", "STUDY", "STUD", "BSA", "HB", "ALB", "CLCR",
-            "EGFR", "BMI", "DOSE", "ROUTE", "ADA", "RACE", "TRT", "ARM",
-            "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"
+            "WT", "AGE", "SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "BSA",
+            "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE", "ROUTE", "ADA",
+            "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"
         ]
         var found: [String] = []
         for candidate in candidates {
@@ -7703,8 +7707,12 @@ final class WorkbenchStore: ObservableObject {
             }
 
             // Fallback: if dataset profile has zero covariates but $INPUT does, use $INPUT
-            let dsAllFalse = !profile.hasWT && !profile.hasAGE && !profile.hasSEX && !profile.hasSTUDY
-            let inputHasAny = modelInput.contains("WT") || modelInput.contains("AGE") || modelInput.contains("SEX") || modelInput.contains("STUD")
+            let dsAllFalse = !profile.hasWT && !profile.hasAGE && !profile.hasSEX
+                && !profile.hasSTUDY && profile.additionalCovariates.isEmpty
+            let knownInputCovariates: Set<String> = ["WT", "AGE", "SEX", "STUDY", "STUD", "STUDYID", "STUDYNO",
+                "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE", "ROUTE", "ADA",
+                "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"]
+            let inputHasAny = !modelInput.intersection(knownInputCovariates).isEmpty
             let useFallback = dsAllFalse && inputHasAny
             let showWT  = useFallback ? modelInput.contains("WT")  : profile.hasWT
             let showAGE = useFallback ? modelInput.contains("AGE") : profile.hasAGE
@@ -9459,6 +9467,7 @@ final class WorkbenchStore: ObservableObject {
         if profile.hasAGE { parts.append("AGE") }
         if profile.hasSEX { parts.append("SEX") }
         if profile.hasSTUDY { parts.append("STUDY") }
+        parts.append(contentsOf: profile.additionalCovariates.sorted())
         return parts.isEmpty ? "no covariates" : parts.joined(separator: ", ")
     }
 

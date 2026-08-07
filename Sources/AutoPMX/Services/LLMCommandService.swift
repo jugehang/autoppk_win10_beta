@@ -26,6 +26,7 @@ struct DatasetProfile {
     let ageMean: Double?
     let sexLevels: [Int]               // unique SEX values found
     let studyLevels: [Int]             // unique STUDY values found
+    let additionalCovariates: [String] // other covariate columns present (DOSE, ROUTE, ADA, ...)
 
     var summary: String {
         var lines = ["Dataset Profile:"]
@@ -59,6 +60,9 @@ struct DatasetProfile {
         if hasSTUDY {
             let counts = studyLevels.sorted().map { "study \($0)" }.joined(separator: ", ")
             lines.append("  STUDY: \(studyLevels.count) levels (\(counts))")
+        }
+        if !additionalCovariates.isEmpty {
+            lines.append("  Additional covariates: \(additionalCovariates.joined(separator: ", "))")
         }
 
         if hasBQL { lines.append("  BQL: flag present in dataset") }
@@ -1672,22 +1676,23 @@ struct LLMCommandService {
         The next run AFTER base model acceptance MUST add at least one covariate.
 
         ━━━ COVARIATE COMPLETENESS CHECK (HARD RULE) ━━━
-        Check the "Dataset:" section at the top of Evidence: "Available covariates: WT, AGE, SEX, ...".
+        Check the "Dataset:" section at the top of Evidence: "Available covariates: <actual columns>".
         EVERY available covariate MUST be tested. For each covariate, test against EVERY relevant PK param.
         If any listed covariate has NOT been tested, you MUST output REVISE (not ACCEPT).
-        Required tests per covariate:
-        - WT: CL, V, Q (all clearance + all volume params) → mandatory FIRST
-        - AGE: CL, V → mandatory SECOND
-        - SEX: CL, V → mandatory THIRD
-        - STUDY: CL, V (if available) → mandatory FOURTH
+        Required tests: use the Dataset profile's ACTUAL available covariates (for example
+        WT, AGE, SEX, STUDY, DOSE, ROUTE, ADA, RACE, TRT when present in $INPUT). Test each
+        available covariate against every relevant PK parameter. Do NOT require covariates
+        that are not in the current project's dataset/$INPUT.
         Each covariate is an INDEPENDENT scientific question. One being significant does NOT excuse skipping another.
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
         Steps:
-        1. WT allometric scaling: apply to ALL PK params (0.75 for CL/Q, 1.0 for V).
-        2. AGE on CL and V: continuous power/linear. Test separately.
-        3. SEX on CL and V: categorical proportional shift (SEXCOV = 1 + THETA * (SEX - ref)).
-        4. STUDY on CL and V (if multiple studies): categorical shift.
+        1. Read the ACTUAL covariates in the current project's Dataset profile and $INPUT.
+           Do not invent or require WT, AGE, SEX, or STUDY unless they are present.
+        2. If WT is present, test allometric scaling on all PK params
+           (0.75 for CL/Q, 1.0 for V).
+        3. For each other continuous covariate present, test on clearance and volume params.
+        4. For each categorical covariate present, test on clearance and volume params.
         Keep each if ΔOFV > 3.84 (forward). Remove if ΔOFV < 6.63 (backward).
         5. Clinical significance: PK ratio 0.8–1.25.
         6. Bootstrap (≥200 samples) validates final model.
@@ -1853,7 +1858,9 @@ struct LLMCommandService {
         Do NOT change the structural model (ADVAN/TRANS), error model, or IIV structure — they are FINALIZED.
         Your ONLY task: add EXACTLY ONE covariate relationship per run, following this order:
 
-        STEP 1 (mandatory first): WT allometric scaling — APPLY TO ALL PK PARAMETERS.
+        STEP 1: Start with the first covariate present in the ACTUAL dataset profile.
+          If WT is present, begin with WT allometric scaling on ALL PK parameters.
+          If WT is absent, skip WT and move to the next available covariate.
 
         ━━━ CORRECT EXPONENTS (FIXED, not estimated) ━━━
         Clearance-related: CL, Q, Q2, Q3 → exponent = 0.75 FIX
@@ -1873,11 +1880,9 @@ struct LLMCommandService {
 
         STEP 2: SCM-style fast screening — test ALL available covariates as univariate additions.
           Check the Dataset profile embedded in the Diagnosis: "Available covariates: ..."
-          Test EVERY covariate listed there against ALL relevant PK parameters:
-          - WT → CL, Q, V1, V2 (all params)
-          - AGE → CL, V1
-          - SEX → CL, V1
-          - STUDY → CL, V1 (if available)
+          Use the ACTUAL covariate columns from the current project's $INPUT/data file
+          (e.g. WT, AGE, SEX, STUDY, DOSE, ROUTE, ADA, RACE, TRT).
+          Test EVERY listed covariate against ALL relevant PK parameters.
           Run each as a SEPARATE model. Rank candidates by ΔOFV.
           Keep entries with ΔOFV > 3.84 (p<0.05, 1 df).
           Do NOT skip any covariate from the dataset profile — each must be tested.
@@ -2022,18 +2027,18 @@ struct LLMCommandService {
         ║ ONLY add/examine/remove covariates.
         ╚══════════════════════════════════════════════════════
 
-        STEP 1 (mandatory first): WT allometric scaling — APPLY TO ALL PK PARAMS.
-          CL, Q, Q2, Q3 → exponent = 0.75 FIX
-          V, V1, V2, V3 → exponent = 1.0 FIX
-          Add EXACTLY 2 new THETAs: (0, 0.75) FIX and (0, 1.0) FIX
-          REUSE the same exponent THETA for all clearance/volume params.
+        STEP 1: Start with the first covariate present in the ACTUAL dataset profile.
+          If WT is present, apply allometric scaling to ALL PK params:
+            CL, Q, Q2, Q3 → exponent = 0.75 FIX
+            V, V1, V2, V3 → exponent = 1.0 FIX
+            Add EXACTLY 2 new THETAs: (0, 0.75) FIX and (0, 1.0) FIX
+            REUSE the same exponent THETA for all clearance/volume params.
+          If WT is absent, skip this step and begin with the next available covariate.
 
         STEP 2: SCM-style univariate screening — test ALL available covariates.
-          Check Dataset profile for: WT, AGE, SEX, STUDY, etc.
-          - WT → CL, Q, V1, V2 (all params)
-          - AGE → CL, V1
-          - SEX → CL, V1
-          - STUDY → CL, V1
+          Check Dataset profile and $INPUT for the ACTUAL covariate columns
+          (e.g. WT, AGE, SEX, STUDY, DOSE, ROUTE, ADA, RACE, TRT).
+          Test every available covariate against all relevant PK parameters.
           Each as SEPARATE model. Rank by ΔOFV. Keep if ΔOFV>3.84 (p<0.05, 1 df).
 
         STEP 3: Forward inclusion — add significant covariates one at a time, most significant first.
@@ -2907,7 +2912,7 @@ struct LLMCommandService {
         }
     }
 
-    private static let defaultInputRecord = "C ID CYCLE DAY TIME NTIME DV AMT RATE DUR CMT DOSE MDV EVID BQL TYPE STUDY SEX WT AGE"
+    private static let defaultInputRecord = "C ID TIME DV AMT RATE DUR CMT EVID MDV"
 
     private static func inputRecordFromDataset(projectURL: URL, dataFile: String) -> String? {
         let url = dataURL(projectURL: projectURL, dataFile: dataFile)
@@ -3354,13 +3359,14 @@ struct LLMCommandService {
     }
 
     private static func defaultProfile(hasWT: Bool = false, hasAGE: Bool = false, hasSEX: Bool = false,
-                                        hasSTUDY: Bool = false, hasBQL: Bool = false, obs: Int = 0) -> DatasetProfile {
+                                        hasSTUDY: Bool = false, hasBQL: Bool = false, obs: Int = 0,
+                                        additionalCovariates: [String] = []) -> DatasetProfile {
         DatasetProfile(route: "Unknown", hasIVBolus: false, hasIVInfusion: false, hasOral: false,
                        doseLevels: [], subjectCount: 0, observationCount: obs,
                        timeRangeDays: (0, 0), hasWT: hasWT, hasAGE: hasAGE, hasSEX: hasSEX,
                        hasSTUDY: hasSTUDY, hasBQL: hasBQL, typicalDV: nil, dvRange: nil,
                        wtRange: nil, wtMedian: nil, wtMean: nil, ageRange: nil, ageMedian: nil, ageMean: nil,
-                       sexLevels: [], studyLevels: [])
+                       sexLevels: [], studyLevels: [], additionalCovariates: additionalCovariates)
     }
 
     static func analyzeDataset(projectURL: URL, dataFile: String, log: ((String) -> Void)? = nil) -> DatasetProfile {
@@ -3383,8 +3389,13 @@ struct LLMCommandService {
         let hasWT = headers.contains("WT")
         let hasAGE = headers.contains("AGE")
         let hasSEX = headers.contains("SEX")
-        let hasSTUDY = headers.contains("STUDY")
+        let hasSTUDY = headers.contains("STUDY") || headers.contains("STUD")
         let hasBQL = headers.contains("BQL")
+        let additionalCovariates = headers.filter {
+            ["STUD", "STUDYID", "STUDYNO", "DOSE", "ROUTE", "ADA", "RACE", "TRT",
+             "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT",
+             "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI"].contains($0)
+        }
         log?("ANA diag: hasWT=\(hasWT) hasAGE=\(hasAGE) hasSEX=\(hasSEX) hasSTUDY=\(hasSTUDY) hasBQL=\(hasBQL)")
 
         // Find column indices
@@ -3392,7 +3403,8 @@ struct LLMCommandService {
               let timeIdx = headers.firstIndex(of: "TIME"),
               let dvIdx = headers.firstIndex(of: "DV") else {
             return defaultProfile(hasWT: hasWT, hasAGE: hasAGE, hasSEX: hasSEX,
-                                  hasSTUDY: hasSTUDY, hasBQL: hasBQL, obs: lines.count - 1)
+                                  hasSTUDY: hasSTUDY, hasBQL: hasBQL, obs: lines.count - 1,
+                                  additionalCovariates: additionalCovariates)
         }
         let cmtIdx = headers.firstIndex(of: "CMT")
         let amtIdx = headers.firstIndex(of: "AMT")
@@ -3586,7 +3598,8 @@ struct LLMCommandService {
             ageMedian: ageValues.isEmpty ? nil : ageValues.sorted()[ageValues.count / 2],
             ageMean: ageMean,
             sexLevels: Array(sexValues),
-            studyLevels: Array(studyValues)
+            studyLevels: Array(studyValues),
+            additionalCovariates: additionalCovariates
         )
     }
 
@@ -3991,11 +4004,21 @@ struct LLMCommandService {
 
         let etaTerms = (1..<etaIndex).map { "ETA\($0)" }.joined(separator: " ")
         let params = tableParams.joined(separator: " ")
-        let extraSdtab = inputRecord
+        let inputTokens = inputRecord
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
+        let inputSet = Set(inputTokens.map { $0.uppercased() })
+        let extraSdtab = inputTokens
             .filter { $0 != "C" }
             .joined(separator: " ")
+        let categorical = ["SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "ADA",
+                           "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV",
+                           "RACE", "TRT", "ARM", "REGION", "GROUP",
+                           "COHORT", "TREATMENT", "FORM"]
+        let continuous = ["WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR",
+                          "BMI", "DOSE", "AMT", "RATE", "DUR"]
+        let catCols = categorical.filter { inputSet.contains($0) }
+        let contCols = continuous.filter { inputSet.contains($0) }
 
         let lines = [
             "$PROBLEM Run\(childRunID): Full dataset extravascular handoff from IV run\(parentRunID)",
@@ -4023,8 +4046,8 @@ struct LLMCommandService {
             "$TABLE ID TIME DV MDV PRED IPRED CWRES CIWRES \(extraSdtab) ONEHEADER NOPRINT NOAPPEND FILE=sdtab\(childRunID) FORMAT=s1PE14.7",
             "$TABLE ID \(params)\(etaTerms.isEmpty ? "" : " \(etaTerms)") NOPRINT NOAPPEND ONEHEADER FILE=patab\(childRunID)",
             "$TABLE ID \(etaTerms) FIRSTONLY NOAPPEND NOPRINT FILE=run\(childRunID).ETA",
-            "$TABLE ID SEX STUDY ADA ROUTE BQL TYPE CMT EVID MDV FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(childRunID)",
-            "$TABLE ID WT AGE DOSE AMT RATE DUR FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(childRunID)"
+            "$TABLE ID \(catCols.joined(separator: " ")) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=catab\(childRunID)",
+            "$TABLE ID \(contCols.joined(separator: " ")) FIRSTONLY NOPRINT NOAPPEND ONEHEADER FILE=cotab\(childRunID)"
         ]
 
         return lines.joined(separator: "\n") + "\n"
@@ -4187,8 +4210,12 @@ struct LLMCommandService {
         let pkParams = pkParameterNames(from: normalizedText)
         let etaTerms = etaTermNames(from: normalizedText)
 
-        let categorical = ["SEX", "STUDY", "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV"]
-        let continuous = ["WT", "AGE", "DOSE", "AMT", "RATE", "DUR"]
+        let categorical = ["SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "ADA",
+                           "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV",
+                           "RACE", "TRT", "ARM", "REGION", "GROUP",
+                           "COHORT", "TREATMENT", "FORM"]
+        let continuous = ["WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR",
+                          "BMI", "DOSE", "AMT", "RATE", "DUR"]
         let inputSet = Set(inputTokens)
         var catCols = categorical.filter { inputSet.contains($0) }
         var contCols = continuous.filter { inputSet.contains($0) }
@@ -4199,7 +4226,7 @@ struct LLMCommandService {
             contCols = ["WT", "AGE"].filter { inputSet.contains($0) }
         }
 
-        let coreSdtab = Set(["ID", "TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES", "STUDY"])
+        let coreSdtab = Set(["ID", "TIME", "DV", "MDV", "PRED", "IPRED", "CWRES", "CIWRES"])
         let extraSdtab = inputTokens.filter { $0 != "C" && !coreSdtab.contains($0) }
         let params = pkParams.isEmpty ? "CL V" : pkParams.joined(separator: " ")
         let etas = etaTerms.joined(separator: " ")
@@ -4680,8 +4707,8 @@ struct LLMCommandService {
         let modelColumns = Set(inputLine.uppercased().components(separatedBy: .whitespaces))
         let knownContinuous: Set<String> = ["WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR", "BMI", "DOSE"]
         let knownCategorical: Set<String> = [
-            "SEX", "STUDY", "STUD", "ROUTE", "ADA", "RACE", "TRT", "ARM",
-            "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"
+            "SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "ROUTE", "ADA",
+            "RACE", "TRT", "ARM", "REGION", "TYPE", "GROUP", "COHORT", "TREATMENT"
         ]
         let selected = includedCovariates?.map { $0.uppercased() } ?? []
         let selectedCovs: Set<String> = selected.isEmpty

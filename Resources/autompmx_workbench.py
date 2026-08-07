@@ -50,7 +50,7 @@ class AutoPMXWorkbench(tk.Frame):
 
         self.prev_run = tk.StringVar(value="38")
         self.curr_run = tk.StringVar(value="41")
-        self.data_file = tk.StringVar(value="NM_dat_new.csv")
+        self.data_file = tk.StringVar(value="dataset.csv")
         self.rules_file = tk.StringVar(value="poppk_rules.json,NONMEM_RULE_KNOWLEDGE_AUDIT_20260512.md")
         self.llm_base_url = tk.StringVar(value="http://localhost:1234/v1")
         self.llm_model_id = tk.StringVar(value="google/gemma-4-26b-a4b")

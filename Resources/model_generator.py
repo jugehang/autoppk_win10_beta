@@ -304,15 +304,14 @@ def action_fix_input(sections: SectionMap, params: Dict[str, Any]) -> SectionMap
         sections["$INPUT"] = "$INPUT " + " ".join(token_list)
     else:
         sections["$INPUT"] = "$INPUT " + " ".join(
-            ["C", "ID", "CYCLE", "DAY", "TIME", "NTIME", "DV", "AMT", "RATE",
-             "DUR", "CMT", "DOSE", "MDV", "EVID", "BQL", "TYPE", "STUDY", "SEX", "WT", "AGE"]
+            ["C", "ID", "TIME", "DV", "AMT", "RATE", "DUR", "CMT", "EVID", "MDV"]
         )
     return sections
 
 
 def action_fix_data(sections: SectionMap, params: Dict[str, Any]) -> SectionMap:
     """Replace $DATA path."""
-    data_file = params.get("data_file", "NM_dat_new.csv")
+    data_file = params.get("data_file", "dataset.csv")
     sections["$DATA"] = f"$DATA {data_file} IGNORE=C"
     return sections
 
@@ -460,8 +459,8 @@ def action_swap_template(sections: SectionMap, params: Dict[str, Any]) -> Sectio
     if not spec:
         raise ValueError(f"Unknown template: {template_id}.  Available: {sorted(TEMPLATES)}")
 
-    input_sec = sections.get("$INPUT", "$INPUT C ID CYCLE DAY TIME NTIME DV AMT RATE DUR CMT DOSE MDV EVID BQL TYPE STUDY SEX WT AGE")
-    data_sec = sections.get("$DATA", "$DATA NM_dat_new.csv IGNORE=C")
+    input_sec = sections.get("$INPUT", "$INPUT C ID TIME DV AMT RATE DUR CMT EVID MDV")
+    data_sec = sections.get("$DATA", "$DATA dataset.csv IGNORE=C")
 
     # Remove old structural sections
     for label in list(sections.keys()):
@@ -630,16 +629,18 @@ def action_fix_table_content(sections: SectionMap, params: Dict[str, Any]) -> Se
             sdtab_tokens.append(token)
     if "ID" in sdtab_tokens:
         sdtab_tokens.remove("ID")
-    if "STUDY" not in sdtab_tokens and "STUDY" in input_tokens:
-        sdtab_tokens.append("STUDY")
 
     cat_cols = [
         token for token in input_tokens
-        if token in ("SEX", "STUDY", "ADA", "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV")
+        if token in ("SEX", "STUDY", "STUD", "STUDYID", "STUDYNO", "ADA",
+                     "ROUTE", "BQL", "TYPE", "CMT", "EVID", "MDV",
+                     "RACE", "TRT", "ARM", "REGION", "GROUP",
+                     "COHORT", "TREATMENT", "FORM")
     ]
     cont_cols = [
         token for token in input_tokens
-        if token in ("WT", "AGE", "DOSE", "AMT", "RATE", "DUR")
+        if token in ("WT", "AGE", "BSA", "HB", "ALB", "CLCR", "EGFR",
+                     "BMI", "DOSE", "AMT", "RATE", "DUR")
     ]
     cat_cols = [token for token in cat_cols if token != "ID"]
     cont_cols = [token for token in cont_cols if token != "ID"]
@@ -768,15 +769,13 @@ def apply_structured(
 def generate_from_template(
     template_id: str,
     run_id: str,
-    data_file: str = "NM_dat_new.csv",
+    data_file: str = "dataset.csv",
     input_columns: Optional[List[str]] = None,
     problem: Optional[str] = None,
 ) -> str:
     """Generate a clean starting model from an AutoPMX template."""
     if input_columns is None:
-        input_columns = ["C", "ID", "CYCLE", "DAY", "TIME", "NTIME", "DV",
-                         "AMT", "RATE", "DUR", "CMT", "DOSE", "MDV", "EVID",
-                         "BQL", "TYPE", "STUDY", "SEX", "WT", "AGE"]
+        input_columns = ["C", "ID", "TIME", "DV", "AMT", "RATE", "DUR", "CMT", "EVID", "MDV"]
     return render_model(template_id, run_id, data_file, input_columns, problem)
 
 
@@ -793,7 +792,7 @@ def main() -> int:
     gen = sub.add_parser("generate")
     gen.add_argument("--template", default="iv_infusion_2c_advan3_trans4")
     gen.add_argument("--run", default="001")
-    gen.add_argument("--data", default="NM_dat_new.csv")
+    gen.add_argument("--data", default="dataset.csv")
     gen.add_argument("--output", type=Path, required=True)
 
     # transform
