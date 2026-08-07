@@ -4864,7 +4864,7 @@ final class WorkbenchStore: ObservableObject {
 
         // Collect THETA indices with high RSE (>100%) from .lst
         var thetaHighRSE: Set<Int> = []
-        var omegaHighRSE: [Int: String] = [:]
+        var omegaHighRSE: Set<Int> = []
         guard let thetaRe = try? NSRegularExpression(pattern: #"THETA\s+(\d+):\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]),
               let omegaRe = try? NSRegularExpression(pattern: #"OMEGA\s+(\d+):\s+[\d.Ee+-]+\s+[\d.Ee+-]+\s+\(?(\d+(?:\.\d+)?)%\)?"#, options: [.caseInsensitive]) else { return modText }
         var inTheta = false
@@ -4885,7 +4885,7 @@ final class WorkbenchStore: ObservableObject {
             if inOmega, let m = omegaRe.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)),
                let rse = Double((t as NSString).substring(with: m.range(at: 2))), rse > 100 {
                 if let num = Int((t as NSString).substring(with: m.range(at: 1))) {
-                    omegaHighRSE[num - 1] = (t as NSString).substring(with: m.range(at: 2))
+                    omegaHighRSE.insert(num - 1)
                 }
             }
         }
@@ -4926,19 +4926,18 @@ final class WorkbenchStore: ObservableObject {
             }
             if inBlock == "OMEGA" {
                 let isEmptyLine = trimmed.isEmpty || trimmed.hasPrefix(";")
-                if isEmptyLine, let rawEstimate = omegaHighRSE[omegaIdx] {
+                if isEmptyLine && omegaHighRSE.contains(omegaIdx) {
                     let alreadyFixed = trimmed.uppercased().contains("FIX")
                     if !alreadyFixed {
-                        // Keep the last estimated variance as the fixed value instead of
-                        // forcing 0, which would silently remove an estimable IIV component.
-                        let fixedValue = Double(rawEstimate).map { String(format: "%.6g", $0) } ?? "0.04"
+                        // IIV that cannot be estimated is pinned to 0 (OMEGA 0 FIX),
+                        // removing the variance contribution from the model.
                         if let semi = line.firstIndex(of: ";") {
                             let comment = line[semi...]
-                            result.append("\(fixedValue) FIX  \(comment)")
+                            result.append("0 FIX  \(comment)")
                         } else {
-                            result.append("\(fixedValue) FIX")
+                            result.append("0 FIX")
                         }
-                        runner.append("  → Fixed OMEGA[\(omegaIdx)] to \(fixedValue) FIX (RSE>100%)")
+                        runner.append("  → Fixed OMEGA[\(omegaIdx)] to 0 FIX (RSE>100%)")
                         omegaIdx += 1
                         continue
                     }
@@ -9081,17 +9080,17 @@ final class WorkbenchStore: ObservableObject {
             if lower.contains("add") {
                 fixAction = """
                 → Keep model structure. Do NOT remove THETA or modify $ERROR block.
-                → Add `FIX` to the end of Add.RE line in $THETA: `(0, 1.0) FIX  ; Add.RE (sd)`
+                → Set Add.RE line in $THETA to `0 FIX  ; Add.RE (sd)`.
                 → Keep $ERROR and $SIGMA completely unchanged.
-                → The FIX keyword pins Add.RE to its initial value, effectively making
+                → The FIX keyword pins Add.RE at ZERO, effectively making
                   the error proportional-only without touching the model structure.
                 """
             } else if lower.contains("prop") {
                 fixAction = """
                 → Keep model structure. Do NOT remove THETA or modify $ERROR block.
-                → Add `FIX` to the end of Prop.RE line in $THETA: `(0, 0.15) FIX  ; Prop.RE (sd)`
+                → Set Prop.RE line in $THETA to `0 FIX  ; Prop.RE (sd)`.
                 → Keep $ERROR and $SIGMA completely unchanged.
-                → The FIX keyword pins Prop.RE to its initial value, effectively making
+                → The FIX keyword pins Prop.RE at ZERO, effectively making
                   the error additive-only without touching the model structure.
                 """
             } else {

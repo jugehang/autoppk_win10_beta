@@ -407,6 +407,16 @@
           "phase": "both"
         },
         {
+          "rule_id": "MT-RANDOM-004",
+          "category": "Parameter Estimation",
+          "subcategory": "$OMEGA",
+          "rule_description": "When an IIV/OMEGA must be fixed, write it as `0 FIX`; never write a nonzero fixed OMEGA such as `0.04 FIX`. A nonzero fixed OMEGA keeps an artificial variance in the model and is not the intended simplification. Keep ETA numbering contiguous; either retain ETA with `0 FIX` or remove the OMEGA row and renumber all ETA references.",
+          "source": "AutoPMX IIV stability policy",
+          "source_section": "IIV / OMEGA fixing policy",
+          "keywords": ["OMEGA", "IIV", "0 FIX", "fixed variance", "ETA"],
+          "phase": "both"
+        },
+        {
           "rule_id": "MT-NONMEM-010",
           "category": "Parameter Estimation",
           "subcategory": "$SIGMA",
