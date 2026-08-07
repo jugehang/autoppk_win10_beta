@@ -742,6 +742,7 @@ final class WorkbenchStore: ObservableObject {
     @Published var automationStartRunID = ""
     @Published var isIVAnchorConfirmPresented = false
     @Published var automationUseIVAnchor = false
+    var automationForceRegularMode = false
     @Published var automationUserGuidance = ""
     @Published var automationStopRequested = false
     @Published var pendingDeleteAsset: ProjectAsset?
@@ -3370,6 +3371,7 @@ final class WorkbenchStore: ObservableObject {
 
     func startAutomationFromOptions() {
         automationUseIVAnchor = false
+        automationForceRegularMode = false
         if shouldAskForIVAnchor() {
             isIVAnchorConfirmPresented = true
             return
@@ -3394,6 +3396,7 @@ final class WorkbenchStore: ObservableObject {
 
     func confirmUseIVAnchor() {
         automationUseIVAnchor = true
+        automationForceRegularMode = false
         automationStartMode = .selectedRun
         isIVAnchorConfirmPresented = false
         isAutomationOptionsPresented = false
@@ -3402,8 +3405,7 @@ final class WorkbenchStore: ObservableObject {
 
     func skipUseIVAnchor() {
         automationUseIVAnchor = false
-        automationStartMode = .fresh
-        automationStartRunID = ""
+        automationForceRegularMode = true
         isIVAnchorConfirmPresented = false
         isAutomationOptionsPresented = false
         startAutomatedModelingDemo()
@@ -3411,6 +3413,7 @@ final class WorkbenchStore: ObservableObject {
 
     func cancelIVAnchorPrompt() {
         automationUseIVAnchor = false
+        automationForceRegularMode = false
         isIVAnchorConfirmPresented = false
     }
 
@@ -6313,7 +6316,8 @@ final class WorkbenchStore: ObservableObject {
                     previousRun = previousForComparison ?? sourceRun
                     // Re-detect inherited handoff mode every round: users often resume via
                     // "Continue Latest" from run00601 rather than explicitly selecting it.
-                    if let currentModText = try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8) {
+                    if !automationForceRegularMode,
+                       let currentModText = try? String(contentsOf: projectURL.appendingPathComponent("run\(sourceRun).mod"), encoding: .utf8) {
                         let upper = currentModText.uppercased()
                         if upper.contains("IV-ANCHOR HANDOFF")
                             || upper.contains("INHERITED IV STRUCTURAL THETA/OMEGA ARE FIXED")

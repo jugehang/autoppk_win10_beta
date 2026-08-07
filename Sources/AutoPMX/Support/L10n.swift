@@ -904,9 +904,9 @@ enum L10n {
         "auto.cancel": [.zhCN: "取消", .en: "Cancel"],
         "auto.start": [.zhCN: "开始", .en: "Start"],
         "auto.ivAnchorConfirmTitle": [.zhCN: "使用 IV 模型作为起始参数？", .en: "Use IV model as starting values?"],
-        "auto.ivAnchorConfirmMessage": [.zhCN: "检测到当前项目已有 IV 最佳模型。是否以 run%@ 的参数作为全数据集建模的起始值？选择“否”将直接从全数据集建立新模型。", .en: "An IV anchor model was found. Use run%@ parameters as starting values for the full-dataset model? Choose No to start fresh from the full dataset."],
+        "auto.ivAnchorConfirmMessage": [.zhCN: "所选 run%@ 是 IV 模型。是否以它作为全数据集建模的 IV 锚点？选择“否”会保留所选模型，按常规“从指定模型继续”流程优化母模型。", .en: "The selected run%@ is an IV model. Use it as the IV anchor for full-dataset modeling? Choose No to keep the selected model and optimize it with the normal Continue From Model workflow."],
         "auto.ivAnchorUse": [.zhCN: "是，以 IV 模型起始", .en: "Yes, start from IV model"],
-        "auto.ivAnchorSkip": [.zhCN: "否，直接全数据集开始", .en: "No, start from full dataset"],
+        "auto.ivAnchorSkip": [.zhCN: "否，继续优化所选模型", .en: "No, optimize the selected model"],
 
         // Context menu
         "ctx.runNonmem": [.zhCN: "通过 PsN 运行 NONMEM", .en: "Run NONMEM via PsN"],
