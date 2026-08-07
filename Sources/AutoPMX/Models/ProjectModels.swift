@@ -3,6 +3,7 @@ import Foundation
 enum AssetCategory: String, CaseIterable, Identifiable {
     case models
     case data
+    case exploratory
     case outputs
     case figures
     case reports
@@ -10,7 +11,7 @@ enum AssetCategory: String, CaseIterable, Identifiable {
     case scripts
 
     static var allCases: [AssetCategory] {
-        [.models, .data, .outputs, .figures, .reports, .scm]
+        [.models, .data, .exploratory, .outputs, .figures, .reports, .scm]
     }
 
     var id: String { rawValue }
@@ -19,6 +20,7 @@ enum AssetCategory: String, CaseIterable, Identifiable {
         switch self {
         case .models: return "Models"
         case .data: return "Data"
+        case .exploratory: return "Exploratory"
         case .outputs: return "NONMEM Outputs"
         case .figures: return "Figures"
         case .reports: return "Reports"
@@ -31,6 +33,7 @@ enum AssetCategory: String, CaseIterable, Identifiable {
         switch self {
         case .models: return "doc.text"
         case .data: return "tablecells"
+        case .exploratory: return "chart.bar.xaxis"
         case .outputs: return "terminal"
         case .figures: return "photo"
         case .reports: return "doc.richtext"

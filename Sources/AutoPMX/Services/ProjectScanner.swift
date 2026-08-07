@@ -565,6 +565,12 @@ struct ProjectScanner {
            ext == "scm" ||
            (isInSCMDir && (ext == "csv" || ext == "xml" || ext == "txt" || ext == "html")) { return .scm }
 
+        // Exploratory outputs: EDA tables/plots and pre-SCM ETA-covariate screening.
+        if upper.hasPrefix("EDA_")
+            || upper.hasPrefix("ETA_COVARIATE_SCREENING")
+            || lowerName.hasPrefix("eta_covariate_screening")
+            || lowerName.hasPrefix("eta_cov") { return .exploratory }
+
         // CSV/XLSX files AND NONMEM table files all go under Data
         if ["csv", "xlsx"].contains(ext) ||
            upper.hasPrefix("SDTAB") || upper.hasPrefix("PATAB") ||
