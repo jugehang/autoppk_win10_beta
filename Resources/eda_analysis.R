@@ -35,6 +35,24 @@ d <- tryCatch(
 # Normalize column names to uppercase
 names(d) <- toupper(names(d))
 
+# NONMEM encodes many categorical covariates as numbers (SEX=0/1, ADA=0/1,
+# STUDY=1..6, ROUTE/CMT/EVID/MDV codes). Detect them explicitly so numeric
+# histograms are not drawn for category variables.
+is_categorical_col <- function(x, col) {
+  known_categorical <- c(
+    "SEX", "ADA", "STUDY", "STUD", "STUDYID", "STUDYNO", "ROUTE",
+    "BQL", "EVID", "MDV", "CMT", "RACE", "TRT", "ARM", "REGION",
+    "TYPE", "GROUP", "COHORT", "TREATMENT", "SEXG", "SEX_GROUP"
+  )
+  if (col %in% known_categorical) return(TRUE)
+  if (is.numeric(x)) {
+    vals <- x[!is.na(x)]
+    if (length(vals) == 0) return(FALSE)
+    return(length(unique(vals)) <= 6)
+  }
+  return(TRUE)
+}
+
 # ---- 2. Basic structure ----
 required <- c("ID", "TIME", "DV")
 missing_cols <- setdiff(required, names(d))
@@ -85,7 +103,7 @@ if (length(numeric_cols) > 0) {
 }
 
 # ---- 4. Categorical summary ----
-cat_cols <- names(d)[sapply(d, function(x) is.character(x) || is.factor(x))]
+cat_cols <- names(d)[sapply(names(d), function(col) is_categorical_col(d[[col]], col))]
 cat_summary <- list()
 for (col in cat_cols) {
   tab <- table(d[[col]], useNA = "ifany")
@@ -164,7 +182,7 @@ available_covs <- intersect(covariate_candidates, names(d))
 
 for (cov in available_covs) {
   cov_data <- d %>% distinct(ID, .keep_all = TRUE)
-  if (is.numeric(cov_data[[cov]])) {
+  if (is.numeric(cov_data[[cov]]) && !is_categorical_col(cov_data[[cov]], cov)) {
     p_cov <- ggplot(cov_data, aes(x = .data[[cov]])) +
       geom_histogram(bins = 12, fill = "seagreen", color = "white", alpha = 0.8) +
       labs(title = paste(cov, "Distribution"), x = cov, y = "Count") +
@@ -201,7 +219,7 @@ if (length(demographic_covs) > 0 && length(valid_groups) > 0) {
       grp_var <- paste0("GRP_", group_col)
       valid_rows <- subj_dem %>% filter(!is.na(.data[[cov]]), !is.na(.data[[grp_var]]))
       if (nrow(valid_rows) == 0 || length(unique(valid_rows[[grp_var]])) < 2) next
-      if (is.numeric(valid_rows[[cov]])) {
+      if (is.numeric(valid_rows[[cov]]) && !is_categorical_col(valid_rows[[cov]], cov)) {
         p_dem <- ggplot(valid_rows, aes(x = .data[[grp_var]], y = .data[[cov]], fill = .data[[grp_var]])) +
           geom_boxplot(alpha = 0.75, outlier.size = 1.2) +
           geom_jitter(width = 0.18, alpha = 0.35, size = 0.9, color = "gray20") +
@@ -286,7 +304,9 @@ if (nrow(d_obs) > 0) {
 
 # 7d. Correlation heatmap (numeric covariates only)
 if (length(available_covs) > 1) {
-  cov_numeric <- available_covs[sapply(d[available_covs], is.numeric)]
+  cov_numeric <- available_covs[
+    sapply(available_covs, function(col) is.numeric(d[[col]]) && !is_categorical_col(d[[col]], col))
+  ]
   if (length(cov_numeric) >= 2) {
     cov_data <- d %>% distinct(ID, .keep_all = TRUE) %>% select(all_of(cov_numeric))
     cov_data <- cov_data %>% select(where(~sum(!is.na(.)) > 1))
