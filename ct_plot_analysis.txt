@@ -1,0 +1,26 @@
+SUBJECTS=198
+OBS=484
+ROUTE=IV Infusion
+DOSE_COLUMN=AMT
+DOSE_GROUPS=20, 30, 40, 60
+HAS_LAG=NO
+LAG_TIME=0
+LAG_RECOMMENDATION=
+HAS_TMDD=NO
+TMDD_RATIO=0.951
+TMDD_FOLD_DIFF=1.197
+TMDD_DETAIL==== Overall (all time points) === |   DOSE_GROUP   n median_dv_norm mean_dv_norm | 1         20 198       3.920750     5.063419 | 2         30   6       5.434667     6.933278 | 3         40 224       3.872625     4.492908 | 4         60  56       4.426583     5.161446 |   Low-dose / High-dose ratio = 0.89 |  | === EARLY phase (n=393) === |   DOSE_GROUP median_dv_norm | 1         20       3.683500 | 2         30       4.436833 | 3         40       3.758875 | 4         60       4.257000 |   Ratio = 0.87 |  | === LATE phase (n=91) === |   DOSE_GROUP median_dv_norm | 1         20       5.565500 | 2         30       8.648667 | 3         40       4.124125 | 4         60       5.597250 |   Ratio = 0.99 |  | === TMDD Decision (weighted ratio = 0.95, overall fold diff = 1.20) === |   TMDD signal: None (linear PK supported — normalized curves are close enough; residual spread is within normal inter-individual variability)
+HAS_ADA=NO
+HAS_ELIM=YES
+ELIM_HALFLIFE_SIMILAR=NA
+ELIM_N_RELIABLE=1
+ELIM_HALFLIFE_VALUES=20:NA, 30:2940, 40:4.779e+06, 60:NA
+ELIM_DETAIL==== Terminal-phase half-life by dose group === |   Dose 20: t1/2 = N/A (insufficient terminal data) |   Dose 30: t1/2 = 2.94e+03  (R^2 = 0.79, reliable) |   Dose 40: t1/2 = 4.78e+06  (R^2 = 0.00, UNRELIABLE (R^2 too low — excluded from comparison)) |   Dose 60: t1/2 = N/A (insufficient terminal data) |   Only 1/4 dose group(s) had reliable terminal fits (R^2 >= 0.5) — elimination similarity cannot be assessed.
+FIRSTDOSE_ELIM_HALFLIFE_SIMILAR=NA
+FIRSTDOSE_ELIM_N_RELIABLE=0
+FIRSTDOSE_ELIM_HALFLIFE_VALUES=20:NA, 30:NA, 40:NA, 60:NA
+FIRSTDOSE_ELIM_DETAIL==== First-Dose terminal-phase half-life by dose group === |   Dose 20: t1/2 = N/A (insufficient terminal data) |   Dose 30: t1/2 = N/A (insufficient terminal data) |   Dose 40: t1/2 = N/A (insufficient terminal data) |   Dose 60: t1/2 = N/A (insufficient terminal data) |   Only 0/4 dose group(s) had reliable terminal fits — first-dose elimination similarity cannot be assessed.
+MULTI_DOSE=NO
+LINEAR_PK=YES
+EXPOSURE_SIMILAR=YES
+EXPOSURE_DETAIL=Dose-normalized curves are close enough across dose groups (TMDD ratio = 0.95, fold diff = 1.2) (terminal elimination data too sparse for assessment) → residual spread within normal IIV, linear PK supported.

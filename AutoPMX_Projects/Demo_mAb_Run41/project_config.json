@@ -1,20 +1,25 @@
 {
-  "project_name": "Demo_mAb_Run41",
-  "units": {
-    "dose": "mg",
-    "amt": "mg",
-    "conc": "µg/mL",
-    "time": "h",
-    "lloq_value": "",
-    "lloq_unit": "µg/mL"
+  "units_data" : {
+    "dataset.csv" : {
+      "conc" : "µg\/mL",
+      "dose" : "mg",
+      "lloq_unit" : "µg\/mL",
+      "lloq_value" : "",
+      "time" : "h",
+      "amt" : "mg"
+    }
   },
-  "grouping": {
-    "factor": "STUDY",
-    "labels": {}
+  "grouping" : {
+    "factor" : "STUDY",
+    "labels" : {
+
+    }
   },
-  "psn_settings": {
-    "vpc_samples": 500,
-    "bootstrap_samples": 200,
-    "stratify_var": "STUDY"
-  }
+  "psn_settings" : {
+    "stratify_var" : "STUDY",
+    "bootstrap_samples" : 200,
+    "vpc_samples" : 500
+  },
+  "data_file" : "NM_dat.csv",
+  "project_name" : "Demo_mAb_Run41"
 }
