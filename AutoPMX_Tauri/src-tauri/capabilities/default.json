@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口默认权限（命令调用由 Rust 侧白名单把关）",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
