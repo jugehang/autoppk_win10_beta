@@ -55,7 +55,7 @@ export default function App() {
         <header className="topbar">
           <div className="topbar__title" data-tauri-drag-region>
             <h1>PopPK 建模工作台</h1>
-            <p className="topbar__sub">AutoPMX · Tauri 双平台骨架</p>
+            <p className="topbar__sub">AutoPMX · PopPK 自动化建模平台</p>
           </div>
           <div className="topbar__actions">
             <span className="pill" title="当前平台">
@@ -67,7 +67,7 @@ export default function App() {
               onClick={() => setGlassOn((v) => !v)}
               aria-pressed={glassOn}
             >
-              {glassOn ? "玻璃：开" : "玻璃：关"}
+              {glassOn ? "毛玻璃：开" : "毛玻璃：关"}
             </button>
           </div>
         </header>
@@ -77,7 +77,7 @@ export default function App() {
             <h2 className="card__title">当前项目</h2>
             <p className="card__desc">
               <strong>Demo_mAb_Run41</strong> — ADVAN13 双室母药+代谢产物模型，
-              run32 运行中。此卡片用于验证玻璃材质与系统毛玻璃叠加效果。
+              当前 run32。
             </p>
             <dl className="stats">
               <div>
@@ -96,10 +96,9 @@ export default function App() {
           </article>
 
           <article className="glass card card--render">
-            <h2 className="card__title">引擎链路验证</h2>
+            <h2 className="card__title">模型生成</h2>
             <p className="card__desc">
-              从模型库模板渲染 NONMEM 控制流（Rust → Python →
-              <code>poppk_model_templates.py</code>）。这是跨平台引擎复用的最小闭环。
+              从 PopPK 模型库模板生成 NONMEM 控制流，作为自动建模的起点。
             </p>
             <div className="render-controls">
               <label className="field">
@@ -121,7 +120,7 @@ export default function App() {
                 onClick={renderModel}
                 disabled={rendering}
               >
-                {rendering ? "渲染中…" : "渲染模型"}
+                {rendering ? "生成中…" : "生成模型"}
               </button>
             </div>
 
@@ -131,7 +130,7 @@ export default function App() {
               </pre>
             )}
             {modelText && (
-              <pre className="model-out" tabIndex={0} aria-label="渲染结果">
+              <pre className="model-out" tabIndex={0} aria-label="生成的模型">
                 {modelText}
               </pre>
             )}
