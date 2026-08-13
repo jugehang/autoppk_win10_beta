@@ -15,7 +15,6 @@ export default function App() {
   const [active, setActive] = useState("demo-mab");
   const [platform, setPlatform] = useState("…");
   const [template, setTemplate] = useState(TEMPLATES[1].id);
-  const [run, setRun] = useState("101");
   const [modelText, setModelText] = useState("");
   const [error, setError] = useState("");
   const [rendering, setRendering] = useState(false);
@@ -38,7 +37,7 @@ export default function App() {
     try {
       const text = await invoke<string>("render_model_template", {
         template,
-        run,
+        run: "001",
       });
       setModelText(text);
     } catch (e) {
@@ -115,16 +114,6 @@ export default function App() {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="field">
-                <span>Run</span>
-                <input
-                  value={run}
-                  onChange={(e) => setRun(e.target.value)}
-                  maxLength={3}
-                  inputMode="numeric"
-                  aria-label="Run 编号"
-                />
               </label>
               <button
                 type="button"
